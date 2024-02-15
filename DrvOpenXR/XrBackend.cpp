@@ -47,7 +47,7 @@
 using namespace vr;
 
 std::unique_ptr<TemporaryGraphics> XrBackend::temporaryGraphics = nullptr;
-XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx)
+XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx, bool isOverlay) : isOverlayApp(isOverlay)
 {
 	memset(projectionViews, 0, sizeof(projectionViews));
 
@@ -119,6 +119,12 @@ ITrackedDevice* XrBackend::GetDevice(
 ITrackedDevice* XrBackend::GetDeviceByHand(
     ITrackedDevice::HandType hand)
 {
+	// if overlay app updated texture and requesting coordinates,
+	// assmme new frame begin. Submit updated overlays to compositor
+	if(isOverlayApp && renderingFrame)
+	{
+		SubmitFrames(true, true);
+	}
 	switch (hand) {
 	case ITrackedDevice::HAND_LEFT:
 		return hand_left.get();
@@ -136,6 +142,13 @@ void XrBackend::GetDeviceToAbsoluteTrackingPose(
     vr::TrackedDevicePose_t* poseArray,
     uint32_t poseArrayCount)
 {
+	// if overlay app updated texture and requesting coordinates,
+	// assmme new frame begin. Submit updated overlays to compositor
+	if(isOverlayApp && renderingFrame)
+	{
+		SubmitFrames(true, true);
+	}
+
 	for (uint32_t i = 0; i < poseArrayCount; ++i) {
 		ITrackedDevice* dev = GetDevice(i);
 		if (dev) {
@@ -178,6 +191,11 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 	// Check we're using the session with the application's device
 	if (!usingApplicationGraphicsAPI) {
 		usingApplicationGraphicsAPI = true;
+		XrSessionCreateInfoOverlayEXTX overlay_info = {XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX};
+		overlay_info.sessionLayersPlacement = 1;
+		XrSessionCreateInfoOverlayEXTX *graphics_binding_next = nullptr;
+		if(isOverlayApp)
+			graphics_binding_next = &overlay_info;
 
 		OOVR_LOG("Recreating OpenXR session for application graphics API");
 
@@ -200,6 +218,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			XrGraphicsBindingD3D11KHR d3dInfo{};
 			d3dInfo.type = XR_TYPE_GRAPHICS_BINDING_D3D11_KHR;
 			d3dInfo.device = dev;
+			d3dInfo.next = graphics_binding_next;
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingD3D11KHR>>(d3dInfo);
 			DrvOpenXR::SetupSession();
 
@@ -224,6 +243,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			d3dInfo.type = XR_TYPE_GRAPHICS_BINDING_D3D12_KHR;
 			d3dInfo.device = device.Get();
 			d3dInfo.queue = d3dTexData->m_pCommandQueue;
+			d3dInfo.next = graphics_binding_next;
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingD3D12KHR>>(d3dInfo);
 			DrvOpenXR::SetupSession();
 
@@ -254,7 +274,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 
 			XrGraphicsBindingVulkanKHR binding;
 			binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-			binding.next = nullptr;
+			binding.next = graphics_binding_next;
 			binding.instance = vktex->m_pInstance;
 			binding.physicalDevice = vktex->m_pPhysicalDevice;
 			binding.device = vktex->m_pDevice;
@@ -283,6 +303,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			XrGraphicsBindingOpenGLWin32KHR binding = { XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR };
 			binding.hGLRC = wglGetCurrentContext();
 			binding.hDC = wglGetCurrentDC();
+			binding.next = graphics_binding_next;
 
 			if (!binding.hGLRC || !binding.hDC) {
 				OOVR_ABORTF("Null OpenGL GLRC or DC: %p,%p", (void*)binding.hGLRC, (void*)binding.hDC);
@@ -318,6 +339,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			binding.glxFBConfig = config;
 			binding.glxDrawable = glXGetCurrentDrawable();
 			binding.glxContext = glXGetCurrentContext();
+			binding.next = graphics_binding_next;
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLXlibKHR>>(binding);
 			DrvOpenXR::SetupSession();
@@ -336,7 +358,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 
 			XrGraphicsBindingOpenGLESAndroidKHR binding = *OpenComposite_Android_GLES_Binding_Info;
 			OOVR_FALSE_ABORT(binding.type == XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR);
-			binding.next = nullptr;
+			binding.next = graphics_binding_next;
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLESAndroidKHR>>(binding);
 			DrvOpenXR::SetupSession();
@@ -867,6 +889,28 @@ void XrBackend::OnOverlayTexture(const vr::Texture_t* texture)
 {
 	if (!usingApplicationGraphicsAPI)
 		CheckOrInitCompositors(texture);
+	if(renderingFrame)
+		return;
+	// overlay app is updaing texture. Start OpenXR frame
+	if (!sessionActive || !isOverlayApp) {
+		return;
+	}
+
+	XrFrameWaitInfo waitInfo{ XR_TYPE_FRAME_WAIT_INFO };
+	XrFrameState state{ XR_TYPE_FRAME_STATE };
+	{
+
+		auto lock = xr_session.lock_shared();
+		OOVR_FAILED_XR_ABORT(xrWaitFrame(xr_session.get(), &waitInfo, &state));
+		xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
+
+		// FIXME loop until this returns true?
+		// OOVR_FALSE_ABORT(state.shouldRender);
+
+		XrFrameBeginInfo beginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
+		OOVR_FAILED_XR_ABORT(xrBeginFrame(xr_session.get(), &beginInfo));
+	}
+	renderingFrame = true;
 }
 
 void XrBackend::UpdateInteractionProfile()

@@ -115,6 +115,7 @@ VR_INTERFACE void* VR_CALLTYPE VR_GetGenericInterface(const char* interfaceVersi
 		valid_apptypes |= (1ull << VRApplication_Background); // Proton uses this
 #endif
 	}
+	valid_apptypes |= (1ull << VRApplication_Overlay);
 
 	if ((valid_apptypes & (1ull << current_apptype)) == 0) {
 		OOVR_LOGF("Invalid interface %s for apptype %d", interfaceVersion, current_apptype);
@@ -249,7 +250,7 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 		return current_init_token;
 	}
 
-	if (eApplicationType != VRApplication_Scene)
+	if (eApplicationType != VRApplication_Scene && eApplicationType != VRApplication_Overlay)
 #ifndef _WIN32
 		if (eApplicationType != VRApplication_Background) // Proton uses this
 #endif
@@ -268,7 +269,7 @@ success:
 	running = true;
 
 	// TODO seperate this from the rest of dllmain
-	IBackend* backend = DrvOpenXR::CreateOpenXRBackend();
+	IBackend* backend = DrvOpenXR::CreateOpenXRBackend(eApplicationType == VRApplication_Overlay);
 	if (!backend) {
 		*peError = VRInitError_Init_Internal;
 	} else {

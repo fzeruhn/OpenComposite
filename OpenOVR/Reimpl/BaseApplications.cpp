@@ -86,11 +86,12 @@ uint64_t BaseApplications::GetApplicationPropertyUint64(const char* pchAppKey, E
 }
 EVRApplicationError BaseApplications::SetApplicationAutoLaunch(const char* pchAppKey, bool bAutoLaunch)
 {
-	STUBBED();
+
+	return VRApplicationError_None;
 }
 bool BaseApplications::GetApplicationAutoLaunch(const char* pchAppKey)
 {
-	STUBBED();
+	return false;
 }
 EVRApplicationError BaseApplications::SetDefaultApplicationForMimeType(const char* pchAppKey, const char* pchMimeType)
 {

@@ -7,6 +7,6 @@
 #endif
 
 namespace DrvOpenXR {
-IBackend* CreateOpenXRBackend();
+IBackend* CreateOpenXRBackend(bool isOverlay);
 void GetXRAppName(char (&appName)[128]);
 }; // namespace DrvOpenXR

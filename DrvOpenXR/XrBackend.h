@@ -15,7 +15,7 @@ class XrBackend : public IBackend {
 public:
 	DECLARE_BACKEND_FUNCS(virtual, override);
 
-	XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx);
+	XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx, bool isOverlayApp);
 	~XrBackend() override;
 
 	/**
@@ -101,6 +101,10 @@ private:
 	// until after all frame and layer data has been submitted and PostPresentHandoff is called. Otherwise we
 	// might miss overlay elements for GUI or HUDs
 	bool postPresentStatus = false;
+
+	// if app type is overlay, enable extensions
+	// and enable xrFrame simulation when app updates overlays
+	bool isOverlayApp = false;
 
 	// Number of frames rendered for use in frame timing data
 	uint32_t nFrameIndex = 0;

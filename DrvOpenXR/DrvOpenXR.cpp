@@ -83,7 +83,7 @@ static void CreateSystemID()
 	OOVR_FAILED_XR_ABORT(xrGetSystem(xr_instance, &systemInfo, &xr_system));
 }
 
-IBackend* DrvOpenXR::CreateOpenXRBackend()
+IBackend* DrvOpenXR::CreateOpenXRBackend(bool isOverlay)
 {
 	// TODO handle something like Unity which stops and restarts the instance
 	if (initialised) {
@@ -137,6 +137,10 @@ IBackend* DrvOpenXR::CreateOpenXRBackend()
 
 	std::vector<const char*> extensions;
 	XrGraphicsApiSupportedFlags apiFlags = 0;
+	if (isOverlay && !availableExtensions.count("XR_EXTX_overlay"))
+	{
+		OOVR_ABORT("VRApplication_Overlay requested, but XR_EXTX_overlay not supported, cannot continue!");
+	}
 
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
 	if (availableExtensions.count("XR_KHR_D3D11_enable")) {
@@ -260,7 +264,7 @@ IBackend* DrvOpenXR::CreateOpenXRBackend()
 #endif
 
 	// Build a backend that works with OpenXR
-	currentBackend = new XrBackend(useVulkanTmpGfx, useD3D11TmpGfx);
+	currentBackend = new XrBackend(useVulkanTmpGfx, useD3D11TmpGfx, isOverlay);
 
 	// Setup our OpenXR session
 	SetupSession();
