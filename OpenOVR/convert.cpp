@@ -37,17 +37,8 @@ void O2S_v3f(const Vec3& in, vr::HmdVector3_t& out)
 	out.v[2] = in.z;
 }
 
-void O2S_om34(const Mat4& in, HmdMatrix34_t& out)
-{
-	// Doesn't transpose, TODO remove
-	for (int y = 0; y < 3; y++) {
-		for (int x = 0; x < 4; x++) {
-			out.m[y][x] = in[y][x];
-		}
-	}
-}
 
-void S2O_om44(const HmdMatrix34_t& in, Mat4& out)
+static void S2O_om44(const HmdMatrix34_t& in, Mat4& out)
 {
 	// Doesn't transpose, TODO remove
 	out = glm::identity<Mat4>();
