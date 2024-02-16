@@ -137,7 +137,7 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(bool isOverlay)
 
 	std::vector<const char*> extensions;
 	XrGraphicsApiSupportedFlags apiFlags = 0;
-	if (isOverlay && !availableExtensions.count("XR_EXTX_overlay"))
+	if (isOverlay && !availableExtensions.count("XR_EXTX_overlay") && !oovr_global_configuration.OverlayForceScene())
 	{
 		OOVR_ABORT("VRApplication_Overlay requested, but XR_EXTX_overlay not supported, cannot continue!");
 	}

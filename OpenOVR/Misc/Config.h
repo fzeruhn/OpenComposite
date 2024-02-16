@@ -23,6 +23,8 @@ public:
 	inline bool InitUsingVulkan() const { return initUsingVulkan; }
 	float HiddenMeshVerticalScale() const { return hiddenMeshVerticalScale; }
 	inline bool LogAllOpenVRCalls() const { return logAllOpenVRCalls; }
+	inline float OverlayLayersPlacement() const { return overlayLayersPlacement; }
+	inline float OverlayForceScene() const { return overlayForceScene; }
 
 private:
 	static int ini_handler(
@@ -52,6 +54,8 @@ private:
 	bool initUsingVulkan = false;
 	float hiddenMeshVerticalScale = 1.0f;
 	bool logAllOpenVRCalls = false;
+	float overlayLayersPlacement = 1;
+	bool overlayForceScene = false;
 };
 
 extern Config oovr_global_configuration;

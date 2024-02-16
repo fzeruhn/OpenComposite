@@ -3,6 +3,8 @@
 //
 
 #include "XrBackend.h"
+#include "../OpenOVR/Misc/Config.h"
+
 #include "generated/interfaces/vrtypes.h"
 
 #ifdef _WIN32
@@ -192,9 +194,9 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 	if (!usingApplicationGraphicsAPI) {
 		usingApplicationGraphicsAPI = true;
 		XrSessionCreateInfoOverlayEXTX overlay_info = {XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX};
-		overlay_info.sessionLayersPlacement = 1;
+		overlay_info.sessionLayersPlacement = oovr_global_configuration.OverlayLayersPlacement();
 		XrSessionCreateInfoOverlayEXTX *graphics_binding_next = nullptr;
-		if(isOverlayApp)
+		if(isOverlayApp && !oovr_global_configuration.OverlayForceScene())
 			graphics_binding_next = &overlay_info;
 
 		OOVR_LOG("Recreating OpenXR session for application graphics API");
