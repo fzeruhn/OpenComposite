@@ -115,6 +115,12 @@ void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float *xscale, float *y
 		a[1][0] * (a[0][1] * a[2][2] - a[2][1] * a[0][2]) +
 		a[2][0] * (a[0][1] * a[1][2] - a[1][1] * a[0][2]);
 
+	if(det < 0)
+	{
+		a[1][0] *= -1;
+		a[1][1] *= -1;
+		a[1][2] *= -1;
+	}
 	float roll = atan2f(a[2][1], a[2][2]);
 	float pitch = atan2f(-a[2][0], sqrtf(a[2][1] * a[2][1] + a[2][2] * a[2][2]));
 	float yaw = atan2f(a[1][0], a[0][0]);
@@ -123,6 +129,7 @@ void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float *xscale, float *y
 	if(det < 0)
 	{
 		yaw *= -1.0f;
+		roll *= -1.0f;
 		*yscale = *xscale * -1.0f;
 	}
 	else
@@ -139,12 +146,6 @@ void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float *xscale, float *y
 	temp[1] = cr * sp * cy + sr * cp * sy;
 	temp[2] = cr * cp * sy - sr * sp * cy;
 	temp[3] = cr * cp * cy + sr * sp * sy;
-
-	norm = 0;
-	for(int i = 0; i < 4; i++) norm += temp[i] * temp[i];
-	norm = sqrtf(norm);
-	for(int i = 0; i < 4; i++) temp[i] /= norm;
-	if(det < 0) temp[3] *= -1.0f, temp[1] *= -1.0f;
 }
 
 void ConcatTransforms(HmdMatrix34_t *_out, const HmdMatrix34_t *_in1, const HmdMatrix34_t *_in2)
@@ -235,16 +236,21 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 				if ((uint64_t)overlay.layerQuad.subImage.swapchain == 0) {
 					continue;
 				}
+				if( !overlay.compositor )
+					continue;
+
+				int32_t width = (int32_t)overlay.compositor->GetSrcSize().width;
+				int32_t height = (int32_t)overlay.compositor->GetSrcSize().height;
 	
-				const XrRect2Di& srcSize = overlay.layerQuad.subImage.imageRect;
-				if (srcSize.extent.height <= 8 && srcSize.extent.width <= 8) {
+				//const XrRect2Di& srcSize = overlay.layerQuad.subImage.imageRect;
+				if (height <= 8 && width <= 8) {
 					// Hack for F1 22 which creates a low res texture to fade between scenes
 					// but ends up just leaving a black square that takes up half the screen.
 					continue;
 				}
 	
 				// Calculate the texture's aspect ratio
-				const float aspect = srcSize.extent.height > 0 ? (float)srcSize.extent.width / (float)srcSize.extent.height : 1.0f;
+				const float aspect = height > 0 ? (float)width / (float)height : 1.0f;
 				// ... and use that to set the size of the overlay, as it will appear to the user
 				// Note we shouldn't do this when setting the texture, as the user may change the width of
 				//  the overlay without changing the texture.
@@ -867,8 +873,8 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 	// build result
 	pResults->vNormal = {n[0], n[1], n[2]};
 	pResults->vPoint = {dst[0], dst[1], dst[2]};
-	pResults->vUVs = {  dst_proj.x / (float)overlay->widthMeters + 0.5,
-						dst_proj.y / (float)overlay->widthMeters + 0.5 };
+	pResults->vUVs = {  dst_proj.x / (float)overlay->widthMeters + 0.5f,
+						dst_proj.y / (float)overlay->widthMeters + 0.5f };
 	pResults->fDistance = -src_proj.z;
 	return pResults->vUVs.v[0] > 0 && pResults->vUVs.v[0] < 1 && pResults->vUVs.v[1] > 0 && pResults->vUVs.v[1] < 1;
 }
