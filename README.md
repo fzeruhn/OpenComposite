@@ -146,6 +146,10 @@ the game to think controllers are connected, disable this option. See issue #25.
 	* The scaling factor used for the hidden area mesh if supported by the application. The hidden area mesh is a region that the game doesn't render to. If you set this lower e.g. `0.8` then less will be drawn at the very top and very bottom of the image improving performance. Suggested range is `0.5` to `1.0`.
 * `logAllOpenVRCalls` - boolean, default `false`
 	* Log every OpenVR call a game makes. Similar to `logGetTrackedProperty`, this clutters logs and should not be enabled unless necessary.
+* `overlayLayersPlacement` - integer, default `1`
+	* Set `sessionLayersPlacement` attribute for overlay applications
+* `overlayForceScene` - boolean, default `false`
+	* Run overlay application as scene application. This is useful to test overlay support in single-app mode without XR_EXTX_overlay extension
 
 The possible types are as follows:
 
