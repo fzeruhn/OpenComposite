@@ -41,7 +41,7 @@ public:
 	Texture_t texture = {};
 	XrCompositionLayerQuad layerQuad = { XR_TYPE_COMPOSITION_LAYER_QUAD };
 	std::unique_ptr<Compositor> compositor;
-	float distance;
+	float distance = 0;
 	uint32_t sortOrder = 0;
 
 	// Transform
@@ -793,8 +793,8 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 	USEH();
 
 	// first, get transform
-	glm::mat3 m; // basis
-	glm::vec3 p; // position
+	glm::mat3 basis;
+	glm::vec3 position;
 	if (overlay->transformType == VROverlayTransform_TrackedDeviceRelative) {
 		vr::ETrackingUniverseOrigin trackingSpace = pParams->eOrigin;
 		ITrackedDevice* dev = BackendManager::Instance().GetDevice(overlay->transformData.deviceRelative.device);
@@ -806,21 +806,21 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 		HmdMatrix34_t transform;
 		ConcatTransforms(&transform, &pose.mDeviceToAbsoluteTracking, &overlay->transformData.deviceRelative.offset);
 		auto& m1 = transform.m;
-		m = glm::mat3(
+		basis = glm::mat3(
 		    m1[0][0], m1[0][1], m1[0][2],
 		    m1[1][0], m1[1][1], m1[1][2],
 		    m1[2][0], m1[2][1], m1[2][2]);
-		p = { m1[0][3], m1[1][3], m1[2][3] };
+		position = { m1[0][3], m1[1][3], m1[2][3] };
 	} else {
 		auto& m1 = overlay->overlayTransform.m;
-		m = glm::mat3(
+		basis = glm::mat3(
 		    m1[0][0], m1[0][1], m1[0][2],
 		    m1[1][0], m1[1][1], m1[1][2],
 		    m1[2][0], m1[2][1], m1[2][2]);
-		p = { m1[0][3], m1[1][3], m1[2][3] };
+		position = { m1[0][3], m1[1][3], m1[2][3] };
 	}
 	// world space -> overlay space
-	glm::mat3 mi = glm::inverse(m);
+	glm::mat3 invertedBasis = glm::inverse(basis);
 
 	// collect the data
 	auto& s = pParams->vSource.v;
@@ -829,10 +829,10 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 	glm::vec3 dir = { d[0], d[1], d[2] };
 
 	// move src to overlay space
-	glm::vec3 src_proj = (src - p) * mi;
+	glm::vec3 src_proj = (src - position) * invertedBasis;
 	if (src_proj.z < 0)
 		return false;
-	glm::vec3 dir_proj = dir * mi;
+	glm::vec3 dir_proj = dir * invertedBasis;
 
 	// only intersect with forward ray
 	if (dir_proj.z > -0.01)
@@ -842,8 +842,8 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 	glm::vec3 dst_proj = src_proj - dir_proj * (src_proj.z / dir_proj.z);
 
 	// convert it back
-	glm::vec3 dst = dst_proj * m + p;
-	glm::vec3 n = glm::vec3{ 0.0f, 0.0f, 1.0f } * m;
+	glm::vec3 dst = dst_proj * basis + position;
+	glm::vec3 n = glm::vec3{ 0.0f, 0.0f, 1.0f } * basis;
 
 	// build result
 	pResults->vNormal = { n[0], n[1], n[2] };
