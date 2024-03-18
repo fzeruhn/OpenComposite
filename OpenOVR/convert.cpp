@@ -37,7 +37,6 @@ void O2S_v3f(const Vec3& in, vr::HmdVector3_t& out)
 	out.v[2] = in.z;
 }
 
-
 static void S2O_om44(const HmdMatrix34_t& in, Mat4& out)
 {
 	// Doesn't transpose, TODO remove

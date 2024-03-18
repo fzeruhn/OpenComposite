@@ -49,7 +49,8 @@
 using namespace vr;
 
 std::unique_ptr<TemporaryGraphics> XrBackend::temporaryGraphics = nullptr;
-XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx, bool isOverlay) : isOverlayApp(isOverlay)
+XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx, bool isOverlay)
+    : isOverlayApp(isOverlay)
 {
 	memset(projectionViews, 0, sizeof(projectionViews));
 
@@ -123,8 +124,7 @@ ITrackedDevice* XrBackend::GetDeviceByHand(
 {
 	// if overlay app updated texture and requesting coordinates,
 	// assmme new frame begin. Submit updated overlays to compositor
-	if(isOverlayApp && renderingFrame)
-	{
+	if (isOverlayApp && renderingFrame) {
 		SubmitFrames(true, true);
 	}
 	switch (hand) {
@@ -146,8 +146,7 @@ void XrBackend::GetDeviceToAbsoluteTrackingPose(
 {
 	// if overlay app updated texture and requesting coordinates,
 	// assmme new frame begin. Submit updated overlays to compositor
-	if(isOverlayApp && renderingFrame)
-	{
+	if (isOverlayApp && renderingFrame) {
 		SubmitFrames(true, true);
 	}
 
@@ -193,10 +192,10 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 	// Check we're using the session with the application's device
 	if (!usingApplicationGraphicsAPI) {
 		usingApplicationGraphicsAPI = true;
-		XrSessionCreateInfoOverlayEXTX overlay_info = {XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX};
+		XrSessionCreateInfoOverlayEXTX overlay_info = { XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX };
 		overlay_info.sessionLayersPlacement = oovr_global_configuration.OverlayLayersPlacement();
-		XrSessionCreateInfoOverlayEXTX *graphics_binding_next = nullptr;
-		if(isOverlayApp && !oovr_global_configuration.OverlayForceScene())
+		XrSessionCreateInfoOverlayEXTX* graphics_binding_next = nullptr;
+		if (isOverlayApp && !oovr_global_configuration.OverlayForceScene())
 			graphics_binding_next = &overlay_info;
 
 		OOVR_LOG("Recreating OpenXR session for application graphics API");
@@ -891,7 +890,7 @@ void XrBackend::OnOverlayTexture(const vr::Texture_t* texture)
 {
 	if (!usingApplicationGraphicsAPI)
 		CheckOrInitCompositors(texture);
-	if(renderingFrame)
+	if (renderingFrame)
 		return;
 	// overlay app is updaing texture. Start OpenXR frame
 	if (!sessionActive || !isOverlayApp) {

@@ -89,34 +89,32 @@ BaseOverlay::~BaseOverlay()
 	}
 }
 
-void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float *xscale, float *yscale )
+void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float* xscale, float* yscale)
 {
-	auto &a = mat.m;
+	auto& a = mat.m;
 	float norm = 0;
 
 	// first, get rid of scale
-	for(int i = 0; i < 3; i++)
-	{
+	for (int i = 0; i < 3; i++) {
 		norm = 0;
-		for(int j = 0; j < 3; j++)
-			norm += a[i][j]*a[i][j];
+		for (int j = 0; j < 3; j++)
+			norm += a[i][j] * a[i][j];
 		norm = sqrtf(norm);
-		for(int j = 0; j < 3; j++)
+		for (int j = 0; j < 3; j++)
 			a[i][j] /= norm;
 		// hack: we cannot perform scale transform for XrPose, so scale quad rect
-		if(i == 0)
+		if (i == 0)
 			*xscale = fabs(norm);
 	}
 
 	// cannot convert scaled/inverted matrix to quaternion correctly,
 	// so use angles to sanitize rotation and detect inverted y/yaw
-	float det = 
-		a[0][0] * (a[1][1] * a[2][2] - a[2][1] * a[1][2]) -
-		a[1][0] * (a[0][1] * a[2][2] - a[2][1] * a[0][2]) +
-		a[2][0] * (a[0][1] * a[1][2] - a[1][1] * a[0][2]);
-
-	if(det < 0)
-	{
+	// clang-format off
+	float det = a[0][0] * (a[1][1] * a[2][2] - a[2][1] * a[1][2]) -
+	            a[1][0] * (a[0][1] * a[2][2] - a[2][1] * a[0][2]) +
+	            a[2][0] * (a[0][1] * a[1][2] - a[1][1] * a[0][2]);
+	// clang-format on
+	if (det < 0) {
 		a[1][0] *= -1;
 		a[1][1] *= -1;
 		a[1][2] *= -1;
@@ -126,13 +124,11 @@ void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float *xscale, float *y
 	float yaw = atan2f(a[1][0], a[0][0]);
 
 	// quad layer cannot do free transform, so just keep y aspect ratio
-	if(det < 0)
-	{
+	if (det < 0) {
 		yaw *= -1.0f;
 		roll *= -1.0f;
 		*yscale = *xscale * -1.0f;
-	}
-	else
+	} else
 		*yscale = *xscale;
 
 	float cr = cosf(roll * 0.5f);
@@ -148,42 +144,28 @@ void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float *xscale, float *y
 	temp[3] = cr * cp * cy + sr * sp * sy;
 }
 
-void ConcatTransforms(HmdMatrix34_t *_out, const HmdMatrix34_t *_in1, const HmdMatrix34_t *_in2)
+void ConcatTransforms(HmdMatrix34_t* _out, const HmdMatrix34_t* _in1, const HmdMatrix34_t* _in2)
 {
-	auto &out = _out->m;
-	const auto &in1 = _in1->m;
-	const auto &in2 = _in2->m;
-	out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] +
-		in1[0][2] * in2[2][0];
-	out[0][1] = in1[0][0] * in2[0][1] + in1[0][1] * in2[1][1] +
-		in1[0][2] * in2[2][1];
-	out[0][2] = in1[0][0] * in2[0][2] + in1[0][1] * in2[1][2] +
-		in1[0][2] * in2[2][2];
-	out[0][3] = in1[0][0] * in2[0][3] + in1[0][1] * in2[1][3] +
-		in1[0][2] * in2[2][3] + in1[0][3];
-	out[1][0] = in1[1][0] * in2[0][0] + in1[1][1] * in2[1][0] +
-		in1[1][2] * in2[2][0];
-	out[1][1] = in1[1][0] * in2[0][1] + in1[1][1] * in2[1][1] +
-		in1[1][2] * in2[2][1];
-	out[1][2] = in1[1][0] * in2[0][2] + in1[1][1] * in2[1][2] +
-		in1[1][2] * in2[2][2];
-	out[1][3] = in1[1][0] * in2[0][3] + in1[1][1] * in2[1][3] +
-		in1[1][2] * in2[2][3] + in1[1][3];
-	out[2][0] = in1[2][0] * in2[0][0] + in1[2][1] * in2[1][0] +
-		in1[2][2] * in2[2][0];
-	out[2][1] = in1[2][0] * in2[0][1] + in1[2][1] * in2[1][1] +
-		in1[2][2] * in2[2][1];
-	out[2][2] = in1[2][0] * in2[0][2] + in1[2][1] * in2[1][2] +
-		in1[2][2] * in2[2][2];
-	out[2][3] = in1[2][0] * in2[0][3] + in1[2][1] * in2[1][3] +
-		in1[2][2] * in2[2][3] + in1[2][3];
+	auto& out = _out->m;
+	const auto& in1 = _in1->m;
+	const auto& in2 = _in2->m;
+	out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] + in1[0][2] * in2[2][0];
+	out[0][1] = in1[0][0] * in2[0][1] + in1[0][1] * in2[1][1] + in1[0][2] * in2[2][1];
+	out[0][2] = in1[0][0] * in2[0][2] + in1[0][1] * in2[1][2] + in1[0][2] * in2[2][2];
+	out[0][3] = in1[0][0] * in2[0][3] + in1[0][1] * in2[1][3] + in1[0][2] * in2[2][3] + in1[0][3];
+	out[1][0] = in1[1][0] * in2[0][0] + in1[1][1] * in2[1][0] + in1[1][2] * in2[2][0];
+	out[1][1] = in1[1][0] * in2[0][1] + in1[1][1] * in2[1][1] + in1[1][2] * in2[2][1];
+	out[1][2] = in1[1][0] * in2[0][2] + in1[1][1] * in2[1][2] + in1[1][2] * in2[2][2];
+	out[1][3] = in1[1][0] * in2[0][3] + in1[1][1] * in2[1][3] + in1[1][2] * in2[2][3] + in1[1][3];
+	out[2][0] = in1[2][0] * in2[0][0] + in1[2][1] * in2[1][0] + in1[2][2] * in2[2][0];
+	out[2][1] = in1[2][0] * in2[0][1] + in1[2][1] * in2[1][1] + in1[2][2] * in2[2][1];
+	out[2][2] = in1[2][0] * in2[0][2] + in1[2][1] * in2[1][2] + in1[2][2] * in2[2][2];
+	out[2][3] = in1[2][0] * in2[0][3] + in1[2][1] * in2[1][3] + in1[2][2] * in2[2][3] + in1[2][3];
 }
 
 float CalcDistance(float a[], float b[])
 {
-	return sqrtf((a[0] - b[0])*(a[0]-b[0]) +
-				 (a[1] - b[1])*(a[1]-b[1]) +
-				 (a[2] - b[2])*(a[2]-b[2]));
+	return sqrtf((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 }
 
 int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompositionLayerBaseHeader const* const*& layers)
@@ -217,38 +199,38 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 		vr::ETrackingUniverseOrigin trackingSpace = GetUnsafeBaseCompositor()->GetTrackingSpace();
 		ITrackedDevice* hmd = BackendManager::Instance().GetDevice(vr::k_unTrackedDeviceIndex_Hmd);
 		hmd->GetPose(trackingSpace, &hmdPose, ETrackingStateType::TrackingStateType_Rendering);
-		const auto &hmdM = hmdPose.mDeviceToAbsoluteTracking.m;
-		float hmdPosition[3] = {hmdM[0][3], hmdM[1][3], hmdM[2][3]}; 
-	
+		const auto& hmdM = hmdPose.mDeviceToAbsoluteTracking.m;
+		float hmdPosition[3] = { hmdM[0][3], hmdM[1][3], hmdM[2][3] };
+
 		for (const auto& kv : overlays) {
 			if (kv.second) {
 				OverlayData& overlay = *kv.second;
-	
+
 				// Skip hiddden overlays, and those without a valid texture (eg, after calling ClearOverlayTexture).
 				if (!overlay.visible || overlay.texture.handle == nullptr)
 					continue;
-	
+
 				// Quick hack to get around Boneworks creating overlays and setting them to an opacity of
 				// zero to hide them. Leave 1% of margin in case of weird float issues.
 				// if (overlay.colour.a < 0.01)
 				//	continue;
-	
+
 				if ((uint64_t)overlay.layerQuad.subImage.swapchain == 0) {
 					continue;
 				}
-				if( !overlay.compositor )
+				if (!overlay.compositor)
 					continue;
 
 				int32_t width = (int32_t)overlay.compositor->GetSrcSize().width;
 				int32_t height = (int32_t)overlay.compositor->GetSrcSize().height;
-	
-				//const XrRect2Di& srcSize = overlay.layerQuad.subImage.imageRect;
+
+				// const XrRect2Di& srcSize = overlay.layerQuad.subImage.imageRect;
 				if (height <= 8 && width <= 8) {
 					// Hack for F1 22 which creates a low res texture to fade between scenes
 					// but ends up just leaving a black square that takes up half the screen.
 					continue;
 				}
-	
+
 				// Calculate the texture's aspect ratio
 				const float aspect = height > 0 ? (float)width / (float)height : 1.0f;
 				// ... and use that to set the size of the overlay, as it will appear to the user
@@ -258,8 +240,7 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 				overlay.layerQuad.size.height = overlay.layerQuad.size.width / aspect;
 				float xscale, yscale;
 
-				if (overlay.transformType == VROverlayTransform_TrackedDeviceRelative)
-				{
+				if (overlay.transformType == VROverlayTransform_TrackedDeviceRelative) {
 					ITrackedDevice* dev = BackendManager::Instance().GetDevice(overlay.transformData.deviceRelative.device);
 
 					if (dev) {
@@ -270,12 +251,10 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 						overlay.layerQuad.pose.position = { transform.m[0][3], transform.m[1][3], transform.m[2][3] };
 						RotationFromMatrix((float*)&overlay.layerQuad.pose.orientation, transform, &xscale, &yscale);
 					}
-				}
-				else
-				{
-					const auto &posM = overlay.overlayTransform.m;
+				} else {
+					const auto& posM = overlay.overlayTransform.m;
 					overlay.layerQuad.pose.position = { posM[0][3], posM[1][3], posM[2][3] };
-					RotationFromMatrix((float*)&overlay.layerQuad.pose.orientation, overlay.overlayTransform,  &xscale, &yscale);
+					RotationFromMatrix((float*)&overlay.layerQuad.pose.orientation, overlay.overlayTransform, &xscale, &yscale);
 				}
 				overlay.layerQuad.size.width *= xscale;
 				overlay.layerQuad.size.height *= fabs(yscale);
@@ -285,13 +264,12 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 				size_t i;
 
 				// sort overlays by distance
-				for(i = firstOverlay; i < layerHeaders.size(); i++)
-				{
+				for (i = firstOverlay; i < layerHeaders.size(); i++) {
 					// restore OverlayData address by offset
-					OverlayData *d = (OverlayData*)((char*)layerHeaders[i] - offsetof(OverlayData, layerQuad));
-					if(d->sortOrder > overlay.sortOrder)
+					OverlayData* d = (OverlayData*)((char*)layerHeaders[i] - offsetof(OverlayData, layerQuad));
+					if (d->sortOrder > overlay.sortOrder)
 						break;
-					if(d->distance <= overlay.distance)
+					if (d->distance <= overlay.distance)
 						break;
 				}
 				// Finally, add it to the list of layers to be sent to LibOVR
@@ -817,50 +795,47 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 	// first, get transform
 	glm::mat3 m; // basis
 	glm::vec3 p; // position
-	if (overlay->transformType == VROverlayTransform_TrackedDeviceRelative)
-	{
+	if (overlay->transformType == VROverlayTransform_TrackedDeviceRelative) {
 		vr::ETrackingUniverseOrigin trackingSpace = pParams->eOrigin;
 		ITrackedDevice* dev = BackendManager::Instance().GetDevice(overlay->transformData.deviceRelative.device);
-		if(!dev)
+		if (!dev)
 			return false;
 
 		TrackedDevicePose_t pose;
 		dev->GetPose(trackingSpace, &pose, ETrackingStateType::TrackingStateType_Rendering);
 		HmdMatrix34_t transform;
 		ConcatTransforms(&transform, &pose.mDeviceToAbsoluteTracking, &overlay->transformData.deviceRelative.offset);
-		auto &m1 = transform.m;
-		m = glm::mat3(	m1[0][0], m1[0][1], m1[0][2],
-						m1[1][0], m1[1][1], m1[1][2],
-						m1[2][0], m1[2][1], m1[2][2]
-					 );
+		auto& m1 = transform.m;
+		m = glm::mat3(
+		    m1[0][0], m1[0][1], m1[0][2],
+		    m1[1][0], m1[1][1], m1[1][2],
+		    m1[2][0], m1[2][1], m1[2][2]);
 		p = { m1[0][3], m1[1][3], m1[2][3] };
-	}
-	else
-	{
-		auto &m1 = overlay->overlayTransform.m;
-		m = glm::mat3(	m1[0][0], m1[0][1], m1[0][2],
-						m1[1][0], m1[1][1], m1[1][2],
-						m1[2][0], m1[2][1], m1[2][2]
-					 );
-		p={ m1[0][3], m1[1][3], m1[2][3] };;
+	} else {
+		auto& m1 = overlay->overlayTransform.m;
+		m = glm::mat3(
+		    m1[0][0], m1[0][1], m1[0][2],
+		    m1[1][0], m1[1][1], m1[1][2],
+		    m1[2][0], m1[2][1], m1[2][2]);
+		p = { m1[0][3], m1[1][3], m1[2][3] };
 	}
 	// world space -> overlay space
 	glm::mat3 mi = glm::inverse(m);
 
 	// collect the data
-	auto &s = pParams->vSource.v;
-	glm::vec3 src = {s[0], s[1], s[2]};
-	auto &d = pParams->vDirection.v;
-	glm::vec3 dir = {d[0], d[1], d[2]};
+	auto& s = pParams->vSource.v;
+	glm::vec3 src = { s[0], s[1], s[2] };
+	auto& d = pParams->vDirection.v;
+	glm::vec3 dir = { d[0], d[1], d[2] };
 
 	// move src to overlay space
 	glm::vec3 src_proj = (src - p) * mi;
-	if(src_proj.z < 0)
+	if (src_proj.z < 0)
 		return false;
 	glm::vec3 dir_proj = dir * mi;
 
 	// only intersect with forward ray
-	if(dir_proj.z > -0.01)
+	if (dir_proj.z > -0.01)
 		return false;
 
 	// assign z to zero to fing intersection
@@ -868,13 +843,15 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 
 	// convert it back
 	glm::vec3 dst = dst_proj * m + p;
-	glm::vec3 n = glm::vec3{0.0f, 0.0f, 1.0f} * m;
+	glm::vec3 n = glm::vec3{ 0.0f, 0.0f, 1.0f } * m;
 
 	// build result
-	pResults->vNormal = {n[0], n[1], n[2]};
-	pResults->vPoint = {dst[0], dst[1], dst[2]};
-	pResults->vUVs = {  dst_proj.x / (float)overlay->widthMeters + 0.5f,
-						dst_proj.y / (float)overlay->widthMeters + 0.5f };
+	pResults->vNormal = { n[0], n[1], n[2] };
+	pResults->vPoint = { dst[0], dst[1], dst[2] };
+	// clang-format off
+	pResults->vUVs = { dst_proj.x / (float)overlay->widthMeters + 0.5f,
+	                   dst_proj.y / (float)overlay->widthMeters + 0.5f };
+	// clang-format on
 	pResults->fDistance = -src_proj.z;
 	return pResults->vUVs.v[0] > 0 && pResults->vUVs.v[0] < 1 && pResults->vUVs.v[1] > 0 && pResults->vUVs.v[1] < 1;
 }
@@ -934,7 +911,7 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 {
 	USEH();
 	overlay->texture = *pTexture;
-	if(overlay->colourSpace != ColorSpace_Auto)
+	if (overlay->colourSpace != ColorSpace_Auto)
 		overlay->texture.eColorSpace = overlay->colourSpace;
 
 	BackendManager::Instance().OnOverlayTexture(&overlay->texture);

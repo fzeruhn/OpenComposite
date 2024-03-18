@@ -273,8 +273,7 @@ float ITrackedDevice::GetFloatTrackedDeviceProperty(vr::ETrackedDeviceProperty p
 
 int32_t ITrackedDevice::GetInt32TrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* pErrorL)
 {
-	if(prop == vr::Prop_ControllerRoleHint_Int32)
-	{
+	if (prop == vr::Prop_ControllerRoleHint_Int32) {
 		int ret = (int32_t)GetControllerRole();
 		*pErrorL = vr::TrackedProp_Success;
 		return ret;
@@ -282,7 +281,6 @@ int32_t ITrackedDevice::GetInt32TrackedDeviceProperty(vr::ETrackedDeviceProperty
 
 	if (!oovr_global_configuration.AdmitUnknownProps())
 		OOVR_SOFT_ABORTF("unknown int32 property - dev: %d, prop: %d", DeviceIndex(), prop);
-
 
 	if (pErrorL)
 		*pErrorL = vr::TrackedProp_UnknownProperty;
