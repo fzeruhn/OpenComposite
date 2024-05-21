@@ -163,11 +163,6 @@ void ConcatTransforms(HmdMatrix34_t* _out, const HmdMatrix34_t* _in1, const HmdM
 	out[2][3] = in1[2][0] * in2[0][3] + in1[2][1] * in2[1][3] + in1[2][2] * in2[2][3] + in1[2][3];
 }
 
-float CalcDistance(float a[], float b[])
-{
-	return sqrtf((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
-}
-
 int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompositionLayerBaseHeader const* const*& layers)
 {
 	// Note that at least on MSVC, this shouldn't be doing any memory allocations
@@ -200,7 +195,7 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 		ITrackedDevice* hmd = BackendManager::Instance().GetDevice(vr::k_unTrackedDeviceIndex_Hmd);
 		hmd->GetPose(trackingSpace, &hmdPose, ETrackingStateType::TrackingStateType_Rendering);
 		const auto& hmdM = hmdPose.mDeviceToAbsoluteTracking.m;
-		float hmdPosition[3] = { hmdM[0][3], hmdM[1][3], hmdM[2][3] };
+		glm::vec3 hmdPosition = { hmdM[0][3], hmdM[1][3], hmdM[2][3] };
 
 		for (const auto& kv : overlays) {
 			if (kv.second) {
@@ -260,7 +255,7 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 				overlay.layerQuad.size.height *= fabs(yscale);
 				overlay.invertY = yscale < 0;
 
-				overlay.distance = CalcDistance(&overlay.layerQuad.pose.position.x, hmdPosition);
+				overlay.distance = glm::distance(X2G_v3f(overlay.layerQuad.pose.position), hmdPosition);
 				size_t i;
 
 				// sort overlays by distance
