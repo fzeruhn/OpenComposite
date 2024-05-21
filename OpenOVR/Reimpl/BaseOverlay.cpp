@@ -89,7 +89,7 @@ BaseOverlay::~BaseOverlay()
 	}
 }
 
-void QuatAndScaleFromMatrix(float temp[], HmdMatrix34_t mat, float* xscale, float* yscale)
+static void QuatAndScaleFromMatrix(float temp[], HmdMatrix34_t mat, float* xscale, float* yscale)
 {
 	auto& a = mat.m;
 	float norm = 0;
@@ -144,7 +144,7 @@ void QuatAndScaleFromMatrix(float temp[], HmdMatrix34_t mat, float* xscale, floa
 	temp[3] = cr * cp * cy + sr * sp * sy;
 }
 
-void ConcatTransforms(HmdMatrix34_t* _out, const HmdMatrix34_t* _in1, const HmdMatrix34_t* _in2)
+static void ConcatTransforms(HmdMatrix34_t* _out, const HmdMatrix34_t* _in1, const HmdMatrix34_t* _in2)
 {
 	auto& out = _out->m;
 	const auto& in1 = _in1->m;
