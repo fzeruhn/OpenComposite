@@ -89,7 +89,7 @@ BaseOverlay::~BaseOverlay()
 	}
 }
 
-void RotationFromMatrix(float temp[], HmdMatrix34_t mat, float* xscale, float* yscale)
+void QuatAndScaleFromMatrix(float temp[], HmdMatrix34_t mat, float* xscale, float* yscale)
 {
 	auto& a = mat.m;
 	float norm = 0;
@@ -244,12 +244,12 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 						HmdMatrix34_t transform;
 						ConcatTransforms(&transform, &pose.mDeviceToAbsoluteTracking, &overlay.transformData.deviceRelative.offset);
 						overlay.layerQuad.pose.position = { transform.m[0][3], transform.m[1][3], transform.m[2][3] };
-						RotationFromMatrix((float*)&overlay.layerQuad.pose.orientation, transform, &xscale, &yscale);
+						QuatAndScaleFromMatrix((float*)&overlay.layerQuad.pose.orientation, transform, &xscale, &yscale);
 					}
 				} else {
 					const auto& posM = overlay.overlayTransform.m;
 					overlay.layerQuad.pose.position = { posM[0][3], posM[1][3], posM[2][3] };
-					RotationFromMatrix((float*)&overlay.layerQuad.pose.orientation, overlay.overlayTransform, &xscale, &yscale);
+					QuatAndScaleFromMatrix((float*)&overlay.layerQuad.pose.orientation, overlay.overlayTransform, &xscale, &yscale);
 				}
 				overlay.layerQuad.size.width *= xscale;
 				overlay.layerQuad.size.height *= fabs(yscale);
