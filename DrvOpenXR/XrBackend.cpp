@@ -623,7 +623,9 @@ void XrBackend::ClearSkyboxOverride()
 bool XrBackend::GetFrameTiming(OOVR_Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
 {
 	// Zero everything except the size field
-	memset(reinterpret_cast<unsigned char*>(pTiming) + sizeof(pTiming->m_nSize), 0, pTiming->m_nSize - sizeof(pTiming->m_nSize));
+	const uint32_t savedSize = pTiming->m_nSize;
+	(*pTiming) = {0};
+	pTiming->m_nSize = savedSize;
 
 	if (pTiming->m_nSize >= sizeof(IVRCompositor_018::Compositor_FrameTiming)) {
 		pTiming->m_flSystemTimeInSeconds = frameSubmitTimeUs;
