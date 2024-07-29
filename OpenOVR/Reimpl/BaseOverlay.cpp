@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#include <cfloat>
+#include <cmath>
+#include <openxr/openxr.h>
 #define BASE_IMPL
 #include "../../DrvOpenXR/XrBackend.h"
 #include "BaseCompositor.h"
@@ -13,6 +16,7 @@
 #include <string>
 
 using glm::mat4;
+using glm::quat;
 using glm::vec3;
 
 using namespace vr;
@@ -25,6 +29,7 @@ public:
 	HmdColor_t colour;
 
 	float widthMeters = 1; // default 1 meter
+	float curvature = 0;
 
 	float autoCurveDistanceRangeMin, autoCurveDistanceRangeMax; // WTF does this do?
 	EColorSpace colourSpace = ColorSpace_Auto;
@@ -39,7 +44,13 @@ public:
 
 	// Rendering
 	Texture_t texture = {};
-	XrCompositionLayerQuad layerQuad = { XR_TYPE_COMPOSITION_LAYER_QUAD };
+
+	union {
+		XrCompositionLayerBaseHeader base;
+		XrCompositionLayerQuad quad;
+		XrCompositionLayerCylinderKHR cylinder;
+	} compositionLayer;
+
 	std::weak_ptr<Compositor> compositor;
 	float distance;
 	uint32_t sortOrder = 0;
@@ -196,11 +207,11 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			// if (overlay.colour.a < 0.01)
 			//	continue;
 
-			if ((uint64_t)overlay.layerQuad.subImage.swapchain == 0) {
+			if ((uint64_t)overlay.compositionLayer.quad.subImage.swapchain == 0) {
 				continue;
 			}
 
-			const XrRect2Di& srcSize = overlay.layerQuad.subImage.imageRect;
+			const XrRect2Di& srcSize = overlay.compositionLayer.quad.subImage.imageRect;
 			// (a flipped texture is drawn with a negative height)
 			const int32_t srcHeight = std::abs(srcSize.extent.height);
 			if (srcHeight <= 8 && srcSize.extent.width <= 8) {
@@ -226,12 +237,22 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			if (!QuatAndScaleFromMatrix(&orientation, transform, &xscale, &yscale) || !IsFinite(position))
 				continue;
 
-			overlay.layerQuad.pose.position = G2X_v3f(position);
-			overlay.layerQuad.pose.orientation = { orientation.x, orientation.y, orientation.z, orientation.w };
-			overlay.layerQuad.size.width = overlay.widthMeters * xscale;
-			overlay.layerQuad.size.height = overlay.widthMeters / aspect * yscale;
-			// The transform is in the current tracking space, which the app may have changed since it set the texture
-			overlay.layerQuad.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+			overlay.compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+
+			if (overlay.compositionLayer.base.type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR) {
+				const float radius = xscale / (2.0 * M_PI * overlay.curvature);
+				const float angle = 2.0 * (xscale / (2.0 * radius));
+				const glm::vec3 center_point = position + orientation * glm::vec3(0.0f, 0.0f, radius);
+
+				overlay.compositionLayer.cylinder.radius = radius;
+				overlay.compositionLayer.cylinder.centralAngle = angle;
+				overlay.compositionLayer.cylinder.aspectRatio = aspect;
+				overlay.compositionLayer.cylinder.pose = { G2X_quat(orientation), G2X_v3f(center_point) };
+			} else {
+				overlay.compositionLayer.quad.size.width = overlay.widthMeters * xscale;
+				overlay.compositionLayer.quad.size.height = overlay.widthMeters / aspect * yscale;
+				overlay.compositionLayer.quad.pose = { G2X_quat(orientation), G2X_v3f(position) };
+			}
 
 			overlay.distance = glm::distance(position, hmdPosition);
 			size_t i;
@@ -245,7 +266,7 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 					break;
 			}
 			// Finally, add it to the list of layers to be sent to LibOVR
-			layerHeaders.insert(layerHeaders.begin() + i, (XrCompositionLayerBaseHeader*)&overlay.layerQuad);
+			layerHeaders.insert(layerHeaders.begin() + i, &overlay.compositionLayer.base);
 			layerOverlays.insert(layerOverlays.begin() + (i - firstOverlay), &overlay);
 		}
 	}
@@ -291,12 +312,14 @@ EVROverlayError BaseOverlay::CreateOverlay(const char* pchOverlayKey, const char
 	overlays[pchOverlayKey] = data;
 	validOverlays.insert(data);
 
-	data->layerQuad.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-	data->layerQuad.next = NULL;
-	data->layerQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-	data->layerQuad.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
-	data->layerQuad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-	data->layerQuad.pose = { { 0.f, 0.f, 0.f, 1.f },
+	data->compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+	data->compositionLayer.base.next = NULL;
+	data->compositionLayer.base.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+	data->compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+
+	// Still same for quad + cylinder
+	data->compositionLayer.quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+	data->compositionLayer.quad.pose = { { 0.f, 0.f, 0.f, 1.f },
 		{ 0.0f, 0.0f, -0.65f } };
 
 	return VROverlayError_None;
@@ -547,11 +570,30 @@ EVROverlayError BaseOverlay::GetOverlayWidthInMeters(VROverlayHandle_t ulOverlay
 }
 EVROverlayError BaseOverlay::SetOverlayCurvature(VROverlayHandle_t ulOverlayHandle, float fCurvature)
 {
-	STUBBED();
+	if (!xr_ext->CylinderKHR_Available()) {
+		OOVR_LOGF("WARNING: Tried to set overlay curvature, but KHR_composition_layer_cylinder is not available.");
+		return VROverlayError_None;
+	}
+
+	USEH();
+
+	overlay->curvature = fCurvature;
+
+	if (overlay->curvature > FLT_EPSILON) {
+		overlay->compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
+	} else {
+		overlay->compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+	}
+
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlayCurvature(VROverlayHandle_t ulOverlayHandle, float* pfCurvature)
 {
-	STUBBED();
+	USEH();
+
+	*pfCurvature = overlay->curvature;
+
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayAutoCurveDistanceRangeInMeters(VROverlayHandle_t ulOverlayHandle, float fMinDistanceInMeters, float fMaxDistanceInMeters)
 {
@@ -819,7 +861,7 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 	pResults->vPoint = { dst[0], dst[1], dst[2] };
 	// clang-format off
 	// The overlay is widthMeters wide, and as tall as its texture's aspect ratio makes it
-	const XrExtent2Di& extent = overlay->layerQuad.subImage.imageRect.extent;
+	const XrExtent2Di& extent = overlay->compositionLayer.quad.subImage.imageRect.extent;
 	const float heightMeters = extent.width > 0 && extent.height != 0 ? overlay->widthMeters * std::abs(extent.height) / extent.width : overlay->widthMeters;
 	pResults->vUVs = { dst_proj.x / (float)overlay->widthMeters + 0.5f,
 	                   dst_proj.y / heightMeters + 0.5f };
@@ -898,10 +940,11 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 	}
 
 	compositor->LoadSubmitContext();
-	compositor->Invoke(&overlay->texture, &overlay->textureBounds, overlay->layerQuad.subImage);
+	//                                                             Same for quad & cylinder
+	compositor->Invoke(&overlay->texture, &overlay->textureBounds, overlay->compositionLayer.quad.subImage);
 	compositor->ResetSubmitContext();
 
-	overlay->layerQuad.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+	overlay->compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
 
 	return VROverlayError_None;
 }
