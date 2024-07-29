@@ -66,6 +66,7 @@ public:
 	XrExt(XrGraphicsApiSupportedFlags apis, const std::vector<const char*>& extensions);
 
 	bool G2Controller_Available() { return supportsG2Controller; }
+	bool CylinderKHR_Available() { return supportsCylinderKHR; }
 	bool xrGetVisibilityMaskKHR_Available() { return pfnXrGetVisibilityMaskKHR != nullptr; }
 	bool xrMndxXdevSpace_Available() { return pfnxrCreateXDevSpaceMNDX != nullptr; }
 
@@ -221,6 +222,7 @@ private:
 	PFN_xrCreateXDevSpaceMNDX pfnxrCreateXDevSpaceMNDX = nullptr;
 
 	bool supportsG2Controller = false;
+	bool supportsCylinderKHR = false;
 
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
 	PFN_xrGetD3D11GraphicsRequirementsKHR pfnXrGetD3D11GraphicsRequirementsKHR = nullptr;

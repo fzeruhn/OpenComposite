@@ -39,6 +39,8 @@ XrExt::XrExt(XrGraphicsApiSupportedFlags apis, const std::vector<const char*>& e
 			supportsG2Controller = true;
 		if (strcmp(ext, XR_MNDX_XDEV_SPACE_EXTENSION_NAME) == 0)
 			xdevSpace = true;
+		if (strcmp(ext, XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME) == 0)
+			supportsCylinderKHR = true;
 	}
 
 #define XR_BIND(name, function) OOVR_FAILED_XR_ABORT(xrGetInstanceProcAddr(xr_instance, #name, (PFN_xrVoidFunction*)&this->function))
