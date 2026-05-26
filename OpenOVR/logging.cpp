@@ -135,7 +135,6 @@ std::string GetEnv(const std::string& var)
 #ifdef ANDROID
 #include <android/log.h>
 #else
-static std::ofstream stream;
 
 #ifdef __GLIBCXX__
 #include <ext/stdio_filebuf.h>
@@ -160,40 +159,46 @@ static FILE* cfile(std::ofstream& ofs)
 }
 #endif
 
-#endif
-
-static void init_stream()
+static std::ofstream init_stream()
 {
-	if (!stream.is_open()) {
-		string outputFilePath = "opencomposite.log";
+	std::ofstream stream;
+	string outputFilePath = "opencomposite.log";
 
-		// Try and write to standard location
-		// fall back to exe dir if can't create dir
+	// Try and write to standard location
+	// fall back to exe dir if can't create dir
 #ifdef _WIN32
-		string outputFolder = GetEnv("LOCALAPPDATA");
-		if (!outputFolder.empty())
-			outputFolder = outputFolder + "\\OpenComposite\\logs";
-		if (!outputFolder.empty() && makePath(outputFolder))
-			outputFilePath = outputFolder + "\\" + outputFilePath;
+	string outputFolder = GetEnv("LOCALAPPDATA");
+	if (!outputFolder.empty())
+		outputFolder = outputFolder + "\\OpenComposite\\logs";
+	if (!outputFolder.empty() && makePath(outputFolder))
+		outputFilePath = outputFolder + "\\" + outputFilePath;
 #else
-		string outputFolder = GetEnv("XDG_STATE_HOME");
-		if (outputFolder.empty()) {
-			outputFolder = GetEnv("HOME");
-			if (!outputFolder.empty())
-				outputFolder = outputFolder + "/.local/state";
-		}
+	string outputFolder = GetEnv("XDG_STATE_HOME");
+	if (outputFolder.empty()) {
+		outputFolder = GetEnv("HOME");
 		if (!outputFolder.empty())
-			outputFolder = outputFolder + "/OpenComposite/logs";
-		if (!outputFolder.empty() && makePath(outputFolder))
-			outputFilePath = outputFolder + "/" + outputFilePath;
+			outputFolder = outputFolder + "/.local/state";
+	}
+	if (!outputFolder.empty())
+		outputFolder = outputFolder + "/OpenComposite/logs";
+	if (!outputFolder.empty() && makePath(outputFolder))
+		outputFilePath = outputFolder + "/" + outputFilePath;
 #endif
 
-		stream.open(outputFilePath.c_str());
+	stream.open(outputFilePath.c_str());
 #ifdef __GLIBCXX__
-		stream_fd.store(fileno(cfile(stream)), std::memory_order::seq_cst);
+	stream_fd.store(fileno(cfile(stream)), std::memory_order::seq_cst);
 #endif
-	}
+	return stream;
 }
+
+static std::ofstream& stream()
+{
+	static std::ofstream res = init_stream();
+	return res;
+}
+
+#endif
 
 void oovr_printf_safe(const char* format, ...)
 {
@@ -252,8 +257,7 @@ void oovr_log_raw(const char* file, long line, const char* func, const char* msg
 #ifdef ANDROID
 	__android_log_print(ANDROID_LOG_INFO, "OpenComposite", "%s:%d \t %s", func, line, msg);
 #else
-	init_stream();
-	stream << "[" << format_time() << "] " << func << ":" << line << "\t- " << (msg ? msg : "NULL") << std::endl;
+	stream() << "[" << format_time() << "] " << func << ":" << line << "\t- " << (msg ? msg : "NULL") << std::endl;
 
 	// Write it to stdout
 	// TODO on Windows, write it into the debug log
@@ -305,7 +309,7 @@ OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func
 #ifdef ANDROID
 	__android_log_print(ANDROID_LOG_ERROR, "OpenComposite", "ERROR: %s:%d \t %s", func, line, buff);
 #else
-	stream << std::flush;
+	stream() << std::flush;
 #endif
 
 	OOVR_MESSAGE(buff, title);
