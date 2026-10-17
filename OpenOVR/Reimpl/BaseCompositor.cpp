@@ -600,3 +600,10 @@ ovr_enum_t BaseCompositor::GetPosesForFrame(uint32_t unPosePredictionID, Tracked
 {
 	STUBBED();
 }
+
+ovr_enum_t BaseCompositor::GetSubmitTexture(Texture_t* pOutTexture, bool* pNeedsFlush, OOVR_EVRCompositorTextureUsage eUsage,
+    const Texture_t* pTexture, const VRTextureBounds_t* pBounds, EVRSubmitFlags nSubmitFlags)
+{
+	// There's no compositor-owned shared texture to give out.
+	return VRCompositorError_RequestFailed;
+}

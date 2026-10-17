@@ -73,6 +73,11 @@ public:
 	 * Returns true for success. Otherwise, returns false, and distortion coordinates are not suitable. */
 	bool ComputeDistortion(vr::EVREye eEye, float fU, float fV, vr::DistortionCoordinates_t* pDistortionCoordinates);
 
+	/** Gets the result of the distortion functions for the specified eye and set of input UVs.
+	 * nNumCoordinates must be the number of elements of pInput and pOutput. */
+	bool ComputeDistortionSet(vr::EVREye eEye, vr::EVRDistortionChannel eChannel, bool bAsNormalizedDeviceCoordinates,
+	    uint32_t nNumCoordinates, const vr::DistortionCoordinate_t* pInput, vr::DistortionCoordinate_t* pOutput);
+
 	/** Returns the transform from eye space to the head space. Eye space is the per-eye flavor of head
 	 * space that provides stereo disparity. Instead of Model * View * Projection the sequence is Model * View * Eye^-1 * Projection.
 	 * Normally View and Eye^-1 will be multiplied together and treated as View in your application.
@@ -268,6 +273,14 @@ public:
 	uncbVREvent should be the size in bytes of the VREvent_t struct */
 	bool PollNextEventWithPose(vr::ETrackingUniverseOrigin eOrigin, vr::VREvent_t* pEvent, uint32_t uncbVREvent, vr::TrackedDevicePose_t* pTrackedDevicePose);
 
+	/** PollNextEventWithPose, which also says which overlay an event is for. */
+	bool PollNextEventWithPoseAndOverlays(vr::ETrackingUniverseOrigin eOrigin, vr::VREvent_t* pEvent, uint32_t uncbVREvent,
+	    vr::TrackedDevicePose_t* pTrackedDevicePose, vr::VROverlayHandle_t* pulOverlayHandle);
+
+	/** The eye-tracked foveation centre, in NDC. Returns false when there is no eye tracking. */
+	bool GetEyeTrackedFoveationCenter(vr::HmdVector2_t* pNdcLeft, vr::HmdVector2_t* pNdcRight);
+	bool GetEyeTrackedFoveationCenterForProjection(const vr::HmdMatrix44_t* pProjMat, vr::HmdVector2_t* pNdc);
+
 	/** returns the name of an EVREvent enum value */
 	const char* GetEventTypeNameFromEnum(vr::EVREventType eType);
 
@@ -372,6 +385,9 @@ public:
 	 * number for logging or showing to a user, and not to try to detect anything at runtime. When appropriate, feature-specific
 	 * presence information is provided by other APIs. */
 	const char* GetRuntimeVersion();
+
+	/** Called by VR_Init in OpenVR 2.15 and later, with the SDK version the app was built with. */
+	vr::EVRInitError SetSDKVersion(uint32_t nVersionMajor, uint32_t nVersionMinor, uint32_t nVersionBuild);
 
 public:
 	// Legacy methods
