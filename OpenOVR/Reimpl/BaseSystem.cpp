@@ -118,6 +118,14 @@ bool BaseSystem::ComputeDistortion(EVREye eEye, float fU, float fV, DistortionCo
 	return BackendManager::Instance().GetPrimaryHMD()->ComputeDistortion(eEye, fU, fV, out);
 }
 
+bool BaseSystem::ComputeDistortionSet(EVREye eEye, EVRDistortionChannel eChannel, bool bAsNormalizedDeviceCoordinates,
+    uint32_t nNumCoordinates, const DistortionCoordinate_t* pInput, DistortionCoordinate_t* pOutput)
+{
+	// Like ComputeDistortion: the OpenXR runtime does the distortion, so there's nothing to report.
+	OOVR_SOFT_ABORT("Distortion computation not implemented for OpenXR");
+	return false;
+}
+
 HmdMatrix34_t BaseSystem::GetEyeToHeadTransform(EVREye ovr_eye)
 {
 	return BackendManager::Instance().GetPrimaryHMD()->GetEyeToHeadTransform(ovr_eye);
@@ -874,4 +882,28 @@ void BaseSystem::ResetSeatedZeroPose()
 			xrDestroySpace(oldSpace);
 		}
 	}
+}
+
+bool BaseSystem::PollNextEventWithPoseAndOverlays(ETrackingUniverseOrigin eOrigin, VREvent_t* pEvent, uint32_t uncbVREvent,
+    TrackedDevicePose_t* pTrackedDevicePose, VROverlayHandle_t* pulOverlayHandle)
+{
+	if (pulOverlayHandle)
+		*pulOverlayHandle = k_ulOverlayHandleInvalid;
+	return PollNextEventWithPose(eOrigin, pEvent, uncbVREvent, pTrackedDevicePose);
+}
+
+bool BaseSystem::GetEyeTrackedFoveationCenter(HmdVector2_t* pNdcLeft, HmdVector2_t* pNdcRight)
+{
+	return false;
+}
+
+bool BaseSystem::GetEyeTrackedFoveationCenterForProjection(const HmdMatrix44_t* pProjMat, HmdVector2_t* pNdc)
+{
+	return false;
+}
+
+EVRInitError BaseSystem::SetSDKVersion(uint32_t nVersionMajor, uint32_t nVersionMinor, uint32_t nVersionBuild)
+{
+	OOVR_LOGF("App built with OpenVR SDK %u.%u.%u", nVersionMajor, nVersionMinor, nVersionBuild);
+	return VRInitError_None;
 }

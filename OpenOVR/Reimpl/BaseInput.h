@@ -264,6 +264,12 @@ public:
 	 * a call to UpdateActionState, and the action data returned after that point will use the new dominant hand. */
 	EVRInputError GetDominantHand(vr::ETrackedControllerRole* peDominantHand);
 
+	/** Eye tracking (OpenVR 2.15). */
+	EVRInputError GetEyeTrackingDataRelativeToNow(VRActionHandle_t action, vr::ETrackingUniverseOrigin eOrigin,
+	    float fPredictedSecondsFromNow, vr::VREyeTrackingData_t* pEyeTrackingData, uint32_t ulEyeTrackingDataSize);
+	EVRInputError GetEyeTrackingDataForNextFrame(VRActionHandle_t action, vr::ETrackingUniverseOrigin eOrigin,
+	    vr::VREyeTrackingData_t* pEyeTrackingData, uint32_t ulEyeTrackingDataSize);
+
 	/** Sets the dominant hand for the user for this application. */
 	EVRInputError SetDominantHand(vr::ETrackedControllerRole eDominantHand);
 
