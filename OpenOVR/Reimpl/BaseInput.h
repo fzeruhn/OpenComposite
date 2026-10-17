@@ -566,6 +566,9 @@ private:
 
 		// the previous state of the double click binding
 		bool last_state;
+
+		// the timestamp of the last press counted, so a press read twice in one frame counts once
+		XrTime last_press_time = 0;
 	};
 
 	enum class PoseBindingPoint {

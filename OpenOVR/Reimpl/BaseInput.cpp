@@ -1466,6 +1466,11 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 			if (!click_state.changedSinceLastSync || !click_state.currentState)
 				continue;
 
+			// Games may read an action more than once per frame (e.g. once per input source); count each press once
+			if (click_state.lastChangeTime == dclick_info.last_press_time)
+				continue;
+			dclick_info.last_press_time = click_state.lastChangeTime;
+
 			if (!dclick_info.first_click_time) {
 				// first click, record the timestamp
 				dclick_info.first_click_time = click_state.lastChangeTime;
