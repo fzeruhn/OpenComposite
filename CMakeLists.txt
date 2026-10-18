@@ -333,6 +333,7 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/BaseSettings.cpp
 	OpenOVR/Reimpl/BaseSystem.cpp
 	OpenOVR/Reimpl/BaseMailbox.cpp
+	OpenOVR/Reimpl/BaseNotifications.cpp
 	OpenOVR/Reimpl/BaseControlPanel.cpp
 	OpenOVR/Reimpl/BaseHeadsetView.cpp
 	OpenOVR/Reimpl/CVRApplications.cpp
@@ -350,6 +351,7 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/CVRSettings.cpp
 	OpenOVR/Reimpl/CVRSystem.cpp
 	OpenOVR/Reimpl/CVRMailbox.cpp
+	OpenOVR/Reimpl/CVRNotifications.cpp
 	OpenOVR/Reimpl/CVRControlPanel.cpp
 	OpenOVR/Reimpl/CVRHeadsetView.cpp
 	${GENERATED_DIR}/stubs.gen.cpp
@@ -390,6 +392,7 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/BaseSettings.h
 	OpenOVR/Reimpl/BaseSystem.h
 	OpenOVR/Reimpl/BaseMailbox.h
+	OpenOVR/Reimpl/BaseNotifications.h
 	OpenOVR/Reimpl/BaseControlPanel.h
 	OpenOVR/Reimpl/BaseHeadsetView.h
 	OpenOVR/Reimpl/Interfaces.h
