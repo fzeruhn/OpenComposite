@@ -267,8 +267,17 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			xr_ext->xrGetVulkanGraphicsDeviceKHR(xr_instance, xr_system, vktex->m_pInstance, &xr_desire);
 
 			if (xr_desire != vktex->m_pPhysicalDevice) {
-				OOVR_ABORTF("The VkPhysicalDevice that the OpenVR app (%p) used is different from the one that the OpenXR runtime used (%p)!\n"
-				            "This should never happen, except for on multi-gpu, in which case DRI_PRIME=1 should fix things on Linux.",
+				// With one GPU they're the same device seen through different instances: No Man's Sky
+				// under Wine passes a physical device from another of its instances than m_pInstance.
+				uint32_t gpuCount = 0;
+				vkEnumeratePhysicalDevices(vktex->m_pInstance, &gpuCount, nullptr);
+				if (gpuCount != 1) {
+					OOVR_ABORTF("The VkPhysicalDevice that the OpenVR app (%p) used is different from the one that the OpenXR runtime used (%p)!\n"
+					            "This should never happen, except for on multi-gpu, in which case DRI_PRIME=1 should fix things on Linux.",
+					    (void*)vktex->m_pPhysicalDevice, (void*)xr_desire);
+				}
+				OOVR_LOGF("The OpenVR app's VkPhysicalDevice (%p) isn't the runtime's (%p) for its instance, but there's only one GPU: "
+				          "using the app's",
 				    (void*)vktex->m_pPhysicalDevice, (void*)xr_desire);
 			}
 
