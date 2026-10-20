@@ -4,6 +4,7 @@
 
 #ifdef SUPPORT_VK
 
+#include <cstring>
 #include <string>
 
 #include "TemporaryVk.h"
@@ -94,13 +95,27 @@ TemporaryVk::TemporaryVk()
 		parseExtensionsStr(deviceExtensionsStr, deviceExtensionsStore, deviceExtensionsCstr);
 	}
 
-	// Needed if the app ends up using Vulkan
-	deviceExtensionsCstr.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+	// Needed if the app ends up using Vulkan, where the device has them: Wine on macOS (winevulkan
+	// over MoltenVK) has no external memory, and asking for it anyway fails the whole device.
+	uint32_t availableCount = 0;
+	vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &availableCount, nullptr);
+	std::vector<VkExtensionProperties> available(availableCount);
+	vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &availableCount, available.data());
+	auto addIfAvailable = [&](const char* name) {
+		for (const VkExtensionProperties& ext : available) {
+			if (strcmp(ext.extensionName, name) == 0) {
+				deviceExtensionsCstr.push_back(name);
+				return;
+			}
+		}
+		OOVR_LOGF("Device extension %s isn't available; continuing without it", name);
+	};
+	addIfAvailable(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
 #ifdef _WIN32
 	// Don't import vulkan_win32 just for this constant, so hardcode the string
-	deviceExtensionsCstr.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+	addIfAvailable(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
 #else
-	deviceExtensionsCstr.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+	addIfAvailable(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
 #endif
 
 	devCreateInfo.enabledExtensionCount = deviceExtensionsCstr.size();
