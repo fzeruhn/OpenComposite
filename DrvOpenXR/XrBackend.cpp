@@ -402,7 +402,9 @@ void XrBackend::WaitForTrackingData()
 
 	{
 		auto lock = xr_session.lock_shared();
+		auto waitCall = std::chrono::steady_clock::now();
 		OOVR_FAILED_XR_ABORT(xrWaitFrame(xr_session.get(), &waitInfo, &state));
+		RecordFrameTiming(waitCall, std::chrono::steady_clock::now(), state.predictedDisplayPeriod);
 		xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
 
 		// FIXME loop until this returns true?
@@ -631,6 +633,30 @@ void XrBackend::ClearSkyboxOverride()
 
 /* Misc compositor */
 
+void XrBackend::RecordFrameTiming(std::chrono::steady_clock::time_point callTime, std::chrono::steady_clock::time_point returnTime,
+    XrDuration predictedDisplayPeriod)
+{
+	using ms = std::chrono::duration<float, std::milli>;
+	float wait = ms(returnTime - callTime).count();
+	if (predictedDisplayPeriod > 0)
+		displayPeriodMs = (float)predictedDisplayPeriod / 1e6f;
+	if (lastWaitCall != std::chrono::steady_clock::time_point{}) {
+		float interval = ms(callTime - lastWaitCall).count();
+		float busy = interval - measuredWaitMs; // since the previous xrWaitFrame returned
+		// A long pause (loading, the session hidden) is not a frame: skip it rather than drop the resolution for it
+		if (interval < 1000.0f) {
+			const float a = measuredIntervalMs == 0.0f ? 1.0f : 0.1f; // ~10-frame smoothing; the app samples one frame
+			measuredIntervalMs += a * (interval - measuredIntervalMs);
+			measuredBusyMs += a * (busy - measuredBusyMs);
+			measuredDropped = (displayPeriodMs > 0.0f && interval > 1.5f * displayPeriodMs)
+			    ? (uint32_t)(interval / displayPeriodMs + 0.5f) - 1
+			    : 0;
+		}
+	}
+	measuredWaitMs = wait;
+	lastWaitCall = callTime;
+}
+
 /**
  * Get frame timing information to be passed to the application
  *
@@ -651,20 +677,30 @@ bool XrBackend::GetFrameTiming(OOVR_Compositor_FrameTiming* pTiming, uint32_t un
 		pTiming->m_nNumDroppedFrames = 0; // number of additional times previous frame was scanned out
 		pTiming->m_nReprojectionFlags = 0;
 
-		// Just use sensible values until GPU timers implemented
-		pTiming->m_flPreSubmitGpuMs = 8.0f;
-		pTiming->m_flPostSubmitGpuMs = 1.0f;
-		pTiming->m_flTotalRenderGpuMs = 9.0f;
+		// No GPU timers through OpenXR: the app's measured frame time (render + submit, between xrWaitFrame calls) stands
+		// in for its GPU time. A GPU-bound app blocks in submit or present, so the proxy grows as the GPU saturates.
+		// Before the first measured frame, the old constants.
+		if (measuredIntervalMs > 0.0f) {
+			pTiming->m_nNumDroppedFrames = measuredDropped;
+			pTiming->m_nNumMisPresented = measuredDropped ? 1 : 0;
+			pTiming->m_flTotalRenderGpuMs = measuredBusyMs;
+			pTiming->m_flPreSubmitGpuMs = measuredBusyMs > 1.0f ? measuredBusyMs - 1.0f : measuredBusyMs;
+			pTiming->m_flPostSubmitGpuMs = measuredBusyMs > 1.0f ? 1.0f : 0.0f;
+		} else {
+			pTiming->m_flPreSubmitGpuMs = 8.0f;
+			pTiming->m_flPostSubmitGpuMs = 1.0f;
+			pTiming->m_flTotalRenderGpuMs = 9.0f;
+		}
 
 		// Use very conservative guesses for these. They are used in F1 22 for dynamic resolution calculations but are not something that is provided
 		// through OpenXR. Using conservative values will give a bit more headroom for the game to target realistic frame times.
 		pTiming->m_flCompositorRenderGpuMs = 1.5f; // time spend performing distortion correction, rendering chaperone, overlays, etc.
 		pTiming->m_flCompositorRenderCpuMs = 3.0f; // time spent on cpu submitting the above work for this frame
 
-		pTiming->m_flCompositorIdleCpuMs = 0.1f;
+		pTiming->m_flCompositorIdleCpuMs = measuredIntervalMs > 0.0f ? measuredWaitMs : 0.1f;
 
 		/** Miscellaneous measured intervals. */
-		pTiming->m_flClientFrameIntervalMs = 11.1f; // time between calls to WaitGetPoses
+		pTiming->m_flClientFrameIntervalMs = measuredIntervalMs > 0.0f ? measuredIntervalMs : 11.1f; // time between calls to WaitGetPoses
 		pTiming->m_flPresentCallCpuMs = 0.0f; // time blocked on call to present (usually 0.0, but can go long)
 		pTiming->m_flWaitForPresentCpuMs = 0.0f; // time spent spin-waiting for frame index to change (not near-zero indicates wait object failure)
 		pTiming->m_flSubmitFrameMs = 0.0f; // time spent in IVRCompositor::Submit (not near-zero indicates driver issue)
