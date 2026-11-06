@@ -54,12 +54,22 @@ XrExt::XrExt(XrGraphicsApiSupportedFlags apis, const std::vector<const char*>& e
 	}
 
 	if (xdevSpace) {
-		XR_BIND(xrCreateXDevListMNDX, pfnxrCreateXDevListMNDX);
-		XR_BIND(xrGetXDevListGenerationNumberMNDX, pfnxrGetXDevListGenerationNumberMNDX);
-		XR_BIND(xrEnumerateXDevsMNDX, pfnxrEnumerateXDevsMNDX);
-		XR_BIND(xrGetXDevPropertiesMNDX, pfnxrGetXDevPropertiesMNDX);
-		XR_BIND(xrDestroyXDevListMNDX, pfnxrDestroyXDevListMNDX);
-		XR_BIND(xrCreateXDevSpaceMNDX, pfnxrCreateXDevSpaceMNDX);
+		// XR_MNDX_xdev_space is a vendor (Monado) extension. Some OpenXR loaders
+		// (notably Proton's wineopenxr, which forwards Monado to Windows games)
+		// advertise the extension in xrEnumerateInstanceExtensionProperties but
+		// do not forward its function pointers, causing xrGetInstanceProcAddr to
+		// return XR_ERROR_FUNCTION_UNSUPPORTED. Binding optionally lets the call
+		// site (XrBackend::CreateGenericTrackers, which already checks
+		// xrMndxXdevSpace_Available()) gracefully skip generic tracker support
+		// instead of aborting the process.
+		XR_BIND_OPT(xrCreateXDevListMNDX, pfnxrCreateXDevListMNDX);
+		XR_BIND_OPT(xrGetXDevListGenerationNumberMNDX, pfnxrGetXDevListGenerationNumberMNDX);
+		XR_BIND_OPT(xrEnumerateXDevsMNDX, pfnxrEnumerateXDevsMNDX);
+		XR_BIND_OPT(xrGetXDevPropertiesMNDX, pfnxrGetXDevPropertiesMNDX);
+		XR_BIND_OPT(xrDestroyXDevListMNDX, pfnxrDestroyXDevListMNDX);
+		XR_BIND_OPT(xrCreateXDevSpaceMNDX, pfnxrCreateXDevSpaceMNDX);
+		if (!xrMndxXdevSpace_Available())
+			OOVR_LOG("XR_MNDX_xdev_space is advertised but the runtime doesn't provide all of its functions, generic trackers are disabled");
 	}
 
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
@@ -128,8 +138,9 @@ XrTime XrSessionGlobals::GetBestTime()
 	return nextPredictedFrameTime > 1 ? nextPredictedFrameTime : latestTime;
 }
 
-const XruCachedViews& XrSessionGlobals::GetCachedViews(XrSpace space)
+XruCachedViews XrSessionGlobals::GetCachedViews(XrSpace space)
 {
+	std::lock_guard lock(cachedViewsMtx);
 	auto it = cachedViews.find(space);
 	if (it != cachedViews.end()) {
 		return it->second;
@@ -153,6 +164,7 @@ const XruCachedViews& XrSessionGlobals::GetCachedViews(XrSpace space)
 
 void XrSessionGlobals::ClearCachedViews()
 {
+	std::lock_guard lock(cachedViewsMtx);
 	cachedViews.clear();
 }
 
@@ -234,7 +246,7 @@ void rotate_vector_by_quaternion(const XrVector3f& v, const XrQuaternionf& q, Xr
 
 XrSession& SessionWrapper::get()
 {
-	return SessionLock(*this, false);
+	return session;
 }
 
 SessionLock SessionWrapper::lock_shared()

@@ -264,6 +264,12 @@ public:
 	 * a call to UpdateActionState, and the action data returned after that point will use the new dominant hand. */
 	EVRInputError GetDominantHand(vr::ETrackedControllerRole* peDominantHand);
 
+	/** Eye tracking (OpenVR 2.15). */
+	EVRInputError GetEyeTrackingDataRelativeToNow(VRActionHandle_t action, vr::ETrackingUniverseOrigin eOrigin,
+	    float fPredictedSecondsFromNow, vr::VREyeTrackingData_t* pEyeTrackingData, uint32_t ulEyeTrackingDataSize);
+	EVRInputError GetEyeTrackingDataForNextFrame(VRActionHandle_t action, vr::ETrackingUniverseOrigin eOrigin,
+	    vr::VREyeTrackingData_t* pEyeTrackingData, uint32_t ulEyeTrackingDataSize);
+
 	/** Sets the dominant hand for the user for this application. */
 	EVRInputError SetDominantHand(vr::ETrackedControllerRole eDominantHand);
 
@@ -545,6 +551,27 @@ private:
 
 		// The previous state for the dpad binding.
 		bool lastState = false;
+
+		// If custom thresholds are used for click action, which needs to be read as float (useful for Index touchpads)
+		bool customClickThresholds = false;
+
+		// Triggers the haptic action in the current action set once this becomes clicked (useful for Index touchpads)
+		bool triggerHapticOnClick = false;
+	};
+
+	struct DClickBindingInfo {
+		// the maximum allowed time between the first click and the second click for the double binding to trigger
+		static constexpr XrDuration max_dclick_pause = 500 * 1'000'000; /* 500ms */
+
+		// the source click action this double click bindings is listening on
+		XrAction click_action;
+
+		// when a click is received, it's timestamp is saved to be compared with the following click
+		// when a second click is received (in the max_dclick_pause time window) it's reset back to 0
+		XrTime first_click_time;
+
+		// the previous state of the double click binding
+		bool last_state;
 	};
 
 	enum class PoseBindingPoint {
@@ -560,6 +587,28 @@ private:
 	struct PoseBindingInfo {
 		PoseBindingPoint point = PoseBindingPoint::RAW;
 		ITrackedDevice::TrackedDeviceType hand = ITrackedDevice::HAND_LEFT;
+	};
+
+	struct ActionPerProfileData {
+	public:
+		// used for extending float value range: if this reports a value above 0, the value read by this action is one plus that value
+		XrAction stackedValueExtension = XR_NULL_HANDLE;
+
+		// list of dpad directions to check
+		// first member of the pair is the parent name, the second is the corresponding binding info
+		using DpadGrouping = std::pair<std::string, DpadBindingInfo>;
+		std::vector<DpadGrouping> dpadBindings;
+
+		// list of double click input bindings
+		std::vector<DClickBindingInfo> dclickBindings;
+
+		// contains all subaction paths which are forced by bindings to always return true (for boolean queries)
+		std::vector<XrPath> forcedSubactionPaths;
+		// parameters to modify how some inputs behave. There's probably a cleaner way to do this, but whatever
+		float click_activate_threshold = 0.7;
+		float click_deactivate_threshold = 0.55;
+		float deadzone = 0.0;
+		float maxzone = 1.0;
 	};
 
 	struct Action {
@@ -583,6 +632,8 @@ private:
 		std::string setName; // The name of the action set - set before we've enumerated the action sets, eg 'main'
 
 		XrAction xr = XR_NULL_HANDLE;
+		// used for extending float value range: if this reports a value above 0, the value read by this action is one plus that value
+		XrAction stackedValueExtension = XR_NULL_HANDLE;
 
 		// If this is a skeletal action, what hand it's bound to - this is set in the actions
 		// manifest itself, not a binding file.
@@ -606,14 +657,22 @@ private:
 			float z = 0;
 		} previousState;
 
-		// list of dpad directions to check
-		// first member of the pair is the parent name, the second is the corresponding binding info
-		using DpadGrouping = std::pair<std::string, DpadBindingInfo>;
-		std::vector<DpadGrouping> dpadBindings;
+		// The syncSerial from when previousState was populated.
+		uint64_t previousSerial = 0;
+
+		struct {
+			float x = 0;
+			float y = 0;
+		} deltaState;
 
 		// If this is a pose action, we calculate it from the legacy pose inputs rather than giving it
 		// it's own OpenXR action, since it may need some special transforms to make it line up properly.
 		std::unordered_map<const InteractionProfile*, PoseBindingInfo> poseBindingsLeft, poseBindingsRight;
+
+		std::unordered_map<const InteractionProfile*, ActionPerProfileData> perProfileData;
+		static const ActionPerProfileData defaultActionData;
+
+		std::unordered_map<XrPath, XrBool32> analog_to_digital_last_state_subaction;
 	};
 
 	enum class InputSource {
@@ -675,7 +734,7 @@ private:
 	class Registry {
 	public:
 		Registry(uint32_t _maxNameSize);
-		~Registry();
+		~Registry() = default;
 
 		T* LookupItem(const std::string& name) const;
 		T* LookupItem(RegHandle handle) const;
@@ -718,6 +777,9 @@ private:
 	// See GetSyncSerial
 	uint64_t syncSerial = 0;
 
+	// For some reason, the behavior is different for digital input actions
+	uint64_t syncSerialDigital = 0;
+
 	bool hasLoadedActions = false;
 	std::string loadedActionsPath;
 	bool usingLegacyInput = false;
@@ -732,6 +794,8 @@ private:
 
 	// TODO convert to Registry
 	std::unordered_map<std::string, std::unique_ptr<InputValueHandle>> inputHandleRegistry;
+
+	std::unordered_map<std::string, XrAction> indexGripExtensionActions;
 
 	XrActionSet legacyInputsSet = XR_NULL_HANDLE;
 
@@ -749,9 +813,13 @@ private:
 		"/user/hand/right",
 	};
 
+	std::vector<const InteractionProfile*> handInteractionProfiles;
+
 	void LoadBindingsSet(const InteractionProfile& profile, const std::string& bindingsPath);
 
-	void LoadDpadAction(const InteractionProfile& profile, const std::string& importBasePath, const std::string& inputName, const std::string& subMode, Action* action, std::vector<XrActionSuggestedBinding>& bindings);
+	void LoadDpadAction(const InteractionProfile& profile, const std::string& importBasePath, const std::string& inputName, const std::string& subMode, Action* action, std::vector<XrActionSuggestedBinding>& bindings, bool isKnuckles);
+	void LoadDClickAction(const InteractionProfile& profile, const std::string& importBasePath, Action* action, std::vector<XrActionSuggestedBinding>& bindings);
+
 	void CreateLegacyActions();
 
 	/**
@@ -768,7 +836,7 @@ private:
 	Action* cast_AH(VRActionHandle_t);
 	ActionSet* cast_ASH(VRActionSetHandle_t);
 	static InputValueHandle* cast_IVH(VRInputValueHandle_t);
-	static ITrackedDevice* ivhToDev(VRInputValueHandle_t handle);
+	static std::shared_ptr<ITrackedDevice> ivhToDev(VRInputValueHandle_t handle);
 	static bool checkRestrictToDevice(vr::VRInputValueHandle_t restrict, XrPath subactionPath);
 	static ITrackedDevice::TrackedDeviceType ParseAndRemoveHandPrefix(std::string& toModify);
 
@@ -785,7 +853,7 @@ private:
 	/**
 	 * Get the state for a digital action, which could be bound to a DPad action.
 	 */
-	XrResult getBooleanOrDpadData(Action& action, const XrActionStateGetInfo* getInfo, XrActionStateBoolean* state);
+	XrResult getBooleanOrDpadData(const InteractionProfile* profile, Action& action, const XrActionStateGetInfo* getInfo, XrActionStateBoolean* state);
 
 	/**
 	 * Uses the finger tracking extensions to generate a skeletal summary.

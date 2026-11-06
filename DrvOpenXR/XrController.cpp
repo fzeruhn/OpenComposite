@@ -180,7 +180,7 @@ void XrController::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevice
 		pose->bPoseIsValid = true;
 		pose->eTrackingResult = vr::TrackingResult_Running_OK;
 	}
-	
+
 	// TODO do something with TrackingState
 	XrSpace space = XR_NULL_HANDLE;
 
@@ -193,20 +193,23 @@ void XrController::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevice
 	// Find the hand transform matrix, and include that
 	glm::mat4 transform = profile.GetGripToSteamVRTransform(GetHand());
 
-	if (!xr_utils::PoseFromSpace(pose, space, origin, transform)) {
-		// Fallback to pose from hand tracking if the controller one isn't valid
-		isHandTrackingValid = GetPoseFromHandTracking(input, pose);
+	if (xr_utils::PoseFromSpace(pose, space, origin, transform)) {
+		isPoseFromHandTracking = false;
+		return;
 	}
 
+	// Fallback to pose from hand tracking if the controller one isn't valid
+	GetPoseFromHandTracking(input, pose);
+	isPoseFromHandTracking = true;
 }
 
-bool XrController::GetPoseFromHandTracking(BaseInput* input, vr::TrackedDevicePose_t* pose)
+void XrController::GetPoseFromHandTracking(BaseInput* input, vr::TrackedDevicePose_t* pose)
 {
 	if (!xr_gbl->handTrackingProperties.supportsHandTracking)
-		return false;
+		return;
 
 	if (!input->handTrackers[(int)GetHand()])
-		return false;
+		return;
 
 	XrHandJointsLocateInfoEXT locateInfo = { XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT };
 	locateInfo.baseSpace = xr_gbl->floorSpace;
@@ -225,7 +228,7 @@ bool XrController::GetPoseFromHandTracking(BaseInput* input, vr::TrackedDevicePo
 
 	OOVR_FAILED_XR_ABORT(xr_ext->xrLocateHandJointsEXT(input->handTrackers[(int)GetHand()], &locateInfo, &locations));
 
-	return xr_utils::PoseFromHandTracking(pose, locations, velocities, GetHand() == HAND_RIGHT);
+	xr_utils::PoseFromHandTracking(pose, locations, velocities, GetHand() == HAND_RIGHT);
 }
 
 vr::ETrackedDeviceClass XrController::GetTrackedDeviceClass()
@@ -233,9 +236,19 @@ vr::ETrackedDeviceClass XrController::GetTrackedDeviceClass()
 	return vr::TrackedDeviceClass_Controller;
 }
 
+bool XrController::IsPoseFromHandTracking()
+{
+	return isPoseFromHandTracking;
+}
+
 bool XrController::IsHandTrackingValid()
 {
 	return isHandTrackingValid;
+}
+
+void XrController::SetHandTrackingValid(bool valid)
+{
+	isHandTrackingValid = valid;
 }
 
 const InteractionProfile* XrController::GetInteractionProfile()

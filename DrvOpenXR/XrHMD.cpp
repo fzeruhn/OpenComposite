@@ -9,7 +9,9 @@
 #include "../OpenOVR/Reimpl/BaseSystem.h"
 #include "../OpenOVR/convert.h"
 #include "generated/static_bases.gen.h"
+#include <chrono>
 #include <thread>
+#include <mutex>
 
 void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 {
@@ -357,6 +359,7 @@ float XrHMD::GetFloatTrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::
 uint32_t XrHMD::GetStringTrackedDeviceProperty(vr::ETrackedDeviceProperty prop,
     char* value, uint32_t bufferSize, vr::ETrackedPropertyError* pErrorL)
 {
+	std::shared_lock lock(profile_mutex);
 
 	if (pErrorL)
 		*pErrorL = vr::TrackedProp_Success;
@@ -412,5 +415,6 @@ int32_t XrHMD::GetInt32TrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr
 
 void XrHMD::SetInteractionProfile(const InteractionProfile* profile)
 {
+	std::unique_lock lock(profile_mutex);
 	this->profile = profile;
 }

@@ -16,6 +16,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
+#include <chrono>
 #include <optional>
 #include <ranges>
 
@@ -470,7 +471,7 @@ EVRInputError BaseInput::getEstimatedBoneData(
 	};
 
 	// Find the interaction profile to retrieve hand poses
-	ITrackedDevice* dev = BackendManager::Instance().GetDeviceByHand(hand);
+	std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDeviceByHand(hand);
 	if (!dev)
 		return vr::VRInputError_InvalidDevice;
 
