@@ -6,6 +6,8 @@
 #include "stdafx.h"
 
 #include <vulkan/vulkan.h>
+
+#include "../DrvOpenXR/XrBackend.h"
 // Required for the close(2) call for the texture shared memory on Linux
 #ifndef _WIN32
 #include <unistd.h>
@@ -91,6 +93,15 @@ VkCompositor::VkCompositor(const vr::Texture_t* initialTexture)
 
 	VkCommandPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 	poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	// Its command buffers go to the app's queue: use the family the backend found that queue in, else the app's word
+	poolInfo.queueFamilyIndex = tex->m_nQueueFamilyIndex;
+	auto* binding = (const XrGraphicsBindingVulkanKHR*)((XrBackend*)BackendManager::Instance().GetBackendInstance())->GetCurrentGraphicsBinding();
+	if (binding && binding->type == XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR && binding->device == tex->m_pDevice) {
+		VkQueue queue = VK_NULL_HANDLE;
+		vkGetDeviceQueue(binding->device, binding->queueFamilyIndex, binding->queueIndex, &queue);
+		if (queue == tex->m_pQueue)
+			poolInfo.queueFamilyIndex = binding->queueFamilyIndex;
+	}
 	OOVR_FAILED_VK_ABORT(vkCreateCommandPool(tex->m_pDevice, &poolInfo, nullptr, &appCommandPool));
 }
 
