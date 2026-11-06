@@ -5,9 +5,6 @@
 
 using namespace vr;
 
-/** The maximum length of an application key */
-static const uint32_t k_unMaxApplicationKeyLength = 128;
-
 // So I can easily use it for return types
 typedef OOVR_EVRApplicationError EVRApplicationError;
 
