@@ -30,6 +30,7 @@ protected:
 	ID3D11SamplerState* quad_sampleState;
 	ID3D11VertexShader* fs_vshader;
 	ID3D11PixelShader* fs_pshader;
+	ID3D11Buffer* constBuffer = nullptr; // the source area for fs_vshader
 
 	std::vector<XrSwapchainImageD3D11KHR> imagesHandles;
 	std::vector<ID3D11RenderTargetView*> swapchain_rtvs;

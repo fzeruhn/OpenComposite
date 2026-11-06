@@ -17,7 +17,7 @@ struct ShaderConstData {
 };
 
 constexpr char fs_shader_code[] = R"_(
-Texture2D shaderTexture : register(t0);
+Texture2DArray shaderTexture : register(t0);
 
 SamplerState SampleType : register(s0);
 
@@ -34,11 +34,8 @@ struct psIn {
 psIn vs_fs(uint vI : SV_VERTEXID)
 {
 	psIn output;
-    //output.tex = float2(vI&1,vI>>1);
-    //output.pos = float4((output.tex.x-0.5f)*2,-(output.tex.y-0.5f)*2,0,1);
-	//output.tex.y = 1.0f - output.tex.y;
-	// Note: if offset=(0,0) and scale=(1,1) then we won't invert the image, those
-	// values come from the viewport vMin/vMax which are the 'wrong way around'.
+	// offset and scale come from the submitted bounds: vMin > vMax inverts the image, and a uMin/uMax
+	// half picks one eye of a side-by-side texture.
 	float2 basePos = float2(vI&1,vI>>1);
 	output.tex = offset + basePos * scale;
 	output.pos = float4((basePos.x-0.5f)*2,-(basePos.y-0.5f)*2,0,1);
@@ -47,7 +44,7 @@ psIn vs_fs(uint vI : SV_VERTEXID)
 
 float4 ps_fs(psIn inputPS) : SV_TARGET
 {
-	float4 textureColor = shaderTexture.Sample(SampleType, inputPS.tex);
+	float4 textureColor = shaderTexture.Sample(SampleType, float3(inputPS.tex, 0));
 	return textureColor;
 })_";
 
@@ -165,6 +162,9 @@ DX11Compositor::~DX11Compositor()
 		tex->Release();
 
 	resolvedMSAATextures.clear();
+
+	if (constBuffer)
+		constBuffer->Release();
 
 	context->Release();
 	device->Release();
@@ -348,18 +348,27 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	sourceRegion.front = 0;
 	sourceRegion.back = 1;
 
-	// Bounds describe an inverted image so copy texture using pixel shader inverting on copy
-	if (bounds && bounds->vMin > bounds->vMax && oovr_global_configuration.InvertUsingShaders() && !swapchain_rtvs.empty()) {
+	// Apparently SteamVR supports apps just sending array textures without specifying what's what.
+	const int arrayIndex = (srcDesc.ArraySize > 1 && eye.has_value()) ? static_cast<int>(*eye) : 0;
+
+	// Bounds describe an inverted image so copy texture using pixel shader inverting on copy.
+	// (Not for textures the shader can't read, multisampled or not bound as shader resources: they're copied as they are.)
+	if (bounds && bounds->vMin > bounds->vMax && oovr_global_configuration.InvertUsingShaders() && !swapchain_rtvs.empty()
+	    && srcDesc.SampleDesc.Count == 1 && (srcDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)) {
 		auto* src = (ID3D11Texture2D*)texture->handle;
 
-		// We must specify srvDesc when the game supplies a typeless format, otherwise we get the
-		// error E_INVALIDARG 0x80070057 (putting this here for ease of searching later).
-		// See https://learn.microsoft.com/en-gb/windows/win32/api/d3d11/ns-d3d11-d3d11_shader_resource_view_desc#remarks
+		// A typeless texture needs a typed view format, or CreateShaderResourceView fails with E_INVALIDARG: use the
+		// swapchain's, the sRGB or linear version of the texture's format. A one-slice array view reads this eye's
+		// slice of an array texture, and a plain texture's only slice.
+		DxgiFormatInfo info = {};
+		bool typeless = GetFormatInfo(srcDesc.Format, info) && srcDesc.Format == info.typeless;
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		srvDesc.Texture2D.MipLevels = 1;
-		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Format = typeless ? (DXGI_FORMAT)createInfo.format : srcDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+		srvDesc.Texture2DArray.MostDetailedMip = 0;
+		srvDesc.Texture2DArray.MipLevels = 1;
+		srvDesc.Texture2DArray.FirstArraySlice = arrayIndex;
+		srvDesc.Texture2DArray.ArraySize = 1;
 		OOVR_FAILED_DX_ABORT(device->CreateShaderResourceView(src, &srvDesc, &quad_texture_view));
 
 		float blend_factor[4] = { 1.f, 1.f, 1.f, 1.f };
@@ -381,21 +390,10 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		context->RSGetState(&pRSState);
 		context->RSSetState(nullptr);
 
+		// Draw over the whole swapchain image; the shader picks the source area from the bounds
 		D3D11_VIEWPORT viewport = CD3D11_VIEWPORT(imagesHandles[currentIndex].texture, swapchain_rtvs[currentIndex]);
 		context->RSSetViewports(1, &viewport);
-
-		// We could - and previously sort-of did - clip the texture using the scissor rectangle.
-		// When adding support for side-by-side rendered eyes, I switched to passing this in via
-		// a constant buffer, on the idea that maybe it's faster to not render scissor-clipped
-		// pixels? I haven't tested the performance difference though, so I'm probably wrong :P
 		context->RSSetScissorRects(0, nullptr);
-
-		// D3D11_RECT rects[1];
-		// rects[0].top = 0;
-		// rects[0].left = 0;
-		// rects[0].bottom = createInfo.height;
-		// rects[0].right = createInfo.width;
-		// context->RSSetScissorRects(1, rects);
 
 		// Set up for rendering
 		context->OMSetRenderTargets(1, &swapchain_rtvs[currentIndex], nullptr);
@@ -404,7 +402,7 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 
 		// Update the source region in the constant buffer
 		D3D11_MAPPED_SUBRESOURCE mappedConstData = {};
-		context->Map(constBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedConstData);
+		OOVR_FAILED_DX_ABORT(context->Map(constBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedConstData));
 		ShaderConstData* constData = (ShaderConstData*)mappedConstData.pData;
 		constData->offsetX = bounds->uMin;
 		constData->offsetY = bounds->vMin;
@@ -412,7 +410,9 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		constData->scaleY = bounds->vMax - bounds->vMin;
 		context->Unmap(constBuffer, 0);
 
-		// Set the active shaders and constant buffers.
+		// Set the active shaders and constant buffers, keeping the app's vertex constant buffer to put back
+		ID3D11Buffer* appConstBuffer = nullptr;
+		context->VSGetConstantBuffers(0, 1, &appConstBuffer);
 		context->PSSetShaderResources(0, 1, &quad_texture_view);
 		context->VSSetShader(fs_vshader, nullptr, 0);
 		context->PSSetShader(fs_pshader, nullptr, 0);
@@ -427,6 +427,10 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		context->IASetPrimitiveTopology(currTopology);
 		quad_texture_view->Release();
 
+		context->VSSetConstantBuffers(0, 1, &appConstBuffer);
+		if (appConstBuffer)
+			appConstBuffer->Release();
+
 		if (numViewPorts)
 			context->RSSetViewports(numViewPorts, viewports.data());
 		if (numScissors)
@@ -434,8 +438,6 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 
 		context->RSSetState(pRSState);
 	} else {
-		// Apparently SteamVR supports apps just sending array textures without specifying what's what.
-		const int arrayIndex = (srcDesc.ArraySize > 1 && eye.has_value()) ? static_cast<int>(*eye) : 0;
 		if (srcDesc.SampleDesc.Count > 1) {
 			D3D11_TEXTURE2D_DESC resDesc = srcDesc;
 			resDesc.SampleDesc.Count = 1;
