@@ -68,7 +68,11 @@ public:
 	bool G2Controller_Available() { return supportsG2Controller; }
 	bool CylinderKHR_Available() { return supportsCylinderKHR; }
 	bool xrGetVisibilityMaskKHR_Available() { return pfnXrGetVisibilityMaskKHR != nullptr; }
-	bool xrMndxXdevSpace_Available() { return pfnxrCreateXDevSpaceMNDX != nullptr; }
+	bool xrMndxXdevSpace_Available()
+	{
+		return pfnxrCreateXDevListMNDX && pfnxrGetXDevListGenerationNumberMNDX && pfnxrEnumerateXDevsMNDX
+		    && pfnxrGetXDevPropertiesMNDX && pfnxrDestroyXDevListMNDX && pfnxrCreateXDevSpaceMNDX;
+	}
 
 	XrResult xrGetVisibilityMaskKHR(
 	    XrSession session,

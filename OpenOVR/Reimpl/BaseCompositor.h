@@ -74,6 +74,12 @@ struct OOVR_Compositor_CumulativeStats {
 	uint32_t m_nNumReprojectedFramesTimedOut;
 };
 
+enum OOVR_EVRCompositorTextureUsage {
+	VRCompositorTextureUsage_Left = vr::Eye_Left,
+	VRCompositorTextureUsage_Right = vr::Eye_Right,
+	VRCompositorTextureUsage_Both,
+};
+
 enum OOVR_EVRCompositorTimingMode {
 	VRCompositorTimingMode_Implicit = 0,
 	VRCompositorTimingMode_Explicit_RuntimePerformsPostPresentHandoff = 1,
@@ -165,6 +171,10 @@ public:
 	 * Returns VRCompositorError_IndexOutOfRange if unDeviceIndex not less than k_unMaxTrackedDeviceCount otherwise VRCompositorError_None.
 	 * It is okay to pass NULL for either pose if you only want one of the values. */
 	ovr_enum_t GetLastPoseForTrackedDeviceIndex(vr::TrackedDeviceIndex_t unDeviceIndex, vr::TrackedDevicePose_t* pOutputPose, vr::TrackedDevicePose_t* pOutputGamePose);
+
+	/** Get the shared texture to copy into for submitting frames. */
+	ovr_enum_t GetSubmitTexture(vr::Texture_t* pOutTexture, bool* pNeedsFlush, OOVR_EVRCompositorTextureUsage eUsage,
+	    const vr::Texture_t* pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags);
 
 	/** Updated scene texture to display. If pBounds is NULL the entire texture will be used.  If called from an OpenGL app, consider adding a glFlush after
 	 * Submitting both frames to signal the driver to start processing, otherwise it may wait until the command buffer fills up, causing the app to miss frames.

@@ -17,6 +17,9 @@
 #include <string>
 #include <vector>
 
+#ifndef GLM_ENABLE_EXPERIMENTAL
+#define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/transform.hpp>
 
@@ -568,7 +571,7 @@ bool BaseRenderModels::TryGetComponentState(ITrackedDevice::TrackedDeviceType ha
 	if (hand == ITrackedDevice::HAND_NONE)
 		return false;
 
-	ITrackedDevice* dev = BackendManager::Instance().GetDeviceByHand(hand);
+	std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDeviceByHand(hand);
 	if (!dev)
 		return false;
 

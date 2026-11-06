@@ -6,6 +6,12 @@
 
 #include "OculusInteractionProfile.h"
 
+#include "OculusHandPoses.h"
+#include "Reimpl/BaseInput.h"
+
+#ifndef GLM_ENABLE_EXPERIMENTAL
+#define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include <glm/gtc/matrix_inverse.hpp>
 
 OculusTouchInteractionProfile::OculusTouchInteractionProfile()
@@ -54,6 +60,8 @@ OculusTouchInteractionProfile::OculusTouchInteractionProfile()
 		{ "joystick", "thumbstick" },
 		{ "pull", "value" },
 		{ "grip/click", "squeeze/value" },
+		{ "grip/force", "squeeze/value" },
+		{ "grip/value", "squeeze/value" },
 		{ "trigger/click", "trigger/value" },
 		{ "application_menu", "menu" }
 	};
@@ -70,7 +78,7 @@ OculusTouchInteractionProfile::OculusTouchInteractionProfile()
 
 	this->propertiesMap = {
 		{ vr::Prop_TrackingSystemName_String, { "oculus" } },
-		{ vr::Prop_ModelNumber_String, { "Miramar (Left Controller)", "Miramar (Right Controller)" } },
+		{ vr::Prop_ModelNumber_String, { "Oculus Quest (Left Controller)", "Oculus Quest (Right Controller)" } },
 		{ vr::Prop_ControllerType_String, { GetOpenVRName().value() } }
 	};
 
@@ -118,6 +126,17 @@ OculusTouchInteractionProfile::OculusTouchInteractionProfile()
 	this->rightComponentTransforms["tip"] = GetMat4x4FromOriginAndEulerRotations(
 	    { -0.016694, -0.02522, 0.024687 },
 	    { -37.4, 0.0, 0.0 });
+	
+	// Define reference poses
+	leftHandPoses[VRSkeletalReferencePose_BindPose] = oculus::leftBindPose;
+	leftHandPoses[VRSkeletalReferencePose_OpenHand] = oculus::leftOpenHandPose;
+	leftHandPoses[VRSkeletalReferencePose_Fist] = oculus::leftFistPose;
+	leftHandPoses[VRSkeletalReferencePose_GripLimit] = oculus::leftGripLimitPose;
+
+	rightHandPoses[VRSkeletalReferencePose_BindPose] = oculus::rightBindPose;
+	rightHandPoses[VRSkeletalReferencePose_OpenHand] = oculus::rightOpenHandPose;
+	rightHandPoses[VRSkeletalReferencePose_Fist] = oculus::rightFistPose;
+	rightHandPoses[VRSkeletalReferencePose_GripLimit] = oculus::rightGripLimitPose;
 }
 
 const std::string& OculusTouchInteractionProfile::GetPath() const
@@ -139,6 +158,11 @@ std::optional<const char*> OculusTouchInteractionProfile::GetRightHandRenderMode
 std::optional<const char*> OculusTouchInteractionProfile::GetOpenVRName() const
 {
 	return "oculus_touch";
+}
+
+std::optional<vr::EVRSkeletalTrackingLevel> OculusTouchInteractionProfile::GetOpenVRTrackinglevel() const
+{
+	return vr::VRSkeletalTracking_Estimated;
 }
 
 const InteractionProfile::LegacyBindings* OculusTouchInteractionProfile::GetLegacyBindings(const std::string& handPath) const

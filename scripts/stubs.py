@@ -65,6 +65,7 @@ interfaces_list = [
     "ClientCore",
     "OverlayView",
     "Mailbox",
+    "Notifications",
     "ControlPanel",
     "HeadsetView",
 

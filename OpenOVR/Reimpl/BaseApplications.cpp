@@ -177,3 +177,10 @@ uint32_t BaseApplications::GetCurrentSceneProcessId()
 {
 	STUBBED();
 }
+
+EVRApplicationError BaseApplications::RegisterSubprocess(uint32_t nPid)
+{
+	// On success the caller exits, as it would with SteamVR. That's fine here: the subprocess
+	// loads OpenComposite itself and calls VR_Init on its own, and there's no transition UI to hide.
+	return VRApplicationError_None;
+}

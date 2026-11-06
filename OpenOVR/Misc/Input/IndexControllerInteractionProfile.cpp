@@ -1,6 +1,9 @@
 #include "IndexControllerInteractionProfile.h"
 #include "logging.h"
 
+#include "IndexHandPoses.h"
+#include "Reimpl/BaseInput.h"
+
 IndexControllerInteractionProfile::IndexControllerInteractionProfile()
 {
 	// Figured these out from OpenXR spec section 6.4
@@ -51,10 +54,12 @@ IndexControllerInteractionProfile::IndexControllerInteractionProfile()
 		// you have to pull really hard which is nerve racking
 		// If you look at the bindings_knuckles.json you can see some more compliated thresholds, which I believe OC ignores.
 		// If we add support for respecting those, change these to more reasonable replacements.
-		{ "grip/force", "squeeze/value" },
+		{ "grip/force", "squeeze/force" },
 		{ "grip/click", "squeeze/value" },
 		{ "grip/touch", "squeeze/value" },
 		{ "grip/value", "squeeze/value" },
+		{ "grip/grab", "squeeze/value" },
+		{ "grip/pull", "squeeze/value" },
 	};
 
 	this->hmdPropertiesMap = {
@@ -119,6 +124,18 @@ IndexControllerInteractionProfile::IndexControllerInteractionProfile()
 	this->rightComponentTransforms["base"] = glm::affineInverse(baseRight);
 	this->leftComponentTransforms["gdc2015"] = glm::affineInverse(gdc);
 	this->rightComponentTransforms["gdc2015"] = glm::affineInverse(gdc);
+
+	// Define reference poses
+	leftHandPoses[VRSkeletalReferencePose_BindPose] = knuckles::leftBindPose;
+	leftHandPoses[VRSkeletalReferencePose_OpenHand] = knuckles::leftOpenHandPose;
+	leftHandPoses[VRSkeletalReferencePose_Fist] = knuckles::leftFistPose;
+	leftHandPoses[VRSkeletalReferencePose_GripLimit] = knuckles::leftGripLimitPose;
+
+	rightHandPoses[VRSkeletalReferencePose_BindPose] = knuckles::rightBindPose;
+	rightHandPoses[VRSkeletalReferencePose_OpenHand] = knuckles::rightOpenHandPose;
+	rightHandPoses[VRSkeletalReferencePose_Fist] = knuckles::rightFistPose;
+	rightHandPoses[VRSkeletalReferencePose_GripLimit] = knuckles::rightGripLimitPose;
+
 }
 
 const std::string& IndexControllerInteractionProfile::GetPath() const
@@ -140,6 +157,11 @@ std::optional<const char*> IndexControllerInteractionProfile::GetRightHandRender
 std::optional<const char*> IndexControllerInteractionProfile::GetOpenVRName() const
 {
 	return "knuckles";
+}
+
+std::optional<vr::EVRSkeletalTrackingLevel> IndexControllerInteractionProfile::GetOpenVRTrackinglevel() const
+{
+	return vr::VRSkeletalTracking_Partial;
 }
 
 const InteractionProfile::LegacyBindings* IndexControllerInteractionProfile::GetLegacyBindings(const std::string& handPath) const

@@ -44,9 +44,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cinttypes>
+#include <mutex>
 
 using namespace vr;
 
+std::mutex inputRestartMutex;
 std::unique_ptr<TemporaryGraphics> XrBackend::temporaryGraphics = nullptr;
 XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx)
 {
@@ -70,7 +72,7 @@ XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx)
 
 	// setup the device indexes
 	for (vr::TrackedDeviceIndex_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++) {
-		ITrackedDevice* dev = GetDevice(i);
+		std::shared_ptr<ITrackedDevice> dev = GetDevice(i);
 
 		if (dev)
 			dev->InitialiseDevice(i);
@@ -97,38 +99,39 @@ XrSessionState XrBackend::GetSessionState()
 	return sessionState;
 }
 
-IHMD* XrBackend::GetPrimaryHMD()
+std::shared_ptr<IHMD> XrBackend::GetPrimaryHMD()
 {
-	return hmd.get();
+	return hmd;
 }
 
-ITrackedDevice* XrBackend::GetDevice(
+std::shared_ptr<ITrackedDevice> XrBackend::GetDevice(
     vr::TrackedDeviceIndex_t index)
 {
 	switch (index) {
 	case vr::k_unTrackedDeviceIndex_Hmd:
 		return GetPrimaryHMD();
 	case 1:
-		return hand_left.get();
+		return hand_left;
 	case 2:
-		return hand_right.get();
+		return hand_right;
 	default:
+		std::shared_lock lock(generic_trackers_mutex);
 		vr::TrackedDeviceIndex_t corrected_index = index - RESERVED_DEVICE_INDICES;
 		if (corrected_index >= generic_trackers.size())
 			return nullptr;
 
-		return generic_trackers.at(corrected_index).get();
+		return generic_trackers.at(corrected_index);
 	}
 }
 
-ITrackedDevice* XrBackend::GetDeviceByHand(
+std::shared_ptr<ITrackedDevice> XrBackend::GetDeviceByHand(
     ITrackedDevice::TrackedDeviceType hand)
 {
 	switch (hand) {
 	case ITrackedDevice::HAND_LEFT:
-		return hand_left.get();
+		return hand_left;
 	case ITrackedDevice::HAND_RIGHT:
-		return hand_right.get();
+		return hand_right;
 	default:
 		OOVR_SOFT_ABORTF("Cannot get hand by type '%d'", (int)hand);
 		return nullptr;
@@ -142,7 +145,7 @@ void XrBackend::GetDeviceToAbsoluteTrackingPose(
     uint32_t poseArrayCount)
 {
 	for (uint32_t i = 0; i < poseArrayCount; ++i) {
-		ITrackedDevice* dev = GetDevice(i);
+		std::shared_ptr<ITrackedDevice> dev = GetDevice(i);
 		if (dev) {
 			dev->GetPose(toOrigin, &poseArray[i], ETrackingStateType::TrackingStateType_Rendering);
 		} else {
@@ -210,7 +213,13 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 
 			dev->Release();
 #else
-			OOVR_ABORT("Application is trying to submit a D3D11 texture, which OpenComposite supports but is disabled in this build");
+
+ #ifdef __linux__
+            OOVR_ABORT("Application is trying to submit a D3D11 texture, this is likely a Steam Proton bug, please report it");
+ #else
+            OOVR_ABORT("Application is trying to submit a D3D11 texture, which OpenComposite supports but is disabled in this build");
+ #endif
+
 #endif
 			break;
 		}
@@ -240,7 +249,13 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 
 			device->Release();
 #else
-			OOVR_ABORT("Application is trying to submit a D3D12 texture, which OpenComposite supports but is disabled in this build");
+
+ #ifdef __linux__
+           OOVR_ABORT("Application is trying to submit a D3D12 texture, this is likely a Steam Proton bug, please report it");
+ #else
+           OOVR_ABORT("Application is trying to submit a D3D12 texture, which OpenComposite supports but is disabled in this build");
+ #endif
+
 #endif
 			break;
 		}
@@ -623,10 +638,22 @@ void XrBackend::ClearSkyboxOverride()
  */
 bool XrBackend::GetFrameTiming(OOVR_Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
 {
-	// Zero everything except the size field
-	memset(reinterpret_cast<unsigned char*>(pTiming) + sizeof(pTiming->m_nSize), 0, pTiming->m_nSize - sizeof(pTiming->m_nSize));
+	// The struct grew over OpenVR versions, so write no more than the app's m_nSize says it has. A bad m_nSize crashed F1 23
+	// here: one bigger than the newest struct is taken as ours, which every game since IVRCompositor_018 has room for.
+	// The newest struct is padded to 8 bytes on Windows, which is also what Proton passes to a Linux build.
+	constexpr size_t newestSize = (sizeof(vr::Compositor_FrameTiming) + 7) & ~(size_t)7;
+	size_t size = pTiming->m_nSize;
+	if (size > newestSize) {
+		OOVR_LOG_ONCEF("GetFrameTiming: m_nSize %u is bigger than the newest OpenVR struct, using %u", pTiming->m_nSize,
+		    (uint32_t)sizeof(OOVR_Compositor_FrameTiming));
+		size = sizeof(OOVR_Compositor_FrameTiming);
+	}
 
-	if (pTiming->m_nSize >= sizeof(IVRCompositor_018::Compositor_FrameTiming)) {
+	// Zero everything except the size field
+	if (size > sizeof(pTiming->m_nSize))
+		memset(reinterpret_cast<unsigned char*>(pTiming) + sizeof(pTiming->m_nSize), 0, size - sizeof(pTiming->m_nSize));
+
+	if (size >= sizeof(IVRCompositor_018::Compositor_FrameTiming)) {
 		pTiming->m_flSystemTimeInSeconds = frameSubmitTimeUs;
 		pTiming->m_nFrameIndex = nFrameIndex;
 
@@ -767,7 +794,8 @@ void XrBackend::PumpEvents()
 				// End the session. The session is still valid and we can still query some information
 				// from it, but we're not allowed to submit frames anymore. This is done when the engagement
 				// sensor detects the user has taken off the headset, for example.
-				OOVR_FAILED_XR_ABORT(xrEndSession(xr_session.get()));
+				if (sessionActive) // could be the case if we missed XR_SESSION_STATE_READY for some reason
+					OOVR_FAILED_XR_ABORT(xrEndSession(xr_session.get()));
 				sessionActive = false;
 				renderingFrame = false;
 				break;
@@ -894,7 +922,7 @@ void XrBackend::UpdateInteractionProfile()
 {
 	struct hand_info {
 		const char* pathstr;
-		std::unique_ptr<XrController>& controller;
+		std::shared_ptr<XrController>& controller;
 		const XrController::XrControllerType hand;
 	};
 
@@ -962,9 +990,10 @@ void XrBackend::UpdateInteractionProfile()
 
 void XrBackend::CreateGenericTrackers()
 {
-
 	if (!xr_ext->xrMndxXdevSpace_Available())
 		return;
+
+	std::unique_lock lock(generic_trackers_mutex);
 
 	OOVR_LOGF("Checking for generic trackers...");
 
@@ -976,7 +1005,7 @@ void XrBackend::CreateGenericTrackers()
 	std::vector<XrXDevIdMNDX> generic_tracker_ids(MAX_GENERIC_TRACKERS);
 	InteractionProfile* profile = InteractionProfile::GetProfileByPath("/interaction_profiles/htc/vive_tracker_htcx");
 
-	uint32_t _generic_tracker_count_unused = 0;
+	uint32_t xdev_count = 0;
 
 	XrCreateXDevListInfoMNDX create_info = {
 		.type = XR_TYPE_CREATE_XDEV_LIST_INFO_MNDX
@@ -991,29 +1020,47 @@ void XrBackend::CreateGenericTrackers()
 	};
 
 	OOVR_FAILED_XR_ABORT(xr_ext->xrCreateXDevListMNDX(xr_session.get(), &create_info, &generic_tracker_list));
-	OOVR_FAILED_XR_ABORT(xr_ext->xrEnumerateXDevsMNDX(generic_tracker_list, MAX_GENERIC_TRACKERS, &_generic_tracker_count_unused, generic_tracker_ids.data()));
+	OOVR_FAILED_XR_ABORT(xr_ext->xrEnumerateXDevsMNDX(generic_tracker_list, MAX_GENERIC_TRACKERS, &xdev_count, generic_tracker_ids.data()));
+
+	std::vector<std::string> forced_tracker_serials{};
+	{
+		auto forced_tracker_serials_str = GetEnv("OPENCOMPOSITE_TRACKER_SERIALS");
+		if (!forced_tracker_serials_str.empty()) {
+			size_t separator_pos{ std::string::npos };
+			while ((separator_pos = forced_tracker_serials_str.find(';')) != std::string::npos) {
+				auto serial = forced_tracker_serials_str.substr(0, separator_pos);
+				forced_tracker_serials.push_back(serial);
+				forced_tracker_serials_str.erase(0, separator_pos + 1);
+			}
+			if (!forced_tracker_serials_str.empty()) {
+				forced_tracker_serials.push_back(forced_tracker_serials_str);
+			}
+		}
+	}
 
 	// filter out non-tracker devices
 	std::erase_if(generic_tracker_ids, [&](XrXDevIdMNDX id) {
-		if (_generic_tracker_count_unused == 0) {
+		if (xdev_count == 0) {
 			return true;
 		}
 		cur_info.id = id;
 
 		OOVR_FAILED_XR_ABORT(xr_ext->xrGetXDevPropertiesMNDX(generic_tracker_list, &cur_info, &cur_properties));
 
-		_generic_tracker_count_unused--;
+		xdev_count--;
 
 		std::string name = cur_properties.name;
+		std::string serial = cur_properties.serial;
 
 		if (!cur_properties.canCreateSpace)
 			return true;
 
-		if (name.find("Tracker") == std::string::npos) {
-			return true;
-		}
+		OOVR_LOGF("Found usable xdev '%s', serial '%s'", name.c_str(), serial.c_str());
 
-		return false;
+		if (forced_tracker_serials.size() > 0 && std::find(forced_tracker_serials.cbegin(), forced_tracker_serials.cend(), serial) != forced_tracker_serials.cend()) {
+			return false;
+		}
+		return name.find("Tracker") == std::string::npos;
 	});
 
 	OOVR_LOGF("Found %zu generic trackers", generic_tracker_ids.size());
@@ -1068,6 +1115,7 @@ void XrBackend::CreateGenericTrackers()
 void XrBackend::MaybeRestartForInputs()
 {
 	// if we haven't attached any actions to the session (infoSet or game actions), no need to restart
+	const std::lock_guard<std::mutex> lock(inputRestartMutex);
 	BaseInput* input = GetUnsafeBaseInput();
 	if (infoSet == XR_NULL_HANDLE && (!input || !input->AreActionsLoaded()))
 		return;
@@ -1081,6 +1129,7 @@ void XrBackend::QueryForInteractionProfile()
 {
 	// Note that we want to avoid using BaseInput here because it would allow for games to call GetControllerState before rendering
 	// and then we'd have to recreate the session twice, once for the input state and once for when the game submits a frame
+	const std::lock_guard<std::mutex> lock(inputRestartMutex);
 	if (subactionPaths[0] == XR_NULL_PATH) {
 		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, "/user/hand/left", &subactionPaths[0]));
 		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, "/user/hand/right", &subactionPaths[1]));

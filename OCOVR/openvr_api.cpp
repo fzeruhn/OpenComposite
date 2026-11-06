@@ -9,6 +9,7 @@
 #include "generated/GVRClientCore.gen.h"
 #include "generated/version.h"
 
+#include "Misc/backtrace.h"
 #include "logging.h"
 #include "steamvr_abi.h"
 #include <functional>
@@ -86,6 +87,14 @@ VR_INTERFACE void* VR_CALLTYPE VR_GetGenericInterface(const char* interfaceVersi
 		return interfaces[interfaceVersion].get();
 	}
 
+	// Half-Life: Alyx (2025 builds) also asks for SteamVR's internal IPC resource manager; it carries on without one,
+	// as it does under XRizer, which has none either
+	if (!strncmp("IVRIPCResourceManagerClient_", interfaceVersion, strlen("IVRIPCResourceManagerClient_"))) {
+		if (error)
+			*error = VRInitError_Init_InterfaceNotFound;
+		return NULL;
+	}
+
 	// Hack for Half-Life: Alyx
 	// This is an interface that is enabled or not by what seems to be a compile-time
 	// switch inside SteamVR, disabled on the public build I was looking at.
@@ -133,6 +142,14 @@ VR_INTERFACE void* VR_CALLTYPE VR_GetGenericInterface(const char* interfaceVersi
 	OOVR_MESSAGE(interfaceVersion, "Missing interface");
 	ERR("unknown/unsupported interface " + string(interfaceVersion));
 #undef INTERFACE
+}
+
+// Valve's openvr_api.dll also exports this accessor, and Half-Life: Alyx's vr.dll imports it
+// (VR_GetGenericInterface caches the instance, and frees it at shutdown, so don't hold on to it here)
+VR_INTERFACE void* VR_CALLTYPE VRControlPanel()
+{
+	EVRInitError error = VRInitError_None;
+	return VR_GetGenericInterface("IVRControlPanel_006", &error);
 }
 
 VR_INTERFACE uint32_t VR_CALLTYPE VR_GetInitToken()
@@ -225,6 +242,8 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 	if (peError) {
 		*peError = VRInitError_None;
 	}
+
+	oovr_install_crash_handler();
 
 	if (eApplicationType == VRApplication_Bootstrapper) {
 #ifdef _WIN32

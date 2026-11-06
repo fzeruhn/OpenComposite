@@ -18,6 +18,7 @@
 #include "Drivers/Backend.h"
 #include "InputData.h"
 #include "LegacyControllerActions.h"
+#include "convert.h"
 
 /**
  * Defines an interaction profile, as specified by 6.4 in the OpenXR spec.
@@ -29,7 +30,7 @@ private:
 	// types of properties that can be retrieved
 	using property_types = std::variant<
 	    bool, float, int32_t, uint64_t, vr::HmdMatrix34_t,
-	    const std::vector<uint32_t>, // array
+	    std::vector<uint32_t>, // array
 	    std::string // string
 	    >;
 
@@ -118,6 +119,11 @@ public:
 	virtual std::optional<const char*> GetOpenVRName() const = 0;
 
 	/**
+	 * Returns the skeletal fidelity for the controller type.
+	 */
+	virtual std::optional<vr::EVRSkeletalTrackingLevel> GetOpenVRTrackinglevel() const = 0;
+
+	/**
 	 * Whether the profile supports bindings or not.
 	 */
 	virtual bool CanHaveBindings() const { return true; }
@@ -150,6 +156,13 @@ public:
 	 * does not provide anything.
 	 */
 	std::optional<glm::mat4> GetComponentTransform(ITrackedDevice::TrackedDeviceType hand, const std::string& name) const;
+
+	/**
+	 * Get the specified reference pose of a controller (in parent space).
+	 *
+	 * These will unfortunately need to be specified for each controller, but the Quest poses are used as a good-enough fallback.
+	 */
+	std::optional<std::array<vr::VRBoneTransform_t, 31>> GetSkeletalReferencePose(ITrackedDevice::TrackedDeviceType hand, int) const;
 
 	/**
 	 * Build a list of suggested bindings for attaching the legacy actions to this profile.
@@ -200,13 +213,6 @@ protected:
 	 */
 	virtual const LegacyBindings* GetLegacyBindings(const std::string& handPath) const = 0;
 
-	/*
-	 * Returns mat4x4 produced from translating, rotating and scaling to 1.0
-	 *  identity matrix. Origin and rotate_xyz are 1:1 from SteamVR rendermodel bindings from
-	 *  SteamVR/drivers/xyzdriver/resources/rendermodels/xyzmodel/xyzmodel.json
-	 */
-	glm::mat4x4 GetMat4x4FromOriginAndEulerRotations(glm::vec3 origin, glm::vec3 rotate_xyz) const;
-
 	// The set of valid input paths for an interaction profile. An interaction profile should fill this in its constructor.
 	std::unordered_set<std::string> validInputPaths;
 
@@ -244,4 +250,7 @@ protected:
 	// Grip transforms for left and right hand
 	glm::mat4 leftHandGripTransform = glm::identity<glm::mat4>();
 	glm::mat4 rightHandGripTransform = glm::identity<glm::mat4>();
+
+	// Reference poses for each hand
+	std::unordered_map<int, std::array<vr::VRBoneTransform_t, 31>> leftHandPoses, rightHandPoses;
 };

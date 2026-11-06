@@ -52,6 +52,8 @@ public:
 	} compositionLayer;
 
 	std::weak_ptr<Compositor> compositor;
+	float distance;
+	uint32_t sortOrder = 0;
 
 	// Transform
 	VROverlayTransformType transformType = VROverlayTransform_Absolute;
@@ -62,7 +64,7 @@ public:
 		} deviceRelative;
 	} transformData;
 
-	MfMatrix4f overlayTransform{
+	glm::mat4 overlayTransform{
 		1.0f, 0.0f, 0.0f, 0.0f,
 		0.0f, 1.0f, 0.0f, 0.0f,
 		0.0f, 0.0f, 1.0f, -1.01f,
@@ -72,6 +74,25 @@ public:
 	OverlayData(string key, string name)
 	    : key(key), name(name)
 	{
+	}
+
+	// The overlay's transform in the tracking space, stored like overlayTransform (rows first: translation in [i][3])
+	bool ComputeOverlayTransform(vr::ETrackingUniverseOrigin trackingSpace, glm::mat4& out)
+	{
+		out = overlayTransform;
+		if (transformType == VROverlayTransform_TrackedDeviceRelative) {
+			std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(transformData.deviceRelative.device);
+			if (!dev)
+				return false;
+
+			TrackedDevicePose_t pose = {};
+			dev->GetPose(trackingSpace, &pose, ETrackingStateType::TrackingStateType_Rendering);
+			if (!pose.bPoseIsValid)
+				return false;
+			// S2G_m34 makes ordinary glm (column-first) matrices, so transpose the product to overlayTransform's layout
+			out = glm::transpose(S2G_m34(pose.mDeviceToAbsoluteTracking) * S2G_m34(transformData.deviceRelative.offset));
+		}
+		return true;
 	}
 };
 
@@ -99,6 +120,41 @@ BaseOverlay::~BaseOverlay()
 	}
 }
 
+/**
+ * Splits an overlay transform, stored like OverlayData::overlayTransform (rows first), into a quad's orientation and
+ * the scale of its X and Y axes. A quad only uses its X and Y axes, so Z is made from them: that way every texel lands
+ * where the transform puts it, mirrored or not (a mirrored overlay just faces the other way). Returns false if X or Y
+ * is zero or they're parallel (a degenerate transform, such as one built from an untracked device's empty pose).
+ */
+static bool QuatAndScaleFromMatrix(glm::quat* orientation, const glm::mat4& mat, float* xscale, float* yscale)
+{
+	// The overlay's X and Y axes in the tracking space are the first two columns of the 3x3 part
+	glm::vec3 x = glm::vec3(mat[0][0], mat[1][0], mat[2][0]);
+	glm::vec3 y = glm::vec3(mat[0][1], mat[1][1], mat[2][1]);
+	*xscale = glm::length(x);
+	*yscale = glm::length(y);
+	if (!(*xscale > 1e-6f) || !(*yscale > 1e-6f)) // also catches NaN
+		return false;
+	x /= *xscale;
+	y /= *yscale;
+
+	glm::vec3 z = glm::cross(x, y);
+	const float zLength = glm::length(z);
+	if (!(zLength > 1e-6f))
+		return false;
+	z /= zLength;
+	y = glm::cross(z, x); // square off any shear
+
+	// glm::mat3 takes columns
+	*orientation = glm::normalize(glm::quat_cast(glm::mat3(x, y, z)));
+	return true;
+}
+
+static bool IsFinite(const glm::vec3& v)
+{
+	return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
 int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompositionLayerBaseHeader const* const*& layers)
 {
 	// Note that at least on MSVC, this shouldn't be doing any memory allocations
@@ -122,6 +178,22 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			HideKeyboard();
 	}
 
+	// sort overlays by distance starting with this index
+	size_t firstOverlay = layerHeaders.size();
+	// find HMD position to sort overlays by distance
+	TrackedDevicePose_t hmdPose = {};
+	vr::ETrackingUniverseOrigin trackingSpace = GetUnsafeBaseCompositor()->GetTrackingSpace();
+	glm::vec3 hmdPosition = { 0.0f, 0.0f, 0.0f };
+	std::shared_ptr<ITrackedDevice> hmd = BackendManager::Instance().GetDevice(vr::k_unTrackedDeviceIndex_Hmd);
+	if (hmd) {
+		hmd->GetPose(trackingSpace, &hmdPose, ETrackingStateType::TrackingStateType_Rendering);
+		if (hmdPose.bPoseIsValid) {
+			const auto& hmdM = hmdPose.mDeviceToAbsoluteTracking.m;
+			hmdPosition = { hmdM[0][3], hmdM[1][3], hmdM[2][3] };
+		}
+	}
+	layerOverlays.clear();
+
 	for (const auto& kv : overlays) {
 		if (kv.second) {
 			OverlayData& overlay = *kv.second;
@@ -140,43 +212,66 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			}
 
 			const XrRect2Di& srcSize = overlay.compositionLayer.quad.subImage.imageRect;
-			if (srcSize.extent.height <= 8 && srcSize.extent.width <= 8) {
+			// (a flipped texture is drawn with a negative height)
+			const int32_t srcHeight = std::abs(srcSize.extent.height);
+			if (srcHeight <= 8 && srcSize.extent.width <= 8) {
 				// Hack for F1 22 which creates a low res texture to fade between scenes
 				// but ends up just leaving a black square that takes up half the screen.
 				continue;
 			}
 
+			// Skip overlay if we can't compute it's transform
+			glm::mat4 transform = glm::mat4(0.0f);
+			if (!overlay.ComputeOverlayTransform(trackingSpace, transform)) {
+				continue;
+			}
+
+			// Calculate the texture's aspect ratio
+			const float aspect = srcHeight > 0 ? (float)srcSize.extent.width / (float)srcHeight : 1.0f;
+			// ... and use that to set the size of the overlay, as it will appear to the user
+			// Note we shouldn't do this when setting the texture, as the user may change the width of
+			//  the overlay without changing the texture.
+			float xscale, yscale;
+			glm::quat orientation;
+			const glm::vec3 position = { transform[0][3], transform[1][3], transform[2][3] };
+			if (!QuatAndScaleFromMatrix(&orientation, transform, &xscale, &yscale) || !IsFinite(position))
+				continue;
+
 			if (overlay.compositionLayer.base.type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR) {
-				const float scale_x = glm::length(glm::vec3(overlay.overlayTransform[0][0], overlay.overlayTransform[1][0], overlay.overlayTransform[2][0]));
+				const float scale_x = glm::length(glm::vec3(transform[0][0], transform[1][0], transform[2][0]));
 				const float radius = scale_x / (2.0 * M_PI * overlay.curvature);
 				const float angle = 2.0 * (scale_x / (2.0 * radius));
 
-				const glm::quat quat = glm::quat_cast(overlay.overlayTransform);
-				const glm::vec3 xlation = glm::vec3(overlay.overlayTransform[0][3], overlay.overlayTransform[1][3], overlay.overlayTransform[2][3]);
-
-				const glm::vec3 center_point = xlation + glm::conjugate(quat) * glm::vec3(0.0, 0.0, 1.0) * quat * radius;
+				const glm::vec3 center_point = position + glm::conjugate(orientation) * glm::vec3(0.0, 0.0, 1.0) * orientation * radius;
 
 				overlay.compositionLayer.cylinder.radius = radius;
 				overlay.compositionLayer.cylinder.centralAngle = angle;
 				overlay.compositionLayer.cylinder.aspectRatio = (float)srcSize.extent.height / (float)srcSize.extent.width;
-				overlay.compositionLayer.cylinder.pose = { { quat.x, quat.y, quat.z, quat.w },
+				overlay.compositionLayer.cylinder.pose = { { orientation.x, orientation.y, orientation.z, orientation.w },
 					{ center_point.x, center_point.y, center_point.z } };
 			} else {
-				const float aspect = srcSize.extent.height > 0 ? (float)srcSize.extent.width / (float)srcSize.extent.height : 1.0f;
-				// Calculate the texture's aspect ratio
-				// ... and use that to set the size of the overlay, as it will appear to the user
-				// Note we shouldn't do this when setting the texture, as the user may change the width of
-				//  the overlay without changing the texture.
-				overlay.compositionLayer.quad.size.width = overlay.widthMeters * overlay.overlayTransform[0][0];
-				overlay.compositionLayer.quad.size.height = overlay.widthMeters * overlay.overlayTransform[1][1] / aspect;
-
-				const glm::quat quat = glm::quat_cast(overlay.overlayTransform);
-				// Finally, add it to the list of layers to be sent to LibOVR
-				overlay.compositionLayer.quad.pose = { { quat.x, quat.y, quat.z, quat.w },
-					{ overlay.overlayTransform[0][3], overlay.overlayTransform[1][3], overlay.overlayTransform[2][3] } };
+				overlay.compositionLayer.quad.pose.position = G2X_v3f(position);
+				overlay.compositionLayer.quad.pose.orientation = { orientation.x, orientation.y, orientation.z, orientation.w };
+				overlay.compositionLayer.quad.size.width = overlay.widthMeters * xscale;
+				overlay.compositionLayer.quad.size.height = overlay.widthMeters / aspect * yscale;
 			}
+			// The transform is in the current tracking space, which the app may have changed since it set the texture
+			overlay.compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
 
-			layerHeaders.push_back(&overlay.compositionLayer.base);
+			overlay.distance = glm::distance(position, hmdPosition);
+			size_t i;
+
+			// Sort the overlays: later layers are drawn on top, so by sort order, then the farthest first
+			for (i = firstOverlay; i < layerHeaders.size(); i++) {
+				const OverlayData* d = layerOverlays[i - firstOverlay];
+				if (d->sortOrder > overlay.sortOrder)
+					break;
+				if (d->sortOrder == overlay.sortOrder && d->distance < overlay.distance)
+					break;
+			}
+			// Finally, add it to the list of layers to be sent to LibOVR
+			layerHeaders.insert(layerHeaders.begin() + i, &overlay.compositionLayer.base);
+			layerOverlays.insert(layerOverlays.begin() + (i - firstOverlay), &overlay);
 		}
 	}
 
@@ -451,12 +546,15 @@ EVROverlayError BaseOverlay::GetOverlayTexelAspect(VROverlayHandle_t ulOverlayHa
 }
 EVROverlayError BaseOverlay::SetOverlaySortOrder(VROverlayHandle_t ulOverlayHandle, uint32_t unSortOrder)
 {
-	// TODO
+	USEH();
+	overlay->sortOrder = unSortOrder;
 	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlaySortOrder(VROverlayHandle_t ulOverlayHandle, uint32_t* punSortOrder)
 {
-	STUBBED();
+	USEH();
+	*punSortOrder = overlay->sortOrder;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayWidthInMeters(VROverlayHandle_t ulOverlayHandle, float fWidthInMeters)
 {
@@ -718,7 +816,62 @@ EVROverlayError BaseOverlay::SetOverlayMouseScale(VROverlayHandle_t ulOverlayHan
 }
 bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, const OOVR_VROverlayIntersectionParams_t* pParams, OOVR_VROverlayIntersectionResults_t* pResults)
 {
-	STUBBED();
+	USEHB();
+
+	// first, get transform
+	glm::mat4 transform = glm::mat4(0.0f);
+	if(!overlay->ComputeOverlayTransform(pParams->eOrigin, transform))
+		return false;
+	// The overlay's axes, with Z made from X and Y as for drawing it (see QuatAndScaleFromMatrix)
+	const glm::vec3 xAxis = glm::vec3(transform[0][0], transform[1][0], transform[2][0]);
+	const glm::vec3 yAxis = glm::vec3(transform[0][1], transform[1][1], transform[2][1]);
+	const glm::vec3 position = glm::vec3(transform[0][3], transform[1][3], transform[2][3]);
+	glm::quat orientation;
+	float xscale, yscale;
+	if (!QuatAndScaleFromMatrix(&orientation, transform, &xscale, &yscale) || !IsFinite(position))
+		return false; // not drawn either
+	const glm::vec3 zAxis = orientation * glm::vec3(0.0f, 0.0f, 1.0f);
+	// (glm::mat3 takes columns; the maths below multiplies row vectors by the basis, so it wants the transpose)
+	glm::mat3 basis = glm::transpose(glm::mat3(xAxis, yAxis, zAxis));
+	// world space -> overlay space
+	glm::mat3 invertedBasis = glm::inverse(basis);
+
+	// collect the data
+	auto& s = pParams->vSource.v;
+	glm::vec3 src = { s[0], s[1], s[2] };
+	auto& d = pParams->vDirection.v;
+	glm::vec3 dir = { d[0], d[1], d[2] };
+
+	// move src to overlay space
+	glm::vec3 src_proj = (src - position) * invertedBasis;
+	if (src_proj.z < 0)
+		return false;
+	glm::vec3 dir_proj = dir * invertedBasis;
+
+	// only intersect with forward ray, not one nearly parallel to the overlay (its angle measured in the world, as
+	// the overlay's scale would skew it in overlay space; zAxis is a unit normal, so this is also dir_proj.z)
+	if (!(glm::dot(dir, zAxis) < -0.01f * glm::length(dir)))
+		return false;
+
+	// assign z to zero to fing intersection
+	glm::vec3 dst_proj = src_proj - dir_proj * (src_proj.z / dir_proj.z);
+
+	// convert it back
+	glm::vec3 dst = dst_proj * basis + position;
+	glm::vec3 n = glm::normalize(glm::vec3{ 0.0f, 0.0f, 1.0f } * basis);
+
+	// build result
+	pResults->vNormal = { n[0], n[1], n[2] };
+	pResults->vPoint = { dst[0], dst[1], dst[2] };
+	// clang-format off
+	// The overlay is widthMeters wide, and as tall as its texture's aspect ratio makes it
+	const XrExtent2Di& extent = overlay->compositionLayer.quad.subImage.imageRect.extent;
+	const float heightMeters = extent.width > 0 && extent.height != 0 ? overlay->widthMeters * std::abs(extent.height) / extent.width : overlay->widthMeters;
+	pResults->vUVs = { dst_proj.x / (float)overlay->widthMeters + 0.5f,
+	                   dst_proj.y / heightMeters + 0.5f };
+	// clang-format on
+	pResults->fDistance = glm::length(dst - src);
+	return pResults->vUVs.v[0] > 0 && pResults->vUVs.v[0] < 1 && pResults->vUVs.v[1] > 0 && pResults->vUVs.v[1] < 1;
 }
 bool BaseOverlay::HandleControllerOverlayInteractionAsMouse(VROverlayHandle_t ulOverlayHandle, TrackedDeviceIndex_t unControllerDeviceIndex)
 {
@@ -777,14 +930,14 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 	USEH();
 	overlay->texture = *pTexture;
 
-	BackendManager::Instance().OnOverlayTexture(pTexture);
+	BackendManager::Instance().OnOverlayTexture(&overlay->texture);
 
 	if (!BackendManager::Instance().IsGraphicsConfigured())
 		return VROverlayError_None;
 
 	std::shared_ptr<Compositor> compositor = overlay->compositor.lock();
 	if (!compositor) {
-		compositor = GetUnsafeBaseCompositor()->CreateCompositorAPI(pTexture);
+		compositor = GetUnsafeBaseCompositor()->CreateCompositorAPI(&overlay->texture);
 		overlay->compositor = std::weak_ptr(compositor);
 		auto* backend = (XrBackend*)BackendManager::Instance().GetBackendInstance();
 		backend->RegisterOverlayCompositor(compositor);
@@ -1023,4 +1176,17 @@ EVROverlayError BaseOverlay::GetOverlayPreCurvePitch(vr::VROverlayHandle_t ulOve
 EVROverlayError BaseOverlay::WaitFrameSync(uint32_t nTimeoutMs)
 {
 	STUBBED();
+}
+
+EVROverlayError BaseOverlay::CreateSubviewOverlay(VROverlayHandle_t parentOverlayHandle, const char* pchSubviewOverlayKey,
+    const char* pchSubviewOverlayName, VROverlayHandle_t* pSubviewOverlayHandle)
+{
+	if (pSubviewOverlayHandle)
+		*pSubviewOverlayHandle = k_ulOverlayHandleInvalid;
+	return VROverlayError_RequestFailed;
+}
+
+EVROverlayError BaseOverlay::SetSubviewPosition(VROverlayHandle_t ulOverlayHandle, float fX, float fY)
+{
+	return VROverlayError_RequestFailed;
 }

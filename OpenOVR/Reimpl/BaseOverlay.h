@@ -177,6 +177,8 @@ private:
 
 	// List of layers, with the first being reserved for the main scene
 	std::vector<XrCompositionLayerBaseHeader*> layerHeaders;
+	// The overlays behind the overlay layers in layerHeaders, in the same order
+	std::vector<OverlayData*> layerOverlays;
 
 	// Virtual Keyboard
 	std::unique_ptr<VRKeyboard> keyboard;
@@ -305,6 +307,11 @@ public:
 	/** Use to draw overlay as a curved surface. Curvature is a percentage from (0..1] where 1 is a fully closed cylinder.
 	 * For a specific radius, curvature can be computed as: overlay.width / (2 PI r). */
 	vr::EVROverlayError SetOverlayCurvature(vr::VROverlayHandle_t ulOverlayHandle, float fCurvature);
+
+	/** Subview overlays (OpenVR 2.12): an overlay drawn inside a part of its parent. */
+	vr::EVROverlayError CreateSubviewOverlay(vr::VROverlayHandle_t parentOverlayHandle, const char* pchSubviewOverlayKey,
+	    const char* pchSubviewOverlayName, vr::VROverlayHandle_t* pSubviewOverlayHandle);
+	vr::EVROverlayError SetSubviewPosition(vr::VROverlayHandle_t ulOverlayHandle, float fX, float fY);
 
 	/** Returns the curvature of the overlay as a percentage from (0..1] where 1 is a fully closed cylinder. */
 	vr::EVROverlayError GetOverlayCurvature(vr::VROverlayHandle_t ulOverlayHandle, float* pfCurvature);
