@@ -549,6 +549,11 @@ private:
 		// If custom thresholds are used for click action, which needs to be read as float (useful for Index touchpads)
 		bool customClickThresholds = false;
 
+		// Those thresholds, kept here rather than in the action's own, which its other bindings use.
+		// TODO: it's unclear what the actual threshold values used by SteamVR are, and they're not configurable in bindings json
+		static constexpr float clickActivateThreshold = 0.33f;
+		static constexpr float clickDeactivateThreshold = 0.2f;
+
 		// Triggers the haptic action in the current action set once this becomes clicked (useful for Index touchpads)
 		bool triggerHapticOnClick = false;
 	};
