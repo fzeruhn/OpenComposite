@@ -4133,7 +4133,7 @@ static void Adam7_getpassvalues(unsigned passw[7], unsigned passh[7], size_t fil
     filter_passstart[i + 1] = filter_passstart[i]
                             + ((passw[i] && passh[i]) ? passh[i] * (1 + (passw[i] * bpp + 7) / 8) : 0);
     /*bits padded if needed to fill full byte at end of each scanline*/
-    padded_passstart[i + 1] = padded_passstart[i] + passh[i] * ((passw[i] * bpp + 7) / 8);
+    padded_passstart[i + 1] = padded_passstart[i] + (size_t)passh[i] * ((passw[i] * bpp + 7) / 8);
     /*only padded at end of reduced image*/
     passstart[i + 1] = passstart[i] + (passh[i] * passw[i] * bpp + 7) / 8;
   }
