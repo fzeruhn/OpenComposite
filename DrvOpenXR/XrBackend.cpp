@@ -154,8 +154,11 @@ void XrBackend::GetDeviceToAbsoluteTrackingPose(
 	}
 }
 
-static void find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev, VkQueue desired_queue, uint32_t& out_queueFamilyIndex, uint32_t& out_queueIndex)
+static void find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev, uint32_t appFamilyIndex, VkQueue desired_queue, uint32_t& out_queueFamilyIndex, uint32_t& out_queueIndex)
 {
+	if (desired_queue == VK_NULL_HANDLE)
+		OOVR_ABORT("The OpenVR app gave no VkQueue with its texture");
+
 	uint32_t queue_family_count;
 	vkGetPhysicalDeviceQueueFamilyProperties(pdev, &queue_family_count, NULL);
 
@@ -163,17 +166,28 @@ static void find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev,
 	vkGetPhysicalDeviceQueueFamilyProperties(pdev, &queue_family_count, hi.data());
 	OOVR_LOGF("number of queue families is %d", queue_family_count);
 
-	for (uint32_t i = 0; i < queue_family_count; i++) {
+	auto searchFamily = [&](uint32_t i) {
 		OOVR_LOGF("queue family %d has %d queues", i, hi[i].queueCount);
 		for (uint32_t j = 0; j < hi[i].queueCount; j++) {
-			VkQueue tmp;
+			VkQueue tmp = VK_NULL_HANDLE;
 			vkGetDeviceQueue(dev, i, j, &tmp);
 			if (tmp == desired_queue) {
 				OOVR_LOGF("Got desired queue: %d %d", i, j);
 				out_queueFamilyIndex = i;
 				out_queueIndex = j;
-				return;
+				return true;
 			}
+		}
+		return false;
+	};
+
+	// Asking for queues of a family the device wasn't created with is invalid, so start with the app's family
+	if (appFamilyIndex < queue_family_count && searchFamily(appFamilyIndex))
+		return;
+	for (uint32_t i = 0; i < queue_family_count; i++) {
+		if (i != appFamilyIndex && searchFamily(i)) {
+			OOVR_LOGF("WARNING: The OpenVR app's VkQueue is in queue family %u, not the %u it gave", i, appFamilyIndex);
+			return;
 		}
 	}
 	OOVR_ABORT("Couldn't find the queue family index/queue index of the queue that the OpenVR app gave us!"
@@ -328,6 +342,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			find_queue_family_and_queue_idx( //
 			    binding.device, //
 			    binding.physicalDevice, //
+			    vktex->m_nQueueFamilyIndex, //
 			    vktex->m_pQueue, //
 			    binding.queueFamilyIndex, //
 			    binding.queueIndex //
