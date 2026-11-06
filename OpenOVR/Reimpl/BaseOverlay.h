@@ -177,6 +177,8 @@ private:
 
 	// List of layers, with the first being reserved for the main scene
 	std::vector<XrCompositionLayerBaseHeader*> layerHeaders;
+	// The overlays behind the overlay layers in layerHeaders, in the same order
+	std::vector<OverlayData*> layerOverlays;
 
 	// Virtual Keyboard
 	std::unique_ptr<VRKeyboard> keyboard;
