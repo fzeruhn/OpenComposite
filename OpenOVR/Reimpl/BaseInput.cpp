@@ -454,7 +454,12 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			action.type = ActionType::Pose;
 		else if (type == "skeleton")
 			action.type = ActionType::Skeleton;
-		else
+		else if (type == "eyetracking") {
+			// OpenVR 2.15's eye tracking: there's no gaze to give (GetEyeTrackingData* report none), so leave the
+			// action out. Its handle still works, and bindings to it are skipped as for any action not in the manifest.
+			OOVR_LOGF("Skipping eye tracking action '%s'", action.fullName.c_str());
+			continue;
+		} else
 			OOVR_ABORTF("Invalid action type '%s' for action '%s'", type.c_str(), action.fullName.c_str());
 
 		if (actions.LookupItem(action.fullName) != nullptr)
