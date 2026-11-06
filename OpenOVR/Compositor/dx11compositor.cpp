@@ -11,10 +11,20 @@
 
 #pragma comment(lib, "d3dcompiler.lib")
 
+struct ShaderConstData {
+	float offsetX, offsetY;
+	float scaleX, scaleY;
+};
+
 constexpr char fs_shader_code[] = R"_(
-Texture2D shaderTexture : register(t0);
+Texture2DArray shaderTexture : register(t0);
 
 SamplerState SampleType : register(s0);
+
+cbuffer ConstData : register(b0) {
+	float2 offset;
+	float2 scale;
+};
 
 struct psIn {
 	float4 pos : SV_POSITION;
@@ -24,15 +34,17 @@ struct psIn {
 psIn vs_fs(uint vI : SV_VERTEXID)
 {
 	psIn output;
-    output.tex = float2(vI&1,vI>>1);
-    output.pos = float4((output.tex.x-0.5f)*2,-(output.tex.y-0.5f)*2,0,1);
-	output.tex.y = 1.0f - output.tex.y;
+	// offset and scale come from the submitted bounds: vMin > vMax inverts the image, and a uMin/uMax
+	// half picks one eye of a side-by-side texture.
+	float2 basePos = float2(vI&1,vI>>1);
+	output.tex = offset + basePos * scale;
+	output.pos = float4((basePos.x-0.5f)*2,-(basePos.y-0.5f)*2,0,1);
 	return output;
 }
 
 float4 ps_fs(psIn inputPS) : SV_TARGET
 {
-	float4 textureColor = shaderTexture.Sample(SampleType, inputPS.tex);
+	float4 textureColor = shaderTexture.Sample(SampleType, float3(inputPS.tex, 0));
 	return textureColor;
 })_";
 
@@ -129,6 +141,14 @@ DX11Compositor::DX11Compositor(ID3D11Texture2D* initial)
 
 	// Create the texture sampler state.
 	OOVR_FAILED_DX_ABORT(device->CreateSamplerState(&samplerDesc, &quad_sampleState));
+
+	// Create a constant buffer, to store the source area of the texture
+	D3D11_BUFFER_DESC constantBufferDesc = {};
+	constantBufferDesc.ByteWidth = sizeof(ShaderConstData);
+	constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	constantBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+	constantBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	OOVR_FAILED_DX_ABORT(device->CreateBuffer(&constantBufferDesc, nullptr, &constBuffer));
 }
 
 DX11Compositor::~DX11Compositor()
@@ -142,6 +162,9 @@ DX11Compositor::~DX11Compositor()
 		tex->Release();
 
 	resolvedMSAATextures.clear();
+
+	if (constBuffer)
+		constBuffer->Release();
 
 	context->Release();
 	device->Release();
@@ -325,11 +348,28 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	sourceRegion.front = 0;
 	sourceRegion.back = 1;
 
-	// Bounds describe an inverted image so copy texture using pixel shader inverting on copy
-	if (bounds && bounds->vMin > bounds->vMax && oovr_global_configuration.InvertUsingShaders() && !swapchain_rtvs.empty()) {
+	// Apparently SteamVR supports apps just sending array textures without specifying what's what.
+	const int arrayIndex = (srcDesc.ArraySize > 1 && eye.has_value()) ? static_cast<int>(*eye) : 0;
+
+	// Bounds describe an inverted image so copy texture using pixel shader inverting on copy.
+	// (Not for textures the shader can't read, multisampled or not bound as shader resources: they're copied as they are.)
+	if (bounds && bounds->vMin > bounds->vMax && oovr_global_configuration.InvertUsingShaders() && !swapchain_rtvs.empty()
+	    && srcDesc.SampleDesc.Count == 1 && (srcDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)) {
 		auto* src = (ID3D11Texture2D*)texture->handle;
 
-		OOVR_FAILED_DX_ABORT(device->CreateShaderResourceView(src, nullptr, &quad_texture_view));
+		// A typeless texture needs a typed view format, or CreateShaderResourceView fails with E_INVALIDARG: use the
+		// swapchain's, the sRGB or linear version of the texture's format. A one-slice array view reads this eye's
+		// slice of an array texture, and a plain texture's only slice.
+		DxgiFormatInfo info = {};
+		bool typeless = GetFormatInfo(srcDesc.Format, info) && srcDesc.Format == info.typeless;
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Format = typeless ? (DXGI_FORMAT)createInfo.format : srcDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+		srvDesc.Texture2DArray.MostDetailedMip = 0;
+		srvDesc.Texture2DArray.MipLevels = 1;
+		srvDesc.Texture2DArray.FirstArraySlice = arrayIndex;
+		srvDesc.Texture2DArray.ArraySize = 1;
+		OOVR_FAILED_DX_ABORT(device->CreateShaderResourceView(src, &srvDesc, &quad_texture_view));
 
 		float blend_factor[4] = { 1.f, 1.f, 1.f, 1.f };
 		context->OMSetBlendState(nullptr, nullptr, 0xffffffff);
@@ -350,25 +390,34 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		context->RSGetState(&pRSState);
 		context->RSSetState(nullptr);
 
-		D3D11_VIEWPORT viewport = CD3D11_VIEWPORT(src, swapchain_rtvs[currentIndex]);
+		// Draw over the whole swapchain image; the shader picks the source area from the bounds
+		D3D11_VIEWPORT viewport = CD3D11_VIEWPORT(imagesHandles[currentIndex].texture, swapchain_rtvs[currentIndex]);
 		context->RSSetViewports(1, &viewport);
-		D3D11_RECT rects[1];
-		rects[0].top = 0;
-		rects[0].left = 0;
-		rects[0].bottom = createInfo.height;
-		rects[0].right = createInfo.width;
-		context->RSSetScissorRects(1, rects);
+		context->RSSetScissorRects(0, nullptr);
 
 		// Set up for rendering
 		context->OMSetRenderTargets(1, &swapchain_rtvs[currentIndex], nullptr);
 		float clear_colour[4] = { 0.f, 0.f, 0.f, 0.f };
 		context->ClearRenderTargetView(swapchain_rtvs[currentIndex], clear_colour);
 
-		// Set the active shaders and constant buffers.
+		// Update the source region in the constant buffer
+		D3D11_MAPPED_SUBRESOURCE mappedConstData = {};
+		OOVR_FAILED_DX_ABORT(context->Map(constBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedConstData));
+		ShaderConstData* constData = (ShaderConstData*)mappedConstData.pData;
+		constData->offsetX = bounds->uMin;
+		constData->offsetY = bounds->vMin;
+		constData->scaleX = bounds->uMax - bounds->uMin;
+		constData->scaleY = bounds->vMax - bounds->vMin;
+		context->Unmap(constBuffer, 0);
+
+		// Set the active shaders and constant buffers, keeping the app's vertex constant buffer to put back
+		ID3D11Buffer* appConstBuffer = nullptr;
+		context->VSGetConstantBuffers(0, 1, &appConstBuffer);
 		context->PSSetShaderResources(0, 1, &quad_texture_view);
 		context->VSSetShader(fs_vshader, nullptr, 0);
 		context->PSSetShader(fs_pshader, nullptr, 0);
 		context->PSSetSamplers(0, 1, &quad_sampleState);
+		context->VSSetConstantBuffers(0, 1, &constBuffer);
 
 		// Set up the mesh's information
 		D3D11_PRIMITIVE_TOPOLOGY currTopology;
@@ -378,6 +427,10 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		context->IASetPrimitiveTopology(currTopology);
 		quad_texture_view->Release();
 
+		context->VSSetConstantBuffers(0, 1, &appConstBuffer);
+		if (appConstBuffer)
+			appConstBuffer->Release();
+
 		if (numViewPorts)
 			context->RSSetViewports(numViewPorts, viewports.data());
 		if (numScissors)
@@ -385,8 +438,6 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 
 		context->RSSetState(pRSState);
 	} else {
-		// Apparently SteamVR supports apps just sending array textures without specifying what's what.
-		const int arrayIndex = (srcDesc.ArraySize > 1 && eye.has_value()) ? static_cast<int>(*eye) : 0;
 		if (srcDesc.SampleDesc.Count > 1) {
 			D3D11_TEXTURE2D_DESC resDesc = srcDesc;
 			resDesc.SampleDesc.Count = 1;
