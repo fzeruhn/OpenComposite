@@ -180,6 +180,40 @@ static void find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev,
 	           "This is really odd and really shouldn't ever happen");
 }
 
+#ifdef SUPPORT_VK
+/**
+ * Whether other is the same GPU as runtimeDevice (a physical device of instance), seen through another VkInstance.
+ * Physical device handles differ between instances, so compare the GPU and driver's identity, and only when instance
+ * has no second device with that identity that it could be instead.
+ */
+static bool is_same_gpu(VkInstance instance, VkPhysicalDevice runtimeDevice, VkPhysicalDevice other)
+{
+	VkPhysicalDeviceProperties want, have;
+	vkGetPhysicalDeviceProperties(runtimeDevice, &want);
+	vkGetPhysicalDeviceProperties(other, &have);
+	if (want.vendorID != have.vendorID || want.deviceID != have.deviceID || want.driverVersion != have.driverVersion
+	    || memcmp(want.pipelineCacheUUID, have.pipelineCacheUUID, VK_UUID_SIZE) != 0)
+		return false;
+
+	uint32_t count = 0;
+	if (vkEnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS)
+		return false;
+	std::vector<VkPhysicalDevice> devices(count);
+	if (vkEnumeratePhysicalDevices(instance, &count, devices.data()) < 0)
+		return false;
+
+	int matching = 0;
+	for (uint32_t i = 0; i < count; i++) {
+		VkPhysicalDeviceProperties props;
+		vkGetPhysicalDeviceProperties(devices[i], &props);
+		if (props.vendorID == want.vendorID && props.deviceID == want.deviceID && props.driverVersion == want.driverVersion
+		    && memcmp(props.pipelineCacheUUID, want.pipelineCacheUUID, VK_UUID_SIZE) == 0)
+			matching++;
+	}
+	return matching == 1;
+}
+#endif
+
 /* Submitting Frames */
 void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 {
@@ -262,30 +296,33 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 		case vr::TextureType_Vulkan: {
 			const vr::VRVulkanTextureData_t* vktex = (vr::VRVulkanTextureData_t*)tex->handle;
 
-			VkPhysicalDevice xr_desire;
-			// Regardless of error checking, we have to call this or we get crazy validation errors.
-			xr_ext->xrGetVulkanGraphicsDeviceKHR(xr_instance, xr_system, vktex->m_pInstance, &xr_desire);
+			VkPhysicalDevice xr_desire = VK_NULL_HANDLE;
+			// We have to call this, or we get crazy validation errors
+			XrResult desireResult = xr_ext->xrGetVulkanGraphicsDeviceKHR(xr_instance, xr_system, vktex->m_pInstance, &xr_desire);
+			if (XR_FAILED(desireResult) || xr_desire == VK_NULL_HANDLE)
+				OOVR_ABORTF("xrGetVulkanGraphicsDeviceKHR failed for the OpenVR app's VkInstance: %d", desireResult);
 
-			if (xr_desire != vktex->m_pPhysicalDevice) {
-				// With one GPU they're the same device seen through different instances: No Man's Sky
-				// under Wine passes a physical device from another of its instances than m_pInstance.
-				uint32_t gpuCount = 0;
-				vkEnumeratePhysicalDevices(vktex->m_pInstance, &gpuCount, nullptr);
-				if (gpuCount != 1) {
+			// XR_KHR_vulkan_enable requires the binding's physical device to be the one the runtime returned (Monado
+			// checks). No Man's Sky under Wine passes a physical device from another of its instances than m_pInstance:
+			// if that's the same GPU, use the runtime's handle for it.
+			VkPhysicalDevice physicalDevice = vktex->m_pPhysicalDevice;
+			if (xr_desire != physicalDevice) {
+				if (physicalDevice == VK_NULL_HANDLE || !is_same_gpu(vktex->m_pInstance, xr_desire, physicalDevice)) {
 					OOVR_ABORTF("The VkPhysicalDevice that the OpenVR app (%p) used is different from the one that the OpenXR runtime used (%p)!\n"
 					            "This should never happen, except for on multi-gpu, in which case DRI_PRIME=1 should fix things on Linux.",
 					    (void*)vktex->m_pPhysicalDevice, (void*)xr_desire);
 				}
-				OOVR_LOGF("The OpenVR app's VkPhysicalDevice (%p) isn't the runtime's (%p) for its instance, but there's only one GPU: "
-				          "using the app's",
+				OOVR_LOGF("WARNING: The OpenVR app's VkPhysicalDevice (%p) isn't the runtime's (%p) for its instance, but it's the same GPU: "
+				          "using the runtime's",
 				    (void*)vktex->m_pPhysicalDevice, (void*)xr_desire);
+				physicalDevice = xr_desire;
 			}
 
 			XrGraphicsBindingVulkanKHR binding;
 			binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
 			binding.next = nullptr;
 			binding.instance = vktex->m_pInstance;
-			binding.physicalDevice = vktex->m_pPhysicalDevice;
+			binding.physicalDevice = physicalDevice;
 			binding.device = vktex->m_pDevice;
 
 			find_queue_family_and_queue_idx( //
