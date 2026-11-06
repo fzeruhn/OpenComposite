@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include <cfloat>
 #include <cmath>
 #include <openxr/openxr.h>
 #define BASE_IMPL
@@ -16,7 +15,6 @@
 #include <string>
 
 using glm::mat4;
-using glm::quat;
 using glm::vec3;
 
 using namespace vr;
@@ -74,6 +72,7 @@ public:
 	OverlayData(string key, string name)
 	    : key(key), name(name)
 	{
+		memset(&compositionLayer, 0, sizeof(compositionLayer));
 	}
 
 	// The overlay's transform in the tracking space, stored like overlayTransform (rows first: translation in [i][3])
@@ -119,6 +118,10 @@ BaseOverlay::~BaseOverlay()
 		}
 	}
 }
+
+// Overlays curved less than this are drawn flat: the bend is under a millimetre per metre of width, and the
+// cylinder's radius grows so large that it loses precision
+static constexpr float minOverlayCurvature = 1e-3f;
 
 /**
  * Splits an overlay transform, stored like OverlayData::overlayTransform (rows first), into a quad's orientation and
@@ -220,7 +223,7 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 				continue;
 			}
 
-			// Skip overlay if we can't compute it's transform
+			// Skip overlay if we can't compute its transform
 			glm::mat4 transform = glm::mat4(0.0f);
 			if (!overlay.ComputeOverlayTransform(trackingSpace, transform)) {
 				continue;
@@ -237,26 +240,31 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			if (!QuatAndScaleFromMatrix(&orientation, transform, &xscale, &yscale) || !IsFinite(position))
 				continue;
 
-			if (overlay.compositionLayer.base.type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR) {
-				const float scale_x = glm::length(glm::vec3(transform[0][0], transform[1][0], transform[2][0]));
-				const float radius = scale_x / (2.0 * M_PI * overlay.curvature);
-				const float angle = 2.0 * (scale_x / (2.0 * radius));
-
-				const glm::vec3 center_point = position + glm::conjugate(orientation) * glm::vec3(0.0, 0.0, 1.0) * orientation * radius;
-
-				overlay.compositionLayer.cylinder.radius = radius;
-				overlay.compositionLayer.cylinder.centralAngle = angle;
-				overlay.compositionLayer.cylinder.aspectRatio = (float)srcSize.extent.height / (float)srcSize.extent.width;
-				overlay.compositionLayer.cylinder.pose = { { orientation.x, orientation.y, orientation.z, orientation.w },
-					{ center_point.x, center_point.y, center_point.z } };
-			} else {
-				overlay.compositionLayer.quad.pose.position = G2X_v3f(position);
-				overlay.compositionLayer.quad.pose.orientation = { orientation.x, orientation.y, orientation.z, orientation.w };
-				overlay.compositionLayer.quad.size.width = overlay.widthMeters * xscale;
-				overlay.compositionLayer.quad.size.height = overlay.widthMeters / aspect * yscale;
-			}
+			const float width = overlay.widthMeters * xscale;
+			const float height = overlay.widthMeters / aspect * yscale;
 			// The transform is in the current tracking space, which the app may have changed since it set the texture
 			overlay.compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+
+			const bool curved = overlay.curvature >= minOverlayCurvature && xr_ext->CylinderKHR_Available()
+			    && std::isfinite(width) && std::isfinite(height) && width > 0 && height > 0;
+			if (curved) {
+				// OpenVR's curvature is the overlay's width over the cylinder's circumference (1 is a closed cylinder).
+				// An OpenXR cylinder's visible arc is centred on its -Z, so its centre is a radius in front of the overlay.
+				const float curvature = std::min(overlay.curvature, 1.0f);
+				const float radius = width / (glm::two_pi<float>() * curvature);
+				const glm::vec3 centre = position + orientation * glm::vec3(0.0f, 0.0f, radius);
+				overlay.compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
+				overlay.compositionLayer.cylinder.radius = radius;
+				// OpenXR wants it below 2π, which a float 2π rounds above
+				overlay.compositionLayer.cylinder.centralAngle = std::min(glm::two_pi<float>() * curvature, std::nextafter(glm::two_pi<float>(), 0.0f));
+				overlay.compositionLayer.cylinder.aspectRatio = width / height;
+				overlay.compositionLayer.cylinder.pose = { G2X_quat(orientation), G2X_v3f(centre) };
+			} else {
+				overlay.compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+				overlay.compositionLayer.quad.size.width = width;
+				overlay.compositionLayer.quad.size.height = height;
+				overlay.compositionLayer.quad.pose = { G2X_quat(orientation), G2X_v3f(position) };
+			}
 
 			overlay.distance = glm::distance(position, hmdPosition);
 			size_t i;
@@ -574,20 +582,12 @@ EVROverlayError BaseOverlay::GetOverlayWidthInMeters(VROverlayHandle_t ulOverlay
 }
 EVROverlayError BaseOverlay::SetOverlayCurvature(VROverlayHandle_t ulOverlayHandle, float fCurvature)
 {
-	if (!xr_ext->CylinderKHR_Available()) {
-		OOVR_LOGF("WARNING: Tried to set overlay curvature, but KHR_composition_layer_cylinder is not available.");
-		return VROverlayError_None;
-	}
-
 	USEH();
 
+	// _BuildLayers draws it as a cylinder where it can
 	overlay->curvature = fCurvature;
-
-	if (overlay->curvature > FLT_EPSILON) {
-		overlay->compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
-	} else {
-		overlay->compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-	}
+	if (fCurvature >= minOverlayCurvature && !xr_ext->CylinderKHR_Available())
+		OOVR_LOG_ONCE("WARNING: Tried to set overlay curvature, but XR_KHR_composition_layer_cylinder is not available");
 
 	return VROverlayError_None;
 }
@@ -944,7 +944,7 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 	}
 
 	compositor->LoadSubmitContext();
-	//                                                             Same for quad & cylinder
+	// (subImage is the same for quad and cylinder layers)
 	compositor->Invoke(&overlay->texture, &overlay->textureBounds, overlay->compositionLayer.quad.subImage);
 	compositor->ResetSubmitContext();
 
