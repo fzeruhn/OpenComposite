@@ -259,15 +259,9 @@ std::string BaseInput::Registry<T>::ShortenOrLookupName(const std::string& longN
 			longNames[fullName] = ret;
 			OOVR_LOGF("Shortened name %s to %s", fullName.c_str(), ret.c_str());
 		} else {
-			// name has already been shortened before - find the shortened version
-			auto iter2 = handlesByName.find(iter->second);
-
-			// if it's in the longNames map, it has to be in the handlesByName map
-			// otherwise something probably went wrong
-			OOVR_FALSE_ABORT(iter2 != handlesByName.end());
-
-			// return shortened name
-			return iter2->first;
+			// name has already been shortened before - return the shortened version. It may have no handle yet, if
+			// nothing was made with it: an action the manifest parser skips, or a binding's action not in the manifest.
+			return iter->second;
 		}
 	}
 	return ret;
