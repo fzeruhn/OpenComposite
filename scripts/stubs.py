@@ -26,6 +26,7 @@
 # interface, such as CVRSettings. This is a valid C++ file, but special macros (which expand to nothing
 # during preprocessing but are parsed by this script) can be used to control the stub generation.
 
+import io
 from pathlib import Path
 
 # Note: with the Python plugin for CLion, you may need to mark the scripts directory as a source root for
@@ -77,10 +78,24 @@ bases_header_fn = output_dir / "static_bases.gen.h"
 
 interfaces = [InterfaceSpec(cvr_dir, headers_dir, output_dir, i) for i in interfaces_list]
 
+
+def write_if_changed(path, content):
+    # The GVR headers aren't the build rule's outputs, so a rewrite would only show up in the next build,
+    # recompiling everything that includes them
+    try:
+        with open(path, newline='') as f:
+            if f.read() == content:
+                return
+    except FileNotFoundError:
+        pass
+    with open(path, "w", newline='\n') as f:
+        f.write(content)
+
+
 for iface in interfaces:
-    header_filename = f"GVR{iface.name}.gen.h"
-    header_path = output_dir / header_filename
-    codegen.write_header(header_path, iface)
+    header = io.StringIO()
+    codegen.write_header(header, iface)
+    write_if_changed(output_dir / f"GVR{iface.name}.gen.h", header.getvalue())
 
 # Write out the stub file
 # This contains all the definitions for our version-specific classes, aka stubs

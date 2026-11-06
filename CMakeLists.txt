@@ -568,6 +568,8 @@ file(GLOB openvr-headers CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE
 
 # glob for stub generator libraries
 file(GLOB stub-deps CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE_DIR}/scripts/stubs/*)
+# The generator skips the methods these implement by hand
+file(GLOB stub-impls CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE_DIR}/OpenOVR/Reimpl/CVR*.cpp)
 
 # Command for running header splitting script
 add_custom_command(
@@ -581,7 +583,7 @@ add_custom_command(
 add_custom_command(
 	OUTPUT ${GENERATED_DIR}/stubs.gen.cpp ${GENERATED_DIR}/static_bases.gen.h
 	COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/stubs.py ${CMAKE_SOURCE_DIR}/OpenOVR/Reimpl ${CMAKE_SOURCE_DIR}/OpenVRHeaders ${GENERATED_DIR}
-	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/stubs.py ${stub-deps} ${GENERATED_DIR}/interfaces/vrtypes.h
+	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/stubs.py ${stub-deps} ${stub-impls} ${GENERATED_DIR}/interfaces/vrtypes.h
 	COMMENT "Generating stubs..."
 	)
 

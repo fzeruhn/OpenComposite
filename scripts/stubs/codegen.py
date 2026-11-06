@@ -7,8 +7,7 @@ from stubs.interface_spec import InterfaceSpec
 cflag_spec = re.compile(r"\[(?P<name>\w+)\]\s*=\s*(?P<value>.*)")
 
 
-def write_header(filename, iface):
-    header = open(filename, "w", newline='\n')
+def write_header(header, iface):
     header.write("#pragma once\n")
     header.write('#include "BaseCommon.h"\n')
 
@@ -17,8 +16,6 @@ def write_header(filename, iface):
 
     for i in iface.versions:
         _write_interface_header(header, i)
-
-    header.close()
 
 
 def _write_interface_header(fi, iface: InterfaceDef):
