@@ -70,11 +70,14 @@ static char* find_chars_or_comment(const char* s, const char* chars)
     return (char*)s;
 }
 
-/* Version of strncpy that ensures dest (size bytes) is null-terminated. */
+/* Version of strncpy that ensures dest (size bytes) is null-terminated. A loop, as
+   in later inih: strncpy here trips gcc's -Wstringop-truncation in optimised builds. */
 static char* strncpy0(char* dest, const char* src, size_t size)
 {
-    strncpy(dest, src, size - 1);
-    dest[size - 1] = '\0';
+    size_t i;
+    for (i = 0; i < size - 1 && src[i]; i++)
+        dest[i] = src[i];
+    dest[i] = '\0';
     return dest;
 }
 

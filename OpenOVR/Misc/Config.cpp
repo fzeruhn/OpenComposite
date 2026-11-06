@@ -216,15 +216,18 @@ Config::Config()
 		// No such file or it was parsed successfully, check the working directory
 		// for a file that overrides some properties
 		char buff[FILENAME_MAX];
-		GetCurrentDir(buff, FILENAME_MAX);
-		file = wstring(&buff[0], &buff[strlen(buff)]);
+		if (GetCurrentDir(buff, FILENAME_MAX)) {
+			file = wstring(&buff[0], &buff[strlen(buff)]);
 #ifdef _WIN32
-		file += L"\\opencomposite.ini";
+			file += L"\\opencomposite.ini";
 #else
-		file += L"/opencomposite.ini";
+			file += L"/opencomposite.ini";
 #endif
-		OOVR_LOG("Checking for app specific config file...");
-		err = wini_parse(file.c_str(), ini_handler, this);
+			OOVR_LOG("Checking for app specific config file...");
+			err = wini_parse(file.c_str(), ini_handler, this);
+		} else {
+			OOVR_LOG("Couldn't get the working directory, so there's no app specific config file");
+		}
 	}
 
 	if (err == -1) {

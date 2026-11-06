@@ -4,10 +4,10 @@ import libparse
 import stubs.interface
 
 # Regex for matching GEN_INTERFACE macro
-geniface = re.compile("GEN_INTERFACE\(\"(?P<interface>\w+)\",\s*\"(?P<version>\d{3})\"(?:\s*,\s*(?P<flags>.*))?\s*\)")
+geniface = re.compile(r'GEN_INTERFACE\("(?P<interface>\w+)",\s*"(?P<version>\d{3})"(?:\s*,\s*(?P<flags>.*))?\s*\)')
 
 # Regex for matching BASE_FLAG macro
-baseflag = re.compile("BASE_FLAG\(\s*(?P<flag>[^=\s]*)\s*(=\s*(?P<value>[^=]*))?\s*\)")
+baseflag = re.compile(r"BASE_FLAG\(\s*(?P<flag>[^=\s]*)\s*(=\s*(?P<value>[^=]*))?\s*\)")
 
 impldef = re.compile(r"^\w[\w\d\s:]*\s+[\*&]*\s*(?P<cls>[\w\d_]+)::(?P<name>[\w\d_]+)\s*\(.*\)")
 
