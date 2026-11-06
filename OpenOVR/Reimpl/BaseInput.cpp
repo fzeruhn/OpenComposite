@@ -391,6 +391,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 
 	// Parse the actions
 	OOVR_LOG("Parsing actions...");
+	std::set<std::string> skippedActionSets; // the sets of actions we leave out, which the app still syncs
 	for (Json::Value item : root["actions"]) {
 		std::unique_ptr<Action> actionPtr = std::make_unique<Action>();
 		Action& action = *actionPtr;
@@ -452,6 +453,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			// OpenVR 2.15's eye tracking: there's no gaze to give (GetEyeTrackingData* report none), so leave the
 			// action out. Its handle still works, and bindings to it are skipped as for any action not in the manifest.
 			OOVR_LOGF("Skipping eye tracking action '%s'", action.fullName.c_str());
+			skippedActionSets.insert(action.setName);
 			continue;
 		} else
 			OOVR_ABORTF("Invalid action type '%s' for action '%s'", type.c_str(), action.fullName.c_str());
@@ -518,22 +520,27 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 	}
 
 	// Make sure all the actions have a corresponding set
-	for (const std::unique_ptr<Action>& action : actions.GetItems()) {
-		// In the OpenVR samples, they don't declare their action set. Are they automatically created?!
-		// Also Vivecraft unfortunately does this, so we do have to support it.
-		std::string fullName = "/actions/" + action->setName;
+	// In the OpenVR samples, they don't declare their action set. Are they automatically created?!
+	// Also Vivecraft unfortunately does this, so we do have to support it.
+	auto findOrCreateSet = [&](const std::string& setName, const std::string& forAction) {
+		std::string fullName = "/actions/" + setName;
 		ActionSet* set = actionSets.LookupItem(fullName);
 		if (set == nullptr) {
-			OOVR_LOGF("Invalid action set '%s' for action '%s', creating implicit set", action->setName.c_str(), action->fullName.c_str());
+			OOVR_LOGF("Invalid action set '%s' for action '%s', creating implicit set", setName.c_str(), forAction.c_str());
 
 			// Create this set
 			set = actionSets.Initialise(fullName, std::make_unique<ActionSet>());
-			set->name = action->setName;
+			set->name = setName;
 			set->fullName = fullName;
 			set->usage = ActionSetUsage::LeftRight; // Just assume these default sets are in leftright mode, FIXME validate against steamvr
 		}
-
-		action->set = set;
+		return set;
+	};
+	for (const std::unique_ptr<Action>& action : actions.GetItems()) {
+		action->set = findOrCreateSet(action->setName, action->fullName);
+	}
+	for (const std::string& setName : skippedActionSets) {
+		findOrCreateSet(setName, "(skipped)");
 	}
 
 	//////////////////////////
