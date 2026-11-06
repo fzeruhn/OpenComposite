@@ -178,6 +178,7 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 
 	D3D11_TEXTURE2D_DESC srcDesc;
 	src->GetDesc(&srcDesc);
+	const D3D11_TEXTURE2D_DESC fullSrcDesc = srcDesc;
 
 	if (bounds) {
 		if (std::fabs(bounds->uMax - bounds->uMin) > 0.1)
@@ -284,19 +285,36 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 			swapchain_rtvs[i] = d3d_make_rtv(device, (XrBaseInStructure&)imagesHandles[i], type);
 		}
 
-		if (srcDesc.SampleDesc.Count > 1) {
-			OOVR_LOGF("Creating resolver textures for MSAA source with sample count x%d", srcDesc.SampleDesc.Count);
-			D3D11_TEXTURE2D_DESC resDesc = srcDesc;
-			resDesc.SampleDesc.Count = 1;
+		// TODO do we need to release the images at some point, or does the swapchain do that for us?
+	}
 
-			resolvedMSAATextures.resize(imageCount, nullptr);
-
-			for (uint32_t i = 0; i < imageCount; i++) {
-				device->CreateTexture2D(&resDesc, nullptr, &resolvedMSAATextures[i]);
-			}
+	// The resolve textures follow the source's full size and format, which can change while the swapchain fits
+	if (fullSrcDesc.SampleDesc.Count > 1) {
+		bool current = resolvedMSAATextures.size() == imagesHandles.size();
+		if (current) {
+			D3D11_TEXTURE2D_DESC have;
+			resolvedMSAATextures[0]->GetDesc(&have);
+			current = have.Width == fullSrcDesc.Width && have.Height == fullSrcDesc.Height && have.Format == fullSrcDesc.Format;
 		}
 
-		// TODO do we need to release the images at some point, or does the swapchain do that for us?
+		if (!current) {
+			OOVR_LOGF("Creating resolver textures for MSAA source with sample count x%d", fullSrcDesc.SampleDesc.Count);
+			for (auto&& tex : resolvedMSAATextures)
+				tex->Release();
+
+			// ResolveSubresource needs the source's full size; one slice and mip is all it resolves into
+			D3D11_TEXTURE2D_DESC resDesc = fullSrcDesc;
+			resDesc.SampleDesc = { 1, 0 };
+			resDesc.ArraySize = 1;
+			resDesc.MipLevels = 1;
+			resDesc.BindFlags = 0;
+			resDesc.CPUAccessFlags = 0;
+			resDesc.MiscFlags = 0;
+
+			resolvedMSAATextures.assign(imagesHandles.size(), nullptr);
+			for (auto&& tex : resolvedMSAATextures)
+				OOVR_FAILED_DX_ABORT(device->CreateTexture2D(&resDesc, nullptr, &tex));
+		}
 	}
 }
 
@@ -350,6 +368,12 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 
 	// Apparently SteamVR supports apps just sending array textures without specifying what's what.
 	const int arrayIndex = (srcDesc.ArraySize > 1 && eye.has_value()) ? static_cast<int>(*eye) : 0;
+	const UINT srcSubresource = D3D11CalcSubresource(0, arrayIndex, srcDesc.MipLevels);
+
+	// Views and resolves need a typed format: for a typeless texture, the swapchain's (its sRGB or linear version)
+	DxgiFormatInfo formatInfo = {};
+	const bool typeless = GetFormatInfo(srcDesc.Format, formatInfo) && srcDesc.Format == formatInfo.typeless;
+	const DXGI_FORMAT typedFormat = typeless ? (DXGI_FORMAT)createInfo.format : srcDesc.Format;
 
 	// Bounds describe an inverted image so copy texture using pixel shader inverting on copy.
 	// (Not for textures the shader can't read, multisampled or not bound as shader resources: they're copied as they are.)
@@ -357,13 +381,9 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	    && srcDesc.SampleDesc.Count == 1 && (srcDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)) {
 		auto* src = (ID3D11Texture2D*)texture->handle;
 
-		// A typeless texture needs a typed view format, or CreateShaderResourceView fails with E_INVALIDARG: use the
-		// swapchain's, the sRGB or linear version of the texture's format. A one-slice array view reads this eye's
-		// slice of an array texture, and a plain texture's only slice.
-		DxgiFormatInfo info = {};
-		bool typeless = GetFormatInfo(srcDesc.Format, info) && srcDesc.Format == info.typeless;
+		// A one-slice array view reads this eye's slice of an array texture, and a plain texture's only slice
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-		srvDesc.Format = typeless ? (DXGI_FORMAT)createInfo.format : srcDesc.Format;
+		srvDesc.Format = typedFormat;
 		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
 		srvDesc.Texture2DArray.MostDetailedMip = 0;
 		srvDesc.Texture2DArray.MipLevels = 1;
@@ -439,12 +459,10 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		context->RSSetState(pRSState);
 	} else {
 		if (srcDesc.SampleDesc.Count > 1) {
-			D3D11_TEXTURE2D_DESC resDesc = srcDesc;
-			resDesc.SampleDesc.Count = 1;
-			context->ResolveSubresource(resolvedMSAATextures[currentIndex], 0, src, arrayIndex, resDesc.Format);
-			context->CopySubresourceRegion(imagesHandles[currentIndex].texture, 0, 0, 0, 0, resolvedMSAATextures[currentIndex], arrayIndex, &sourceRegion);
+			context->ResolveSubresource(resolvedMSAATextures[currentIndex], 0, src, srcSubresource, typedFormat);
+			context->CopySubresourceRegion(imagesHandles[currentIndex].texture, 0, 0, 0, 0, resolvedMSAATextures[currentIndex], 0, &sourceRegion);
 		} else {
-			context->CopySubresourceRegion(imagesHandles[currentIndex].texture, 0, 0, 0, 0, src, arrayIndex, &sourceRegion);
+			context->CopySubresourceRegion(imagesHandles[currentIndex].texture, 0, 0, 0, 0, src, srcSubresource, &sourceRegion);
 		}
 	}
 
