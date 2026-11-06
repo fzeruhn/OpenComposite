@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #define BASE_IMPL
+#include "../../DrvOpenXR/XrBackend.h"
 #include "BaseCompositor.h"
 #include "BaseOverlay.h"
 #include "BaseSystem.h"
@@ -39,7 +40,7 @@ public:
 	// Rendering
 	Texture_t texture = {};
 	XrCompositionLayerQuad layerQuad = { XR_TYPE_COMPOSITION_LAYER_QUAD };
-	std::unique_ptr<Compositor> compositor;
+	std::weak_ptr<Compositor> compositor;
 
 	// Transform
 	VROverlayTransformType transformType = VROverlayTransform_Absolute;
@@ -110,10 +111,6 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			HideKeyboard();
 	}
 
-	if (!oovr_global_configuration.EnableLayers()) {
-		goto done;
-	}
-
 	for (const auto& kv : overlays) {
 		if (kv.second) {
 			OverlayData& overlay = *kv.second;
@@ -154,7 +151,6 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 		}
 	}
 
-done:
 	usingInput = checkUsingInput;
 	layers = layerHeaders.data();
 	return static_cast<int>(layerHeaders.size());
@@ -213,6 +209,10 @@ EVROverlayError BaseOverlay::DestroyOverlay(VROverlayHandle_t ulOverlayHandle)
 	if (highQualityOverlay == ulOverlayHandle)
 		highQualityOverlay = vr::k_ulOverlayHandleInvalid;
 
+	if (std::shared_ptr<Compositor> comp = overlay->compositor.lock()) {
+		auto* backend = (XrBackend*)BackendManager::Instance().GetBackendInstance();
+		backend->UnregisterOverlayCompositor(comp);
+	}
 	overlays.erase(overlay->key);
 	validOverlays.erase(overlay);
 	delete overlay;
@@ -323,6 +323,10 @@ const char* BaseOverlay::GetOverlayErrorNameFromEnum(EVROverlayError error)
 		ERR_CASE(NoNeighbor);
 		ERR_CASE(TooManyMaskPrimitives);
 		ERR_CASE(BadMaskPrimitive);
+		ERR_CASE(TextureAlreadyLocked);
+		ERR_CASE(TextureLockCapacityReached);
+		ERR_CASE(TextureNotLocked);
+		ERR_CASE(TimedOut);
 	}
 #undef ERR_CASE
 
@@ -725,28 +729,22 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 
 	BackendManager::Instance().OnOverlayTexture(pTexture);
 
-	if (!oovr_global_configuration.EnableLayers() || !BackendManager::Instance().IsGraphicsConfigured())
+	if (!BackendManager::Instance().IsGraphicsConfigured())
 		return VROverlayError_None;
 
-	if (!overlay->compositor) {
-		overlay->compositor.reset(GetUnsafeBaseCompositor()->CreateCompositorAPI(pTexture));
+	std::shared_ptr<Compositor> compositor = overlay->compositor.lock();
+	if (!compositor) {
+		compositor = GetUnsafeBaseCompositor()->CreateCompositorAPI(pTexture);
+		overlay->compositor = std::weak_ptr(compositor);
+		auto* backend = (XrBackend*)BackendManager::Instance().GetBackendInstance();
+		backend->RegisterOverlayCompositor(compositor);
 	}
 
-	overlay->compositor->LoadSubmitContext();
-	auto revertToCallerContext = MakeScopeGuard([&]() {
-		overlay->compositor->ResetSubmitContext();
-	});
-
-	overlay->compositor->Invoke(&overlay->texture, nullptr);
+	compositor->LoadSubmitContext();
+	compositor->Invoke(&overlay->texture, &overlay->textureBounds, overlay->layerQuad.subImage);
+	compositor->ResetSubmitContext();
 
 	overlay->layerQuad.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
-	overlay->layerQuad.subImage = {
-		overlay->compositor->GetSwapChain(),
-		{ { 0, 0 },
-		    { (int32_t)overlay->compositor->GetSrcSize().width,
-		        (int32_t)overlay->compositor->GetSrcSize().height } },
-		0
-	};
 
 	return VROverlayError_None;
 }
@@ -755,6 +753,10 @@ EVROverlayError BaseOverlay::ClearOverlayTexture(VROverlayHandle_t ulOverlayHand
 	USEH();
 	overlay->texture = {};
 
+	if (std::shared_ptr<Compositor> comp = overlay->compositor.lock()) {
+		auto* backend = (XrBackend*)BackendManager::Instance().GetBackendInstance();
+		backend->UnregisterOverlayCompositor(comp);
+	}
 	overlay->compositor.reset();
 	return VROverlayError_None;
 }
@@ -840,7 +842,7 @@ EVROverlayError BaseOverlay::ShowKeyboardWithDispatch(EGamepadTextInputMode eInp
 /** Placeholder method for submitting a KeyboardDone event when asked to show the keyboard since it is not implemented yet. **/
 void BaseOverlay::SubmitPlaceholderKeyboardEvent(vr::EVREventType ev, VRKeyboard::eventDispatch_t eventDispatch, uint64_t userValue)
 {
-	VREvent_Keyboard_t data = { 0 };
+	VREvent_Keyboard_t data{};
 	data.uUserValue = userValue;
 
 	VREvent_t evt = { 0 };
@@ -850,7 +852,6 @@ void BaseOverlay::SubmitPlaceholderKeyboardEvent(vr::EVREventType ev, VRKeyboard
 
 	eventDispatch(evt);
 }
-
 
 EVROverlayError BaseOverlay::ShowKeyboard(EGamepadTextInputMode eInputMode, EGamepadTextInputLineMode eLineInputMode,
     const char* pchDescription, uint32_t unCharMax, const char* pchExistingText, bool bUseMinimalMode, uint64_t uUserValue)
@@ -958,19 +959,30 @@ void BaseOverlay::CloseMessageOverlay()
 	STUBBED();
 }
 
-
 EVROverlayError BaseOverlay::SetOverlayPreCurvePitch(vr::VROverlayHandle_t ulOverlayHandle, float fRadians)
 {
-    STUBBED();
+	STUBBED();
 }
-
 
 EVROverlayError BaseOverlay::GetOverlayPreCurvePitch(vr::VROverlayHandle_t ulOverlayHandle, float* pfRadians)
 {
-    STUBBED();
+	STUBBED();
 }
 
 EVROverlayError BaseOverlay::WaitFrameSync(uint32_t nTimeoutMs)
 {
-    STUBBED();
+	STUBBED();
+}
+
+EVROverlayError BaseOverlay::CreateSubviewOverlay(VROverlayHandle_t parentOverlayHandle, const char* pchSubviewOverlayKey,
+    const char* pchSubviewOverlayName, VROverlayHandle_t* pSubviewOverlayHandle)
+{
+	if (pSubviewOverlayHandle)
+		*pSubviewOverlayHandle = k_ulOverlayHandleInvalid;
+	return VROverlayError_RequestFailed;
+}
+
+EVROverlayError BaseOverlay::SetSubviewPosition(VROverlayHandle_t ulOverlayHandle, float fX, float fY)
+{
+	return VROverlayError_RequestFailed;
 }

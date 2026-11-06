@@ -13,6 +13,9 @@
 #include "OculusInteractionProfile.h"
 #include "ReverbG2InteractionProfile.h"
 #include "ViveInteractionProfile.h"
+#include "ViveTrackerInteractionProfile.h"
+
+#include "OculusHandPoses.h"
 
 #include "Reimpl/BaseInput.h"
 #include "generated/static_bases.gen.h"
@@ -77,6 +80,10 @@ void InteractionProfile::AddLegacyBindings(const LegacyControllerActions& ctrl, 
 	create(ctrl.menuTouch, paths->menuTouch);
 	create(ctrl.btnA, paths->btnA);
 	create(ctrl.btnATouch, paths->btnATouch);
+	create(ctrl.trackpadX, paths->trackpadX);
+	create(ctrl.trackpadY, paths->trackpadY);
+	create(ctrl.trackpadTouch, paths->trackpadTouch);
+	create(ctrl.trackpadForce, paths->trackpadForce);
 	create(ctrl.stickX, paths->stickX);
 	create(ctrl.stickY, paths->stickY);
 	create(ctrl.stickBtn, paths->stickBtn);
@@ -103,6 +110,7 @@ const InteractionProfile::ProfileList& InteractionProfile::GetProfileList()
 		profiles.emplace_back(std::make_unique<ViveWandInteractionProfile>());
 		profiles.emplace_back(std::make_unique<OculusTouchInteractionProfile>());
 		profiles.emplace_back(std::make_unique<KhrSimpleInteractionProfile>());
+		profiles.emplace_back(std::make_unique<ViveTrackerInteractionProfile>());
 	}
 	return profiles;
 }
@@ -120,21 +128,48 @@ InteractionProfile* InteractionProfile::GetProfileByPath(const string& name)
 	return byPath.at(name);
 }
 
-glm::mat4 InteractionProfile::GetGripToSteamVRTransform(ITrackedDevice::HandType hand) const
+glm::mat4 InteractionProfile::GetGripToSteamVRTransform(ITrackedDevice::TrackedDeviceType hand) const
 {
-	if (hand == ITrackedDevice::HandType::HAND_LEFT) {
+	if (hand == ITrackedDevice::TrackedDeviceType::HAND_LEFT) {
 		return leftHandGripTransform;
-	} else if (hand == ITrackedDevice::HandType::HAND_RIGHT) {
+	} else if (hand == ITrackedDevice::TrackedDeviceType::HAND_RIGHT) {
 		return rightHandGripTransform;
 	}
 	return glm::identity<glm::mat4>();
 }
 
-std::optional<glm::mat4> InteractionProfile::GetComponentTransform(ITrackedDevice::HandType hand, const std::string& name) const
+std::optional<glm::mat4> InteractionProfile::GetComponentTransform(ITrackedDevice::TrackedDeviceType hand, const std::string& name) const
 {
 	std::unordered_map<std::string, glm::mat4> transforms = hand == ITrackedDevice::HAND_RIGHT ? rightComponentTransforms : leftComponentTransforms;
 	const auto iter = transforms.find(name);
 	if (iter == transforms.end())
+		return {};
+	else
+		return iter->second;
+}
+
+std::optional<std::array<vr::VRBoneTransform_t, 31>> InteractionProfile::GetSkeletalReferencePose(ITrackedDevice::TrackedDeviceType hand, int pose) const
+{
+	auto poses = hand == ITrackedDevice::HAND_LEFT ? leftHandPoses : rightHandPoses;
+
+	// Fall back to oculus poses, which should be close enough for most controllers
+	if (poses.empty()) {
+		OOVR_LOG_ONCE("WARNING: No reference poses defined for interaction profile, using fallback.");
+		if (hand == ITrackedDevice::HAND_LEFT) {
+			poses[VRSkeletalReferencePose_BindPose] = oculus::leftBindPose;
+			poses[VRSkeletalReferencePose_OpenHand] = oculus::leftOpenHandPose;
+			poses[VRSkeletalReferencePose_Fist] = oculus::leftFistPose;
+			poses[VRSkeletalReferencePose_GripLimit] = oculus::leftGripLimitPose;
+		} else {
+			poses[VRSkeletalReferencePose_BindPose] = oculus::rightBindPose;
+			poses[VRSkeletalReferencePose_OpenHand] = oculus::rightOpenHandPose;
+			poses[VRSkeletalReferencePose_Fist] = oculus::rightFistPose;
+			poses[VRSkeletalReferencePose_GripLimit] = oculus::rightGripLimitPose;
+		}
+	}
+
+	const auto iter = poses.find(pose);
+	if (iter == poses.end())
 		return {};
 	else
 		return iter->second;

@@ -1,16 +1,23 @@
 #include "stdafx.h"
 
+#include "Misc/backtrace.h"
 #include "Misc/Config.h"
 #include "logging.h"
+#include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <errno.h> // errno, ENOENT, EEXIST
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdarg.h>
 #include <sys/stat.h> // stat
 #ifdef _WIN32
 #include <direct.h> // _mkdir
+#endif
+#ifdef __GLIBCXX__
+#include <unistd.h>
 #endif
 
 // strftime format
@@ -128,8 +135,121 @@ std::string GetEnv(const std::string& var)
 #ifdef ANDROID
 #include <android/log.h>
 #else
-static std::ofstream stream;
+
+#ifdef __GLIBCXX__
+#include <ext/stdio_filebuf.h>
+
+// We need stream_fd to be thread-safe and signal-safe.
+#if __cpp_lib_atomic_lock_free_type_aliases >= 201907L
+	static std::atomic_signed_lock_free stream_fd = -1;
+#else
+	static std::atomic_int stream_fd = -1;
 #endif
+
+typedef std::basic_ofstream<char>::__filebuf_type buffer_t;
+typedef __gnu_cxx::stdio_filebuf<char> io_buffer_t;
+static FILE* cfile_impl(buffer_t* fb)
+{
+	return (static_cast<io_buffer_t*>(fb))->file();
+}
+
+static FILE* cfile(std::ofstream& ofs)
+{
+	return cfile_impl(ofs.rdbuf());
+}
+#endif
+
+static std::ofstream init_stream()
+{
+	std::ofstream stream;
+	string outputFilePath = "opencomposite.log";
+
+	// Try and write to standard location
+	// fall back to exe dir if can't create dir
+#ifdef _WIN32
+	string outputFolder = GetEnv("LOCALAPPDATA");
+	if (!outputFolder.empty())
+		outputFolder = outputFolder + "\\OpenComposite\\logs";
+	if (!outputFolder.empty() && makePath(outputFolder))
+		outputFilePath = outputFolder + "\\" + outputFilePath;
+#else
+	string outputFolder = GetEnv("XDG_STATE_HOME");
+	if (outputFolder.empty()) {
+		outputFolder = GetEnv("HOME");
+		if (!outputFolder.empty())
+			outputFolder = outputFolder + "/.local/state";
+	}
+	if (!outputFolder.empty())
+		outputFolder = outputFolder + "/OpenComposite/logs";
+	if (!outputFolder.empty() && makePath(outputFolder))
+		outputFilePath = outputFolder + "/" + outputFilePath;
+#endif
+
+	stream.open(outputFilePath.c_str());
+#ifdef __GLIBCXX__
+	if (stream.is_open())
+		stream_fd.store(fileno(cfile(stream)), std::memory_order::seq_cst);
+#endif
+	return stream;
+}
+
+static std::ofstream& stream()
+{
+	static std::ofstream res = init_stream();
+	return res;
+}
+
+#endif
+
+void oovr_printf_safe(const char* format, ...)
+{
+#ifdef __GLIBCXX__
+	int fd = stream_fd.load(std::memory_order::seq_cst);
+	if (fd < 0) {
+		return;
+	}
+
+	int r;
+	char buf[2048];
+	va_list args;
+	va_start(args, format);
+	r = vsnprintf(buf, sizeof(buf), format, args);
+	va_end(args);
+	if (r < 0) {
+		return;
+	}
+
+	size_t len = r;
+	size_t offset = 0;
+	while (len > 0) {
+		r = write(fd, &buf[offset], len);
+		if (r < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			break;
+		}
+
+		offset += r;
+		len -= r;
+	}
+#endif
+}
+
+void oovr_flush_safe()
+{
+#ifdef __GLIBCXX__
+	int fd = stream_fd.load(std::memory_order::seq_cst);
+	if (fd < 0) {
+		return;
+	}
+
+	int r;
+	do {
+		r = fsync(fd);
+	} while (r < 0 && errno == EINTR);
+#endif
+}
 
 OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func, const char* msg, const char* title, va_list args);
 
@@ -138,34 +258,7 @@ void oovr_log_raw(const char* file, long line, const char* func, const char* msg
 #ifdef ANDROID
 	__android_log_print(ANDROID_LOG_INFO, "OpenComposite", "%s:%d \t %s", func, line, msg);
 #else
-	if (!stream.is_open()) {
-		string outputFilePath = "opencomposite.log";
-
-		// Try and write to standard location
-		// fall back to exe dir if can't create dir
-#ifdef _WIN32
-		string outputFolder = GetEnv("LOCALAPPDATA");
-		if (!outputFolder.empty())
-			outputFolder = outputFolder + "\\OpenComposite\\logs";
-		if (!outputFolder.empty() && makePath(outputFolder))
-			outputFilePath = outputFolder + "\\" + outputFilePath;
-#else
-		string outputFolder = GetEnv("XDG_STATE_HOME");
-		if (outputFolder.empty()) {
-			outputFolder = GetEnv("HOME");
-			if (!outputFolder.empty())
-				outputFolder = outputFolder + "/.local/state";
-		}
-		if (!outputFolder.empty())
-			outputFolder = outputFolder + "/OpenComposite/logs";
-		if (!outputFolder.empty() && makePath(outputFolder))
-			outputFilePath = outputFolder + "/" + outputFilePath;
-#endif
-
-		stream.open(outputFilePath.c_str());
-	}
-
-	stream << "[" << format_time() << "] " << func << ":" << line << "\t- " << (msg ? msg : "NULL") << std::endl;
+	stream() << "[" << format_time() << "] " << func << ":" << line << "\t- " << (msg ? msg : "NULL") << std::endl;
 
 	// Write it to stdout
 	// TODO on Windows, write it into the debug log
@@ -217,11 +310,12 @@ OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func
 #ifdef ANDROID
 	__android_log_print(ANDROID_LOG_ERROR, "OpenComposite", "ERROR: %s:%d \t %s", func, line, buff);
 #else
-	stream << std::flush;
+	stream() << std::flush;
 #endif
 
 	OOVR_MESSAGE(buff, title);
 	DebugBreak();
+	oovr_dump_backtrace();
 	abort();
 }
 
@@ -229,7 +323,7 @@ void oovr_soft_abort_raw(const char* file, long line, const char* func, int* cou
 {
 	// If this has been hit already, just ignore it - if we needed a crash that would've been done.
 	if (*count > 0) {
-		*count++;
+		count++;
 		return;
 	}
 
@@ -261,7 +355,24 @@ void oovr_message_raw(const char* message, const char* title)
 	// Display a message box on Windows
 	MessageBoxA(nullptr, message, title, MB_OK);
 #else
-	// Print to stderr on Linux
-	std::cerr << "OOVR_MESSAGE: " << title << ": " << message << std::endl;
+	// Try using zenity or kdialog on Linux, otherwise just print to stderr
+	bool message_displayed = false;
+
+	std::stringstream command;
+
+	if (system("type zenity") == 0) {
+		command << "zenity --error --title=\"" << title << "\" --text=\"" << message << "\"";
+	} else if (system("type kdialog") == 0) {
+		command << "kdialog --title \"" << title << "\" --error \"" << message << "\"";
+	}
+
+	auto c = command.str();
+	if (!c.empty()) {
+		message_displayed = system(c.c_str()) == 0;
+	}
+
+	if (!message_displayed) {
+		std::cerr << "OOVR_MESSAGE: " << title << ": " << message << std::endl;
+	}
 #endif
 }

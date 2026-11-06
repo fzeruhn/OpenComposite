@@ -14,17 +14,17 @@ KhrSimpleInteractionProfile::KhrSimpleInteractionProfile()
 		nullptr
 	};
 	const char* inputs[] = {
-		"input/select/click",
-		"input/menu/click",
-		"input/grip/pose",
-		"input/aim/pose",
-		"output/haptic",
+		"/input/select/click",
+		"/input/menu/click",
+		"/input/grip/pose",
+		"/input/aim/pose",
+		"/output/haptic",
 		nullptr
 	};
 
 	for (const char** side = sides; *side; side++) {
 		for (const char** input = inputs; *input; input++) {
-			validInputPaths.insert(std::string(*side) + "/" + std::string(*input));
+			validInputPaths.insert(std::string(*side) + std::string(*input));
 		}
 	}
 
@@ -53,6 +53,11 @@ std::optional<const char*> KhrSimpleInteractionProfile::GetRightHandRenderModelN
 std::optional<const char*> KhrSimpleInteractionProfile::GetOpenVRName() const
 {
 	return std::nullopt;
+}
+
+std::optional<vr::EVRSkeletalTrackingLevel> KhrSimpleInteractionProfile::GetOpenVRTrackinglevel() const
+{
+	return vr::VRSkeletalTracking_Estimated;
 }
 
 const InteractionProfile::LegacyBindings* KhrSimpleInteractionProfile::GetLegacyBindings(const std::string& handPath) const

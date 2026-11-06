@@ -65,10 +65,12 @@ interfaces_list = [
     "ClientCore",
     "OverlayView",
     "Mailbox",
+    "Notifications",
     "ControlPanel",
+    "HeadsetView",
 
     # Driver interfaces
-    "ServerDriverHost",
+    #"ServerDriverHost",
 ]
 
 bases_header_fn = output_dir / "static_bases.gen.h"

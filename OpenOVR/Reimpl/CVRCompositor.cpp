@@ -19,6 +19,8 @@ GEN_INTERFACE("Compositor", "024")
 // 025 is skipped, as per above
 GEN_INTERFACE("Compositor", "026")
 GEN_INTERFACE("Compositor", "027")
+GEN_INTERFACE("Compositor", "028")
+GEN_INTERFACE("Compositor", "029")
 
 #include "generated/GVRCompositor.gen.h"
 
