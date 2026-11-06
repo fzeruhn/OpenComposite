@@ -1,6 +1,6 @@
 # OpenComposite (OpenXR) - Play SteamVR games without SteamVR!
 [![Discord](https://img.shields.io/discord/499733750209314816.svg?style=for-the-badge&logo=discord&label=discord)](https://discord.gg/zYA6Tzs)
-[![AppVeyor](https://img.shields.io/appveyor/ci/ZNix/openovr.svg?style=for-the-badge&logo=appveyor)](https://ci.appveyor.com/project/ZNix/openovr)
+[![Build](https://img.shields.io/github/actions/workflow/status/fzeruhn/OpenComposite/build.yml?branch=openxr&style=for-the-badge&logo=github&label=build)](https://github.com/fzeruhn/OpenComposite/actions/workflows/build.yml)
 # [>>>Join the Discord here for support<<<](https://discord.gg/zYA6Tzs)
 # [Frequently Asked Questions](https://mbucchia.github.io/OpenXR-Toolkit/opencomposite.html)
 See the **Tips for using OpenComposite** section for solutions to common issues. Thanks to mbucchia for providing this FAQ.
@@ -43,6 +43,10 @@ of your controller.
 \** Some Oculus headsets seem to be incompatible with OpenXR initialising with Vulkan for some games. If you have issues with AC or other games try putting initUsingVulkan=false in the opencomposite.ini (see [Configuration](https://gitlab.com/znixian/OpenOVR/-/tree/openxr#configuration-file) section for details.)
 
 # Downloading and installation
+
+**This fork's builds** are on its [releases page](https://github.com/fzeruhn/OpenComposite/releases/latest):
+`OpenComposite-windows.zip` and `OpenComposite-linux.tar.gz`, 64- and 32-bit, with install notes. The links below are
+upstream's.
 
 OpenComposite can either be installed system-wide (all SteamVR-based games will use it automatically) or per-game (replace a DLL
 file for each game, this usually must be done each time said game is updated).
