@@ -30,6 +30,6 @@ public:
 private:
 	const InteractionProfile& profile;
 	XrXDevPropertiesMNDX xdevProperties;
-	uint32_t genericTrackerIndex;
+	[[maybe_unused]] uint32_t genericTrackerIndex;
 	XrSpace genericTrackerSpace;
 };
