@@ -622,19 +622,20 @@ void XrBackend::ClearSkyboxOverride()
  */
 bool XrBackend::GetFrameTiming(OOVR_Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
 {
-	// Zero everything except the size field. The struct grew over OpenVR versions (144 to 188 bytes), so clear no more
-	// than the app's m_nSize says it has, and no more than the newest struct: a bad m_nSize crashed F1 23 here, and
-	// clearing all of ours would run past an older game's smaller struct.
-	static bool sizeLogged = false;
-	if (!sizeLogged) {
-		OOVR_LOGF("GetFrameTiming: the app's Compositor_FrameTiming is %u bytes", pTiming->m_nSize);
-		sizeLogged = true;
+	// The struct grew over OpenVR versions, so write no more than the app's m_nSize says it has. A bad m_nSize crashed F1 23
+	// here: one bigger than any version's struct is taken as ours, which every game since IVRCompositor_018 has room for.
+	size_t size = pTiming->m_nSize;
+	if (size > sizeof(vr::Compositor_FrameTiming)) {
+		OOVR_LOG_ONCEF("GetFrameTiming: m_nSize %u is bigger than any OpenVR version's struct, using %u", pTiming->m_nSize,
+		    (uint32_t)sizeof(OOVR_Compositor_FrameTiming));
+		size = sizeof(OOVR_Compositor_FrameTiming);
 	}
-	const size_t clearSize = pTiming->m_nSize < sizeof(vr::Compositor_FrameTiming) ? pTiming->m_nSize : sizeof(vr::Compositor_FrameTiming);
-	if (clearSize > sizeof(pTiming->m_nSize))
-		memset(reinterpret_cast<unsigned char*>(pTiming) + sizeof(pTiming->m_nSize), 0, clearSize - sizeof(pTiming->m_nSize));
 
-	if (pTiming->m_nSize >= sizeof(IVRCompositor_018::Compositor_FrameTiming)) {
+	// Zero everything except the size field
+	if (size > sizeof(pTiming->m_nSize))
+		memset(reinterpret_cast<unsigned char*>(pTiming) + sizeof(pTiming->m_nSize), 0, size - sizeof(pTiming->m_nSize));
+
+	if (size >= sizeof(IVRCompositor_018::Compositor_FrameTiming)) {
 		pTiming->m_flSystemTimeInSeconds = frameSubmitTimeUs;
 		pTiming->m_nFrameIndex = nFrameIndex;
 
