@@ -402,7 +402,9 @@ void XrBackend::WaitForTrackingData()
 
 	{
 		auto lock = xr_session.lock_shared();
+		auto waitCall = std::chrono::steady_clock::now();
 		OOVR_FAILED_XR_ABORT(xrWaitFrame(xr_session.get(), &waitInfo, &state));
+		RecordFrameTiming(waitCall, std::chrono::steady_clock::now(), state.predictedDisplayTime, state.predictedDisplayPeriod);
 		xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
 
 		// FIXME loop until this returns true?
@@ -578,6 +580,9 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 		OOVR_FAILED_XR_ABORT(xrWaitFrame(xr_session.get(), &waitInfo, &state));
 		xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
 
+		// Not one of the app's frames, so its display slot isn't a dropped frame
+		RestartFrameTiming();
+
 		// This submits a frame when a skybox override is set. This is designed around rFactor2 where the skybox is used as
 		// a loading screen and is frequently updated, and most other games probably behave in a similar manner. It'd be
 		// ideal to run a separate thread while the skybox override is set to submit frames if IVRCompositor->Submit is not
@@ -631,6 +636,40 @@ void XrBackend::ClearSkyboxOverride()
 
 /* Misc compositor */
 
+void XrBackend::RecordFrameTiming(std::chrono::steady_clock::time_point callTime, std::chrono::steady_clock::time_point returnTime,
+    XrTime predictedDisplayTime, XrDuration predictedDisplayPeriod)
+{
+	using ms = std::chrono::duration<float, std::milli>;
+	float wait = ms(returnTime - callTime).count();
+	if (predictedDisplayPeriod > 0)
+		displayPeriodMs = (float)predictedDisplayPeriod / 1e6f;
+	if (lastWaitCall != std::chrono::steady_clock::time_point{}) {
+		float interval = ms(callTime - lastWaitCall).count();
+		float busy = interval - measuredWaitMs; // since the previous xrWaitFrame returned
+		measuredDropped = 0;
+		// A long pause (loading, the session hidden) is not a frame: skip it rather than drop the resolution for it.
+		// Count to this xrWaitFrame's return, since the runtime may be what paused.
+		if (ms(returnTime - lastWaitCall).count() < 1000.0f) {
+			// Cap each busy sample at a few display periods, so that one hitch (a shader compile, streaming) can't hold
+			// the average over budget for dozens of frames. A game that's slow every frame still reads as over budget.
+			const float cap = displayPeriodMs > 0.0f ? 3.0f * displayPeriodMs : 1000.0f;
+			const float a = measuredIntervalMs == 0.0f ? 1.0f : 0.1f; // ~10-frame smoothing; the app samples one frame
+			measuredIntervalMs = interval; // per frame, as SteamVR reports it
+			measuredBusyMs += a * (std::min(busy, cap) - measuredBusyMs);
+
+			// Dropped frames are the display slots the runtime skipped since the previous frame. The time between calls
+			// would also count the app's frame-to-frame jitter, which the runtime absorbs, as drops.
+			if (lastPredictedDisplayTime != 0 && predictedDisplayPeriod > 0 && predictedDisplayTime > lastPredictedDisplayTime) {
+				XrDuration slots = (predictedDisplayTime - lastPredictedDisplayTime + predictedDisplayPeriod / 2) / predictedDisplayPeriod;
+				measuredDropped = slots > 1 ? (uint32_t)(slots - 1) : 0;
+			}
+		}
+	}
+	measuredWaitMs = wait;
+	lastWaitCall = callTime;
+	lastPredictedDisplayTime = predictedDisplayTime;
+}
+
 /**
  * Get frame timing information to be passed to the application
  *
@@ -666,20 +705,33 @@ bool XrBackend::GetFrameTiming(OOVR_Compositor_FrameTiming* pTiming, uint32_t un
 		pTiming->m_nNumDroppedFrames = 0; // number of additional times previous frame was scanned out
 		pTiming->m_nReprojectionFlags = 0;
 
-		// Just use sensible values until GPU timers implemented
-		pTiming->m_flPreSubmitGpuMs = 8.0f;
-		pTiming->m_flPostSubmitGpuMs = 1.0f;
-		pTiming->m_flTotalRenderGpuMs = 9.0f;
+		// No GPU timers through OpenXR: the app's measured frame time (render + submit, between xrWaitFrame calls) stands
+		// in for its GPU time. A GPU-bound app blocks in submit or present, so the proxy grows as the GPU saturates.
+		// Before the first measured frame, the old constants.
+		if (measuredIntervalMs > 0.0f) {
+			pTiming->m_nNumDroppedFrames = measuredDropped;
+			pTiming->m_nNumMisPresented = measuredDropped ? 1 : 0;
+			pTiming->m_flTotalRenderGpuMs = measuredBusyMs;
+			pTiming->m_flPreSubmitGpuMs = measuredBusyMs > 1.0f ? measuredBusyMs - 1.0f : measuredBusyMs;
+			pTiming->m_flPostSubmitGpuMs = measuredBusyMs > 1.0f ? 1.0f : 0.0f;
+		} else {
+			pTiming->m_flPreSubmitGpuMs = 8.0f;
+			pTiming->m_flPostSubmitGpuMs = 1.0f;
+			pTiming->m_flTotalRenderGpuMs = 9.0f;
+		}
 
 		// Use very conservative guesses for these. They are used in F1 22 for dynamic resolution calculations but are not something that is provided
 		// through OpenXR. Using conservative values will give a bit more headroom for the game to target realistic frame times.
 		pTiming->m_flCompositorRenderGpuMs = 1.5f; // time spend performing distortion correction, rendering chaperone, overlays, etc.
 		pTiming->m_flCompositorRenderCpuMs = 3.0f; // time spent on cpu submitting the above work for this frame
 
-		pTiming->m_flCompositorIdleCpuMs = 0.1f;
+		// The time spent in xrWaitFrame is headroom only if the frame made its slot; after a miss it includes skipped slots
+		// (and no more than a display period, after a pause)
+		const float idle = displayPeriodMs > 0.0f ? std::min(measuredWaitMs, displayPeriodMs) : measuredWaitMs;
+		pTiming->m_flCompositorIdleCpuMs = measuredIntervalMs > 0.0f ? (measuredDropped ? 0.0f : idle) : 0.1f;
 
 		/** Miscellaneous measured intervals. */
-		pTiming->m_flClientFrameIntervalMs = 11.1f; // time between calls to WaitGetPoses
+		pTiming->m_flClientFrameIntervalMs = measuredIntervalMs > 0.0f ? measuredIntervalMs : 11.1f; // time between calls to WaitGetPoses
 		pTiming->m_flPresentCallCpuMs = 0.0f; // time blocked on call to present (usually 0.0, but can go long)
 		pTiming->m_flWaitForPresentCpuMs = 0.0f; // time spent spin-waiting for frame index to change (not near-zero indicates wait object failure)
 		pTiming->m_flSubmitFrameMs = 0.0f; // time spent in IVRCompositor::Submit (not near-zero indicates driver issue)
@@ -852,6 +904,9 @@ void XrBackend::PumpEvents()
 
 void XrBackend::OnSessionCreated()
 {
+	// The gap from the old session's last frame isn't dropped frames
+	RestartFrameTiming();
+
 	sessionState = XR_SESSION_STATE_UNKNOWN;
 	sessionActive = false;
 	renderingFrame = false;

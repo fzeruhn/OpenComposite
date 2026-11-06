@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include "XrDriverPrivate.h"
 
 #include "XrController.h"
@@ -124,6 +126,24 @@ private:
 	uint32_t nFrameIndex = 0;
 
 	double frameSubmitTimeUs = 0.0;
+
+	// Measured frame timing for GetFrameTiming, taken around xrWaitFrame in WaitForTrackingData. Games such as
+	// Half-Life: Alyx drive their dynamic resolution from these values, so constants freeze it at one level.
+	// busy = time from one xrWaitFrame return to the next xrWaitFrame call (the app's render and submit), smoothed;
+	// interval = time between xrWaitFrame calls, per frame.
+	std::chrono::steady_clock::time_point lastWaitCall{};
+	float measuredIntervalMs = 0.0f, measuredBusyMs = 0.0f, measuredWaitMs = 0.0f, displayPeriodMs = 0.0f;
+	uint32_t measuredDropped = 0;
+	XrTime lastPredictedDisplayTime = 0;
+	void RecordFrameTiming(std::chrono::steady_clock::time_point callTime, std::chrono::steady_clock::time_point returnTime,
+	    XrTime predictedDisplayTime, XrDuration predictedDisplayPeriod);
+	// Starts measuring again from the next frame
+	void RestartFrameTiming()
+	{
+		lastWaitCall = {};
+		lastPredictedDisplayTime = 0;
+		measuredDropped = 0;
+	}
 
 	// Action set and action used for querying for the interaction profile
 	inline static XrActionSet infoSet = XR_NULL_HANDLE;
