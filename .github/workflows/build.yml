@@ -1,0 +1,149 @@
+# Builds OpenComposite for Windows and Linux, 64- and 32-bit, and packs the archives (scripts/ci; the same scripts build
+# locally). A pushed v* tag (v2026.11.07, say) also makes a draft release of them, to check and publish by hand.
+name: Build
+
+on:
+  push:
+    branches: [openxr]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The vcpkg release the Windows builds take the Vulkan headers and loader from.
+  VCPKG_REF: '2026.10.16'
+
+jobs:
+  windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            dll: vrclient_x64.dll
+          - arch: x86
+            dll: vrclient.dll
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Vulkan headers and loader (vcpkg ${{ env.VCPKG_REF }})
+        shell: pwsh
+        run: |
+          $vcpkg = Join-Path $env:RUNNER_TEMP 'vcpkg'
+          git clone --quiet --depth 1 --branch $env:VCPKG_REF https://github.com/microsoft/vcpkg.git $vcpkg
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $vcpkg 'bootstrap-vcpkg.bat') -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $vcpkg 'vcpkg.exe') install --vcpkg-root $vcpkg --triplet ${{ matrix.arch }}-windows vulkan-headers vulkan-loader
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build
+        shell: pwsh
+        run: >-
+          scripts/ci/build-windows.ps1 -Arch ${{ matrix.arch }}
+          -Vulkan (Join-Path $env:RUNNER_TEMP 'vcpkg\installed\${{ matrix.arch }}-windows')
+          -Out build -Version "$env:GITHUB_SHA ($env:GITHUB_REF_NAME)"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-${{ matrix.arch }}
+          path: build/bin/${{ matrix.dll }}
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            lib: linux64/vrclient.so
+          - arch: x86
+            lib: vrclient.so
+    steps:
+      # The packages of scripts/ci/ubuntu.dockerfile, and git for the checkout's submodules.
+      - name: Build tools
+        run: |
+          dpkg --add-architecture i386
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git g++ g++-multilib cmake make automake autoconf libtool python3 \
+            libgl-dev libvulkan-dev libgl-dev:i386 libvulkan-dev:i386
+
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build
+        run: sh scripts/ci/build-linux.sh ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}
+          path: build/bin/${{ matrix.lib }}
+          if-no-files-found: error
+
+  package:
+    name: Archives
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: '*-x*'
+
+      - name: Pack
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA:0:12}; fi
+          python3 scripts/ci/package.py --version "$version" --artifacts artifacts --out dist --repository "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: OpenComposite
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: OpenComposite
+          path: dist
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
+          --title "OpenComposite ${GITHUB_REF_NAME#v}" --notes-file dist/RELEASE_NOTES.md
+          dist/OpenComposite-windows.zip dist/OpenComposite-linux.tar.gz dist/OpenComposite-source.tar.gz
+          dist/SHA256SUMS.txt
