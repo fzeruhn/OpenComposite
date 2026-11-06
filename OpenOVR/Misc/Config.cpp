@@ -192,7 +192,7 @@ Config::Config()
 	// If we're on Linux, skip that and just check the working directory.
 #ifdef _WIN32
 	wchar_t buffer[MAX_PATH];
-	DWORD len = GetModuleFileNameW(HINST_THISCOMPONENT, buffer, sizeof(buffer));
+	DWORD len = GetModuleFileNameW(HINST_THISCOMPONENT, buffer, MAX_PATH);
 
 	wstring dir;
 	if (len) {

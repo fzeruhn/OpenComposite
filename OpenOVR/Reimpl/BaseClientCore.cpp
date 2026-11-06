@@ -277,7 +277,7 @@ std::wstring BaseClientCore::GetDllDir()
 	LINUX_STUBBED();
 #else
 	wchar_t buffer[MAX_PATH];
-	DWORD len = GetModuleFileNameW(openovr_module_id, buffer, sizeof(buffer));
+	DWORD len = GetModuleFileNameW(openovr_module_id, buffer, MAX_PATH);
 	wstring dllpath(buffer, len);
 	return dllpath.substr(0, dllpath.find_last_of('\\') + 1);
 #endif
