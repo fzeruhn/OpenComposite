@@ -332,6 +332,8 @@ uint32_t BaseCompositor::GetFrameTimings(OOVR_Compositor_FrameTiming* pTiming, u
 	// This is a request to fill out an array of timing data. However only an arbitrary number
 	// of records are available with number being filled returned. In the case of only one record
 	// being available we can just send the most recent timing data and return 1.
+	if (nFrames == 0)
+		return 0;
 	bool populated = BackendManager::Instance().GetFrameTiming(pTiming, 1);
 	return populated ? 1 : 0;
 }
