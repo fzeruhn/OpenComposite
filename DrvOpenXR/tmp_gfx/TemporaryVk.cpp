@@ -102,6 +102,10 @@ TemporaryVk::TemporaryVk()
 	std::vector<VkExtensionProperties> available(availableCount);
 	vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &availableCount, available.data());
 	auto addIfAvailable = [&](const char* name) {
+		for (const char* enabled : deviceExtensionsCstr) {
+			if (strcmp(enabled, name) == 0)
+				return; // the runtime asked for it already
+		}
 		for (const VkExtensionProperties& ext : available) {
 			if (strcmp(ext.extensionName, name) == 0) {
 				deviceExtensionsCstr.push_back(name);
