@@ -1079,11 +1079,16 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 	info.subactionPaths = allSubactionPaths.data();
 	info.countSubactionPaths = allSubactionPaths.size();
 
-	auto parent_iter = DpadBindingInfo::parents.find(parentName);
+	// The parent actions belong to this action's set, and an action set's actions are only active
+	// while the set is: so each set gets its own. Shared between sets, they lived in whichever set
+	// bound the input first, and a dpad in any other set never fired (No Man's Sky: its menu set
+	// came first, so snap turning and teleporting on foot did nothing).
+	std::string parentKey = action->setName + ":" + parentName;
+	auto parent_iter = DpadBindingInfo::parents.find(parentKey);
 	if (parent_iter == DpadBindingInfo::parents.end()) {
 		// create mapping
-		DpadBindingInfo::parents.insert({ parentName, DpadBindingInfo::ParentActions{} });
-		parent_iter = DpadBindingInfo::parents.find(parentName);
+		DpadBindingInfo::parents.insert({ parentKey, DpadBindingInfo::ParentActions{} });
+		parent_iter = DpadBindingInfo::parents.find(parentKey);
 
 		// create action for getting parent data (i.e. trackpad location)
 		strcpy_arr(info.actionName, parentName.c_str());
@@ -1099,23 +1104,21 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 
 	if (subMode == "click") {
 		dpad_info.click = true;
+
+		// Every binding on this input needs these, not only the one that creates the shared click action below:
+		// on the Knuckles trackpad that action is a float, and reading it as a boolean fails.
+		// Knuckles bindings are also loaded for other controllers, which have no trackpad force
+		auto manualThreshold = isKnuckles && importBasePath.ends_with("trackpad")
+		    && profile.IsInputPathValid(profile.TranslateAction(importBasePath + "/force"));
+		dpad_info.customClickThresholds = manualThreshold;
+		dpad_info.triggerHapticOnClick = manualThreshold;
+
 		if (parent_iter->second.clickAction == XR_NULL_HANDLE) {
-
-			auto manualThreshold = isKnuckles && importBasePath.ends_with("trackpad");
-			dpad_info.customClickThresholds = manualThreshold;
-			dpad_info.triggerHapticOnClick = manualThreshold;
-
 			std::string click_name = parentName + "-click";
 			strcpy_arr(info.actionName, click_name.c_str());
 			info.actionType = manualThreshold ? XR_ACTION_TYPE_FLOAT_INPUT : XR_ACTION_TYPE_BOOLEAN_INPUT;
 			strcpy_arr(info.localizedActionName, click_name.c_str());
 			OOVR_FAILED_XR_ABORT(xrCreateAction(action->set->xr, &info, &parent_iter->second.clickAction));
-
-			if (manualThreshold) {
-				// TODO: it's unclear what the actual threshold value used by SteamVR is, and it's not configurable in bindings json
-				action->perProfileData[&profile].click_activate_threshold = 0.33f;
-				action->perProfileData[&profile].click_deactivate_threshold = 0.2f;
-			}
 
 			XrPath suggested_path;
 			OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath + (manualThreshold ? "/force" : "/click")).c_str(), &suggested_path));
@@ -1141,7 +1144,7 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 	}
 
 	// add dpad parent to action
-	action->perProfileData[&profile].dpadBindings.push_back({ parentName, dpad_info });
+	action->perProfileData[&profile].dpadBindings.push_back({ parentKey, dpad_info });
 }
 
 void BaseInput::LoadDClickAction(const InteractionProfile& profile, const std::string& importBasePath, Action* action, std::vector<XrActionSuggestedBinding>& bindings)
@@ -1472,6 +1475,11 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 			if (!click_state.changedSinceLastSync || !click_state.currentState)
 				continue;
 
+			// Games may read an action more than once per frame (e.g. once per input source); count each press once
+			if (click_state.lastChangeTime == dclick_info.last_press_time)
+				continue;
+			dclick_info.last_press_time = click_state.lastChangeTime;
+
 			if (!dclick_info.first_click_time) {
 				// first click, record the timestamp
 				dclick_info.first_click_time = click_state.lastChangeTime;
@@ -1542,10 +1550,10 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 					XrActionStateFloat click_state{ XR_TYPE_ACTION_STATE_FLOAT };
 					info2.action = iter->second.clickAction;
 					OOVR_FAILED_XR_ABORT(xrGetActionStateFloat(xr_session.get(), &info2, &click_state));
-					if (state->currentState == XR_TRUE) {
-						active = click_state.currentState > perProfileData.click_deactivate_threshold;
+					if (dpad_info.lastState) {
+						active = click_state.currentState > DpadBindingInfo::clickDeactivateThreshold;
 					} else {
-						active = click_state.currentState > perProfileData.click_activate_threshold;
+						active = click_state.currentState > DpadBindingInfo::clickActivateThreshold;
 					}
 				} else {
 					XrActionStateBoolean click_state{ XR_TYPE_ACTION_STATE_BOOLEAN };
