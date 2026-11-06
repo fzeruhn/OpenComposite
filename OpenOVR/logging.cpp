@@ -187,7 +187,8 @@ static std::ofstream init_stream()
 
 	stream.open(outputFilePath.c_str());
 #ifdef __GLIBCXX__
-	stream_fd.store(fileno(cfile(stream)), std::memory_order::seq_cst);
+	if (stream.is_open())
+		stream_fd.store(fileno(cfile(stream)), std::memory_order::seq_cst);
 #endif
 	return stream;
 }
