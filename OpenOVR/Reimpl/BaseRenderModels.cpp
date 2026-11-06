@@ -265,8 +265,8 @@ EVRRenderModelError BaseRenderModels::LoadRenderModel_Async(const char* pchRende
 	}
 
 	uint16_t* indexData = new uint16_t[rm.unVertexCount];
-	for (uint16_t i = 0; i < rm.unVertexCount; i++) {
-		indexData[i] = i;
+	for (uint32_t i = 0; i < rm.unVertexCount; i++) {
+		indexData[i] = static_cast<uint16_t>(i);
 	}
 	rm.rIndexData = indexData;
 	rm.unTriangleCount = rm.unVertexCount / 3;
