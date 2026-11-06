@@ -195,8 +195,18 @@ static std::ofstream init_stream()
 
 static std::ofstream& stream()
 {
-	static std::ofstream res = init_stream();
-	return res;
+	struct LogStream {
+		std::ofstream stream;
+		~LogStream()
+		{
+#ifdef __GLIBCXX__
+			// The signal-safe writers mustn't use the fd once it's closed
+			stream_fd.store(-1, std::memory_order::seq_cst);
+#endif
+		}
+	};
+	static LogStream res{ init_stream() };
+	return res.stream;
 }
 
 #endif
