@@ -68,6 +68,8 @@ XrExt::XrExt(XrGraphicsApiSupportedFlags apis, const std::vector<const char*>& e
 		XR_BIND_OPT(xrGetXDevPropertiesMNDX, pfnxrGetXDevPropertiesMNDX);
 		XR_BIND_OPT(xrDestroyXDevListMNDX, pfnxrDestroyXDevListMNDX);
 		XR_BIND_OPT(xrCreateXDevSpaceMNDX, pfnxrCreateXDevSpaceMNDX);
+		if (!xrMndxXdevSpace_Available())
+			OOVR_LOG("XR_MNDX_xdev_space is advertised but the runtime doesn't provide all of its functions, generic trackers are disabled");
 	}
 
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
