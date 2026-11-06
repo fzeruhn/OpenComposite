@@ -639,10 +639,12 @@ void XrBackend::ClearSkyboxOverride()
 bool XrBackend::GetFrameTiming(OOVR_Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
 {
 	// The struct grew over OpenVR versions, so write no more than the app's m_nSize says it has. A bad m_nSize crashed F1 23
-	// here: one bigger than any version's struct is taken as ours, which every game since IVRCompositor_018 has room for.
+	// here: one bigger than the newest struct is taken as ours, which every game since IVRCompositor_018 has room for.
+	// The newest struct is padded to 8 bytes on Windows, which is also what Proton passes to a Linux build.
+	constexpr size_t newestSize = (sizeof(vr::Compositor_FrameTiming) + 7) & ~(size_t)7;
 	size_t size = pTiming->m_nSize;
-	if (size > sizeof(vr::Compositor_FrameTiming)) {
-		OOVR_LOG_ONCEF("GetFrameTiming: m_nSize %u is bigger than any OpenVR version's struct, using %u", pTiming->m_nSize,
+	if (size > newestSize) {
+		OOVR_LOG_ONCEF("GetFrameTiming: m_nSize %u is bigger than the newest OpenVR struct, using %u", pTiming->m_nSize,
 		    (uint32_t)sizeof(OOVR_Compositor_FrameTiming));
 		size = sizeof(OOVR_Compositor_FrameTiming);
 	}
