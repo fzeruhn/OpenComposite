@@ -14,7 +14,8 @@ target_include_directories(oc_unit_tests PRIVATE
 	${CMAKE_SOURCE_DIR}/DrvOpenXR
 	${CMAKE_BINARY_DIR}
 )
-target_compile_definitions(oc_unit_tests PRIVATE ${GRAPHICS_API_SUPPORT_FLAGS})
+# The standard headers rather than doctest's forward declarations (MSVC 19.5x warns about its std::tuple one)
+target_compile_definitions(oc_unit_tests PRIVATE ${GRAPHICS_API_SUPPORT_FLAGS} DOCTEST_CONFIG_USE_STD_HEADERS)
 if (WIN32)
 	target_link_libraries(oc_unit_tests PRIVATE OCCore DrvOpenXR OpenVR Vulkan ${XrLib} ${glmLib})
 else ()

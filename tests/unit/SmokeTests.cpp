@@ -1,10 +1,11 @@
+// doctest first: stdafx.h brings in Xlib on Linux, whose macros (None, Bool, ...) clash with doctest's names
+#include "doctest.h"
+
 #include "stdafx.h"
 
 #include "Misc/Config.h"
 #include "Misc/Input/IndexControllerInteractionProfile.h"
 #include "logging.h"
-
-#include "doctest.h"
 
 #include <string>
 #include <vector>
