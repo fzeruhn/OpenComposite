@@ -2,9 +2,19 @@
 enable_testing()
 
 # Unit tests: linked against the static libraries the DLL is made from
+# The resource data (render models, keyboard layout, font) is part of the DLL's own sources, not OCCore
+set(OC_TEST_RESOURCES)
+foreach (res ${OVR_RESOURCES})
+	list(APPEND OC_TEST_RESOURCES ${CMAKE_SOURCE_DIR}/${res})
+endforeach ()
+if (NOT WIN32)
+	set_property(SOURCE ${OC_TEST_RESOURCES} APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}")
+endif ()
+
 add_executable(oc_unit_tests
 	unit/main.cpp
 	unit/SmokeTests.cpp
+	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE
 	${CMAKE_SOURCE_DIR}/libs/doctest
