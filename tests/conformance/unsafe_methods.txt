@@ -1,0 +1,9 @@
+# Methods never called against a real runtime (SteamVR): <interface regex> <method regex> <reason>
+IVR.* Launch.* starts programs
+IVRSystem_.* PerformFirmwareUpdate writes device firmware
+IVRScreenshots_.* (RequestScreenshot|TakeStereoScreenshot|HookScreenshot) writes screenshots
+IVRApplications_.* (SetApplicationAutoLaunch|SetDefaultApplicationForMimeType|IdentifyApplication) changes SteamVR's app config
+IVRApplications_.* (AddApplicationManifest|RemoveApplicationManifest) changes SteamVR's app list
+IVRChaperoneSetup_.* (CommitWorkingCopy|ImportFromBufferToWorking) changes the room setup
+IVROverlay_.* ShowDashboard opens SteamVR's dashboard
+IVRCompositor_.* CompositorQuit quits SteamVR's compositor
