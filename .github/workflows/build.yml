@@ -32,6 +32,7 @@ jobs:
         include:
           - arch: x64
             dll: vrclient_x64.dll
+            tests: true
           - arch: x86
             dll: vrclient.dll
     steps:
@@ -56,6 +57,7 @@ jobs:
           scripts/ci/build-windows.ps1 -Arch ${{ matrix.arch }}
           -Vulkan (Join-Path $env:RUNNER_TEMP 'vcpkg\installed\${{ matrix.arch }}-windows')
           -Out build -Version "$env:GITHUB_SHA ($env:GITHUB_REF_NAME)"
+          ${{ matrix.tests && '-Tests' || '' }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -74,6 +76,7 @@ jobs:
         include:
           - arch: x64
             lib: linux64/vrclient.so
+            tests: true
           - arch: x86
             lib: vrclient.so
     steps:
@@ -91,7 +94,7 @@ jobs:
           submodules: recursive
 
       - name: Build
-        run: sh scripts/ci/build-linux.sh ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"
+        run: sh scripts/ci/build-linux.sh ${{ matrix.tests && '--tests' || '' }} ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"
 
       - uses: actions/upload-artifact@v7
         with:
