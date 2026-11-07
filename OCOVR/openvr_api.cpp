@@ -275,7 +275,15 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 #ifndef _WIN32
 		if (eApplicationType != VRApplication_Background) // Proton uses this
 #endif
-			ERR("Cannot init VR: unsupported apptype " + to_string(eApplicationType));
+		{
+			// Overlays and background apps aren't games, so refuse them with an init error rather than ending
+			// the program: it can then carry on as if VR weren't there.
+			OOVR_LOGF("Refusing application type %d: OpenComposite runs games only", (int)eApplicationType);
+			if (peError) {
+				*peError = eApplicationType == VRApplication_Background ? VRInitError_Init_NoServerForBackgroundApp : VRInitError_Init_InvalidApplicationType;
+			}
+			return 0;
+		}
 
 	if (running)
 		ERR("Cannot init VR: Already running!");
