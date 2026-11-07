@@ -31,77 +31,37 @@
 #include <memory>
 #include <mutex>
 
-namespace {
-
-// --- poses ---
-
-XrQuaternionf QMul(const XrQuaternionf& a, const XrQuaternionf& b)
-{
-	return {
-		a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-		a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-		a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-		a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-	};
-}
-
-XrQuaternionf QConj(const XrQuaternionf& q) { return { -q.x, -q.y, -q.z, q.w }; }
-
-XrVector3f QRotate(const XrQuaternionf& q, const XrVector3f& v)
-{
-	XrQuaternionf p{ v.x, v.y, v.z, 0 };
-	XrQuaternionf r = QMul(QMul(q, p), QConj(q));
-	return { r.x, r.y, r.z };
-}
-
-XrPosef Compose(const XrPosef& a, const XrPosef& b) // a * b: b expressed in a's frame
-{
-	XrVector3f p = QRotate(a.orientation, b.position);
-	return { QMul(a.orientation, b.orientation), { a.position.x + p.x, a.position.y + p.y, a.position.z + p.z } };
-}
-
-XrPosef Inverse(const XrPosef& a)
-{
-	XrQuaternionf inv = QConj(a.orientation);
-	XrVector3f p = QRotate(inv, a.position);
-	return { inv, { -p.x, -p.y, -p.z } };
-}
-
-const XrPosef kIdentity{ { 0, 0, 0, 1 }, { 0, 0, 0 } };
-const XrPosef kHead{ { 0, 0, 0, 1 }, { 0, 1.7f, 0 } };
-
-// --- objects ---
-
-struct RtSpace {
-	XrReferenceSpaceType type = XR_REFERENCE_SPACE_TYPE_LOCAL;
-	XrPosef offset = kIdentity;
-	bool isAction = false;
-	XrPosef actionPose = kIdentity; // pose in STAGE for action spaces
-};
-
-struct RtState {
-	std::mutex lock;
-	bool instanceAlive = false;
-	std::set<std::string> enabledExtensions;
-	std::unique_ptr<RtSession> session;
-	std::map<RtSpace*, std::unique_ptr<RtSpace>> spaces;
-	std::map<RtSwapchain*, std::unique_ptr<RtSwapchain>> swapchains;
-	std::deque<XrEventDataBuffer> events;
-	std::map<std::string, XrPath> pathIds;
-	std::vector<std::string> paths{ "" };
-	XrTime time = 1000000000;
-};
-
 RtState& St()
 {
 	static RtState state;
 	return state;
 }
 
-XrInstance kInstance = (XrInstance)(uintptr_t)0x1001;
-const XrSystemId kSystem = 1;
+XrPath RtPath(const std::string& str)
+{
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	auto it = St().pathIds.find(str);
+	if (it != St().pathIds.end())
+		return it->second;
+	XrPath id = St().paths.size();
+	St().paths.push_back(str);
+	St().pathIds[str] = id;
+	return id;
+}
 
-XrTime Period() { return (XrTime)(1e9 / GetScript().displayHz); }
+std::string RtPathString(XrPath path)
+{
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	if (path == XR_NULL_PATH || path >= St().paths.size())
+		return "";
+	return St().paths[(size_t)path];
+}
+
+void QueueEvent(const XrEventDataBuffer& ev)
+{
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	St().events.push_back(ev);
+}
 
 void QueueState(RtSession* s, XrSessionState state)
 {
@@ -112,8 +72,20 @@ void QueueState(RtSession* s, XrSessionState state)
 	ev->session = (XrSession)s;
 	ev->state = state;
 	ev->time = St().time;
-	St().events.push_back(buf);
+	QueueEvent(buf);
 }
+
+bool RtExtensionEnabled(const char* name)
+{
+	return St().enabledExtensions.count(name) != 0;
+}
+
+namespace {
+
+XrInstance kInstance = (XrInstance)(uintptr_t)0x1001;
+const XrSystemId kSystem = 1;
+
+XrTime Period() { return (XrTime)(1e9 / GetScript().displayHz); }
 
 XrSessionState StateFromName(const std::string& n)
 {
@@ -176,7 +148,7 @@ XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(const char* layer, uint
 XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* info, XrInstance* instance)
 {
 	FAIL_POINT("xrCreateInstance");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	if (St().instanceAlive)
 		return XR_ERROR_LIMIT_REACHED;
 	std::set<std::string> enabled;
@@ -206,7 +178,7 @@ XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* info, XrInstance*
 XrResult XRAPI_CALL DestroyInstance(XrInstance)
 {
 	{
-		std::lock_guard<std::mutex> g(St().lock);
+		std::lock_guard<std::recursive_mutex> g(St().lock);
 		for (auto& [p, sc] : St().swapchains)
 			RtD3D11DestroySwapchain(sc.get());
 		St().swapchains.clear();
@@ -216,6 +188,10 @@ XrResult XRAPI_CALL DestroyInstance(XrInstance)
 		St().session.reset();
 		St().events.clear();
 		St().instanceAlive = false;
+		Dump& d = GetDump();
+		std::lock_guard<std::mutex> dg(d.lock);
+		RtActionsDump(d.root);
+		RtActionsReset();
 	}
 	GetDump().Write();
 	return XR_SUCCESS;
@@ -230,7 +206,7 @@ XrResult XRAPI_CALL GetInstanceProperties(XrInstance, XrInstanceProperties* prop
 
 XrResult XRAPI_CALL PollEvent(XrInstance, XrEventDataBuffer* out)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	if (St().events.empty())
 		return XR_EVENT_UNAVAILABLE;
 	*out = St().events.front();
@@ -272,22 +248,13 @@ XrResult XRAPI_CALL StringToPath(XrInstance, const char* str, XrPath* path)
 {
 	if (!str || str[0] != '/')
 		return XR_ERROR_PATH_FORMAT_INVALID;
-	std::lock_guard<std::mutex> g(St().lock);
-	auto it = St().pathIds.find(str);
-	if (it != St().pathIds.end()) {
-		*path = it->second;
-		return XR_SUCCESS;
-	}
-	XrPath id = St().paths.size();
-	St().paths.push_back(str);
-	St().pathIds[str] = id;
-	*path = id;
+	*path = RtPath(str);
 	return XR_SUCCESS;
 }
 
 XrResult XRAPI_CALL PathToString(XrInstance, XrPath path, uint32_t capacity, uint32_t* count, char* buffer)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	if (path == XR_NULL_PATH || path >= St().paths.size())
 		return XR_ERROR_PATH_INVALID;
 	const std::string& s = St().paths[(size_t)path];
@@ -321,6 +288,7 @@ XrResult XRAPI_CALL GetSystemProperties(XrInstance, XrSystemId, XrSystemProperti
 	props->graphicsProperties.maxSwapchainImageHeight = 8192;
 	props->trackingProperties.orientationTracking = XR_TRUE;
 	props->trackingProperties.positionTracking = XR_TRUE;
+	RtExtensionsSystemProperties(props);
 	return XR_SUCCESS;
 }
 
@@ -374,7 +342,7 @@ XrResult XRAPI_CALL GetD3D11GraphicsRequirements(XrInstance, XrSystemId, XrGraph
 XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, XrSession* out)
 {
 	FAIL_POINT("xrCreateSession");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	if (St().session)
 		return XR_ERROR_LIMIT_REACHED;
 	auto session = std::make_unique<RtSession>();
@@ -385,6 +353,10 @@ XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, X
 			binding = "d3d11";
 		}
 	}
+	if (!RtExtensionsSessionInfo(info, session.get()))
+		return XR_ERROR_VALIDATION_FAILURE;
+	if (session->headless)
+		binding = "headless";
 	if (!session->device && !session->headless)
 		return XR_ERROR_GRAPHICS_DEVICE_INVALID;
 	if (session->device)
@@ -393,6 +365,7 @@ XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, X
 		Dump& d = GetDump();
 		std::lock_guard<std::mutex> dg(d.lock);
 		d.root["session"]["binding"] = binding;
+		d.root["session"]["overlay"] = session->overlay;
 	}
 	RtSession* raw = session.get();
 	St().session = std::move(session);
@@ -404,7 +377,7 @@ XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, X
 
 XrResult XRAPI_CALL DestroySession(XrSession session)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s || (XrSession)s != session)
 		return XR_ERROR_HANDLE_INVALID;
@@ -421,7 +394,7 @@ XrResult XRAPI_CALL DestroySession(XrSession session)
 XrResult XRAPI_CALL BeginSession(XrSession, const XrSessionBeginInfo* info)
 {
 	FAIL_POINT("xrBeginSession");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
@@ -435,7 +408,7 @@ XrResult XRAPI_CALL BeginSession(XrSession, const XrSessionBeginInfo* info)
 
 XrResult XRAPI_CALL EndSession(XrSession)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
@@ -448,7 +421,7 @@ XrResult XRAPI_CALL EndSession(XrSession)
 
 XrResult XRAPI_CALL RequestExitSession(XrSession)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s || !s->running)
 		return XR_ERROR_SESSION_NOT_RUNNING;
@@ -474,7 +447,7 @@ XrResult XRAPI_CALL CreateReferenceSpace(XrSession, const XrReferenceSpaceCreate
 	default:
 		return XR_ERROR_REFERENCE_SPACE_UNSUPPORTED;
 	}
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto sp = std::make_unique<RtSpace>();
 	sp->type = info->referenceSpaceType;
 	sp->offset = info->poseInReferenceSpace;
@@ -486,7 +459,7 @@ XrResult XRAPI_CALL CreateReferenceSpace(XrSession, const XrReferenceSpaceCreate
 
 XrResult XRAPI_CALL DestroySpace(XrSpace space)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	St().spaces.erase((RtSpace*)space);
 	return XR_SUCCESS;
 }
@@ -494,7 +467,7 @@ XrResult XRAPI_CALL DestroySpace(XrSpace space)
 XrResult XRAPI_CALL LocateSpace(XrSpace space, XrSpace base, XrTime, XrSpaceLocation* loc)
 {
 	FAIL_POINT("xrLocateSpace");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto a = St().spaces.find((RtSpace*)space), b = St().spaces.find((RtSpace*)base);
 	if (a == St().spaces.end() || b == St().spaces.end())
 		return XR_ERROR_HANDLE_INVALID;
@@ -517,7 +490,7 @@ XrResult XRAPI_CALL GetReferenceSpaceBoundsRect(XrSession, XrReferenceSpaceType 
 XrResult XRAPI_CALL LocateViews(XrSession, const XrViewLocateInfo* info, XrViewState* state, uint32_t capacity, uint32_t* count, XrView* views)
 {
 	FAIL_POINT("xrLocateViews");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto b = St().spaces.find((RtSpace*)info->space);
 	if (b == St().spaces.end())
 		return XR_ERROR_HANDLE_INVALID;
@@ -548,7 +521,7 @@ XrResult XRAPI_CALL EnumerateSwapchainFormats(XrSession, uint32_t capacity, uint
 XrResult XRAPI_CALL CreateSwapchain(XrSession, const XrSwapchainCreateInfo* info, XrSwapchain* out)
 {
 	FAIL_POINT("xrCreateSwapchain");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
@@ -564,7 +537,7 @@ XrResult XRAPI_CALL CreateSwapchain(XrSession, const XrSwapchainCreateInfo* info
 
 XrResult XRAPI_CALL DestroySwapchain(XrSwapchain swapchain)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto it = St().swapchains.find((RtSwapchain*)swapchain);
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
@@ -575,7 +548,7 @@ XrResult XRAPI_CALL DestroySwapchain(XrSwapchain swapchain)
 
 XrResult XRAPI_CALL EnumerateSwapchainImages(XrSwapchain swapchain, uint32_t capacity, uint32_t* count, XrSwapchainImageBaseHeader* images)
 {
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto it = St().swapchains.find((RtSwapchain*)swapchain);
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
@@ -594,7 +567,7 @@ XrResult XRAPI_CALL EnumerateSwapchainImages(XrSwapchain swapchain, uint32_t cap
 XrResult XRAPI_CALL AcquireSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageAcquireInfo*, uint32_t* index)
 {
 	FAIL_POINT("xrAcquireSwapchainImage");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto it = St().swapchains.find((RtSwapchain*)swapchain);
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
@@ -616,7 +589,7 @@ XrResult XRAPI_CALL WaitSwapchainImage(XrSwapchain, const XrSwapchainImageWaitIn
 XrResult XRAPI_CALL ReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageReleaseInfo*)
 {
 	FAIL_POINT("xrReleaseSwapchainImage");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	auto it = St().swapchains.find((RtSwapchain*)swapchain);
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
@@ -631,7 +604,7 @@ XrResult XRAPI_CALL ReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapcha
 XrResult XRAPI_CALL WaitFrame(XrSession, const XrFrameWaitInfo*, XrFrameState* fs)
 {
 	FAIL_POINT("xrWaitFrame");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
@@ -648,6 +621,7 @@ XrResult XRAPI_CALL WaitFrame(XrSession, const XrFrameWaitInfo*, XrFrameState* f
 		if (ev.frame == s->framesWaited && ev.type == "session_state")
 			QueueState(s, StateFromName(ev.state));
 	}
+	RtActionsOnFrame(s);
 	St().time += Period();
 	fs->predictedDisplayTime = St().time + Period();
 	fs->predictedDisplayPeriod = Period();
@@ -658,7 +632,7 @@ XrResult XRAPI_CALL WaitFrame(XrSession, const XrFrameWaitInfo*, XrFrameState* f
 XrResult XRAPI_CALL BeginFrame(XrSession, const XrFrameBeginInfo*)
 {
 	FAIL_POINT("xrBeginFrame");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
@@ -693,7 +667,7 @@ const char* LayerTypeName(XrStructureType type)
 XrResult XRAPI_CALL EndFrame(XrSession, const XrFrameEndInfo* info)
 {
 	FAIL_POINT("xrEndFrame");
-	std::lock_guard<std::mutex> g(St().lock);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
@@ -795,6 +769,21 @@ XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, P
 		if (e.extension && !St().enabledExtensions.count(e.extension))
 			return XR_ERROR_FUNCTION_UNSUPPORTED;
 		*function = e.fn;
+		return XR_SUCCESS;
+	}
+	if (PFN_xrVoidFunction fn = RtActionsLookup(name)) {
+		if (instance == XR_NULL_HANDLE)
+			return XR_ERROR_HANDLE_INVALID;
+		*function = fn;
+		return XR_SUCCESS;
+	}
+	const char* extension = nullptr;
+	if (PFN_xrVoidFunction fn = RtExtensionsLookup(name, &extension)) {
+		if (instance == XR_NULL_HANDLE)
+			return XR_ERROR_HANDLE_INVALID;
+		if (extension && !RtExtensionEnabled(extension))
+			return XR_ERROR_FUNCTION_UNSUPPORTED;
+		*function = fn;
 		return XR_SUCCESS;
 	}
 	return XR_ERROR_FUNCTION_UNSUPPORTED;
