@@ -22,3 +22,7 @@ else ()
 endif ()
 add_test(NAME unit COMMAND oc_unit_tests)
 set_tests_properties(unit PROPERTIES LABELS unit)
+
+if (WIN32)
+	add_subdirectory(runtime)
+endif ()
