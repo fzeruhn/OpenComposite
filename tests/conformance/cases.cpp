@@ -1,0 +1,371 @@
+// The named cases of oc_conformance: sequences the per-method callers can't do (real handles, frames, several Init
+// rounds). Each writes one record per step: {"case", "method": <step label>, ...}.
+
+#include "conformance.h"
+
+#include "IVRCompositor_029.h"
+#include "IVRInput_010.h"
+#include "IVROverlay_028.h"
+#include "IVRSystem_022.h"
+
+#include <thread>
+
+using namespace conformance;
+
+namespace {
+
+Json::Value Err(int e)
+{
+	Json::Value v;
+	v["ret"] = e;
+	return v;
+}
+
+void InitMatrix(CaseContext& c)
+{
+	std::vector<int> types;
+	for (int t = 0; t <= 13; t++)
+		types.push_back(t);
+	types.push_back(99);
+	for (int t : types) {
+		vr::EVRInitError e = c.core->Init((vr::EVRApplicationType)t, nullptr);
+		Json::Value r;
+		r["init_error"] = (int)e;
+		c.Record("Init(" + std::to_string(t) + ")", r);
+		if (e == vr::VRInitError_None)
+			c.core->Cleanup();
+	}
+	Json::Value r;
+	r["ret"] = c.core->BIsHmdPresent();
+	c.Record("BIsHmdPresent", r);
+}
+
+void InitRepeat(CaseContext& c)
+{
+	int ok = 0, found = 0;
+	vr::EVRInitError last = vr::VRInitError_None;
+	for (int i = 0; i < 200; i++) {
+		last = c.core->Init(vr::VRApplication_Scene, nullptr);
+		if (last != vr::VRInitError_None)
+			continue;
+		ok++;
+		vr::EVRInitError le;
+		if (c.core->GetGenericInterface("IVRSystem_022", &le))
+			found++;
+		c.core->Cleanup();
+	}
+	Json::Value r;
+	r["inits_ok"] = ok;
+	r["interfaces_found"] = found;
+	r["last_init_error"] = (int)last;
+	c.Record("200 rounds", r);
+}
+
+void InitOtherThread(CaseContext& c)
+{
+	vr::EVRInitError e = vr::VRInitError_None;
+	std::thread t([&] { e = c.core->Init(vr::VRApplication_Scene, nullptr); });
+	t.join();
+	Json::Value r;
+	r["init_error"] = (int)e;
+	c.Record("Init on another thread", r);
+	if (e != vr::VRInitError_None)
+		return;
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	Json::Value r2;
+	r2["lookup_error"] = (int)le;
+	if (sys) {
+		uint32_t w = 0, h = 0;
+		sys->GetRecommendedRenderTargetSize(&w, &h);
+		r2["width"] = w;
+		r2["height"] = h;
+	}
+	c.Record("GetRecommendedRenderTargetSize on the main thread", r2);
+	c.core->Cleanup();
+}
+
+void LookupBeforeInit(CaseContext& c)
+{
+	auto lookups = [&](const char* when) {
+		for (const std::string& v : GeneratedVersions()) {
+			vr::EVRInitError le = vr::VRInitError_None;
+			void* p = c.core->GetGenericInterface(v.c_str(), &le);
+			Json::Value r;
+			r["lookup_error"] = (int)le;
+			r["found"] = p != nullptr;
+			c.Record(std::string(when) + " " + v, r);
+		}
+	};
+	lookups("before Init:");
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) == vr::VRInitError_None)
+		c.core->Cleanup();
+	lookups("after Cleanup:");
+}
+
+void UnknownInterface(CaseContext& c)
+{
+	vr::EVRInitError e = c.core->Init(vr::VRApplication_Scene, nullptr);
+	for (const char* name : { "IVRNope_001", "IVRSystem_999", "FnTable:IVRSystem_022", "FnTable:IVRNope_001" }) {
+		vr::EVRInitError le = vr::VRInitError_None;
+		void* p = c.core->GetGenericInterface(name, &le);
+		Json::Value r;
+		r["init_error"] = (int)e;
+		r["lookup_error"] = (int)le;
+		r["found"] = p != nullptr;
+		c.Record(name, r);
+	}
+	if (e == vr::VRInitError_None)
+		c.core->Cleanup();
+}
+
+void OverlayLifecycle(CaseContext& c)
+{
+	using namespace vr::IVROverlay_028;
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* ov = (IVROverlay*)c.core->GetGenericInterface("IVROverlay_028", &le);
+	if (!ov) {
+		c.Record("no IVROverlay_028", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
+	c.Record("CreateOverlay", Err(ov->CreateOverlay("oc.test", "Test", &h)));
+
+	using SetFloat = vr::EVROverlayError (IVROverlay::*)(vr::VROverlayHandle_t, float);
+	using GetFloat = vr::EVROverlayError (IVROverlay::*)(vr::VROverlayHandle_t, float*);
+	auto setGetFloat = [&](const char* name, SetFloat setter, GetFloat getter, float value) {
+		Json::Value r;
+		r["set"] = (int)(ov->*setter)(h, value);
+		float got = -1;
+		r["get"] = (int)(ov->*getter)(h, &got);
+		r["value"] = got;
+		r["expected"] = value;
+		c.Record(name, r);
+	};
+	setGetFloat("Alpha", &IVROverlay::SetOverlayAlpha, &IVROverlay::GetOverlayAlpha, 0.5f);
+	setGetFloat("WidthInMeters", &IVROverlay::SetOverlayWidthInMeters, &IVROverlay::GetOverlayWidthInMeters, 1.5f);
+	setGetFloat("Curvature", &IVROverlay::SetOverlayCurvature, &IVROverlay::GetOverlayCurvature, 0.25f);
+	setGetFloat("PreCurvePitch", &IVROverlay::SetOverlayPreCurvePitch, &IVROverlay::GetOverlayPreCurvePitch, 0.125f);
+	setGetFloat("TexelAspect", &IVROverlay::SetOverlayTexelAspect, &IVROverlay::GetOverlayTexelAspect, 2.0f);
+	{
+		Json::Value r;
+		r["set"] = (int)ov->SetOverlaySortOrder(h, 3);
+		uint32_t got = 0;
+		r["get"] = (int)ov->GetOverlaySortOrder(h, &got);
+		r["value"] = got;
+		r["expected"] = 3;
+		c.Record("SortOrder", r);
+	}
+	{
+		Json::Value r;
+		r["set"] = (int)ov->SetOverlayRenderingPid(h, 1234);
+		r["value"] = ov->GetOverlayRenderingPid(h);
+		r["expected"] = 1234;
+		c.Record("RenderingPid", r);
+	}
+	{
+		Json::Value r;
+		r["set"] = (int)ov->SetOverlayColor(h, 0.25f, 0.5f, 0.75f);
+		float cr = 0, cg = 0, cb = 0;
+		r["get"] = (int)ov->GetOverlayColor(h, &cr, &cg, &cb);
+		r["value"] = cr + cg * 10 + cb * 100;
+		r["expected"] = 0.25 + 5.0 + 75.0;
+		c.Record("Color", r);
+	}
+	{
+		Json::Value r;
+		r["set"] = (int)ov->SetOverlayFlag(h, VROverlayFlags_SideBySide_Parallel, true);
+		bool got = false;
+		r["get"] = (int)ov->GetOverlayFlag(h, VROverlayFlags_SideBySide_Parallel, &got);
+		r["value"] = got;
+		r["expected"] = true;
+		c.Record("Flag", r);
+	}
+	{
+		vr::HmdMatrix34_t m{};
+		m.m[0][0] = m.m[1][1] = m.m[2][2] = 1;
+		m.m[1][3] = 1.25f;
+		Json::Value r;
+		r["set"] = (int)ov->SetOverlayTransformAbsolute(h, vr::TrackingUniverseStanding, &m);
+		vr::HmdMatrix34_t got{};
+		vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseSeated;
+		r["get"] = (int)ov->GetOverlayTransformAbsolute(h, &origin, &got);
+		r["value"] = got.m[1][3];
+		r["expected"] = 1.25f;
+		c.Record("TransformAbsolute", r);
+	}
+	vr::Texture_t tex{};
+	callers::Texture made(ArgSet::Valid, *c.call);
+	c.Record("SetOverlayTexture", Err(made.get() ? (int)ov->SetOverlayTexture(h, made.get()) : -1));
+	c.Record("ShowOverlay", Err(ov->ShowOverlay(h)));
+	{
+		Json::Value r;
+		r["ret"] = ov->IsOverlayVisible(h);
+		c.Record("IsOverlayVisible", r);
+	}
+	c.Record("HideOverlay", Err(ov->HideOverlay(h)));
+	c.Record("DestroyOverlay", Err(ov->DestroyOverlay(h)));
+	(void)tex;
+	c.core->Cleanup();
+}
+
+void InputManifest(CaseContext& c)
+{
+	using namespace vr::IVRInput_010;
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* in = (IVRInput*)c.core->GetGenericInterface("IVRInput_010", &le);
+	if (!in) {
+		c.Record("no IVRInput_010", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	c.Record("SetActionManifestPath", Err(in->SetActionManifestPath(c.manifest.c_str())));
+	vr::VRActionSetHandle_t set = vr::k_ulInvalidActionSetHandle;
+	c.Record("GetActionSetHandle", Err(in->GetActionSetHandle("/actions/main", &set)));
+	vr::VRActionHandle_t trigger = 0, grab = 0, pose = 0, haptic = 0;
+	c.Record("GetActionHandle trigger", Err(in->GetActionHandle("/actions/main/in/trigger", &trigger)));
+	c.Record("GetActionHandle grab", Err(in->GetActionHandle("/actions/main/in/grab", &grab)));
+	c.Record("GetActionHandle pose", Err(in->GetActionHandle("/actions/main/in/pose", &pose)));
+	c.Record("GetActionHandle haptic", Err(in->GetActionHandle("/actions/main/out/haptic", &haptic)));
+	VRActiveActionSet_t active{};
+	active.ulActionSet = set;
+	c.Record("UpdateActionState", Err(in->UpdateActionState(&active, sizeof(active), 1)));
+	InputDigitalActionData_t digital{};
+	c.Record("GetDigitalActionData grab", Err(in->GetDigitalActionData(grab, &digital, sizeof(digital), vr::k_ulInvalidInputValueHandle)));
+	InputAnalogActionData_t analog{};
+	c.Record("GetAnalogActionData trigger", Err(in->GetAnalogActionData(trigger, &analog, sizeof(analog), vr::k_ulInvalidInputValueHandle)));
+	InputPoseActionData_t poseData{};
+	c.Record("GetPoseActionDataForNextFrame pose",
+	    Err(in->GetPoseActionDataForNextFrame(pose, vr::TrackingUniverseStanding, &poseData, sizeof(poseData), vr::k_ulInvalidInputValueHandle)));
+	c.Record("TriggerHapticVibrationAction", Err(in->TriggerHapticVibrationAction(haptic, 0, 0.1f, 160, 0.5f, vr::k_ulInvalidInputValueHandle)));
+	c.core->Cleanup();
+}
+
+struct Frames {
+	vr::IVRCompositor_029::IVRCompositor* comp = nullptr;
+	vr::IVRSystem_022::IVRSystem* sys = nullptr;
+};
+
+bool OpenFrames(CaseContext& c, Frames& f)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return false;
+	}
+	vr::EVRInitError le;
+	f.comp = (vr::IVRCompositor_029::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_029", &le);
+	f.sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	if (!f.comp || !f.sys) {
+		c.Record("no compositor or system", Err(le));
+		c.core->Cleanup();
+		return false;
+	}
+	return true;
+}
+
+void FrameLoop(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	for (int frame = 1; frame <= 120; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		Json::Value r;
+		r["wait"] = (int)f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		r["left"] = (int)f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		r["right"] = (int)f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		Json::Value events(Json::arrayValue);
+		vr::VREvent_t ev{};
+		for (int n = 0; n < 64 && f.sys->PollNextEvent(&ev, sizeof(ev)); n++)
+			events.append((int)ev.eventType);
+		r["events"] = events;
+		c.Record("frame " + std::to_string(frame), r);
+	}
+	c.core->Cleanup();
+}
+
+void SubmitEdges(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	vr::TrackedDevicePose_t poses[16];
+	f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+	c.Record("left", Err(f.comp->Submit(vr::Eye_Left, tex.get())));
+	c.Record("left again", Err(f.comp->Submit(vr::Eye_Left, tex.get())));
+	c.Record("right", Err(f.comp->Submit(vr::Eye_Right, tex.get())));
+
+	f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+	vr::Texture_t nullTex{ nullptr, vr::TextureType_DirectX, vr::ColorSpace_Auto };
+	c.Record("left null", Err(f.comp->Submit(vr::Eye_Left, &nullTex)));
+	c.Record("right not null", Err(f.comp->Submit(vr::Eye_Right, tex.get())));
+
+#ifdef _WIN32
+	f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+	vr::Texture_t odd{ nullptr, vr::TextureType_DirectX, vr::ColorSpace_Auto };
+	if (c.call->d3d11) {
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = desc.Height = 256;
+		desc.MipLevels = desc.ArraySize = 1;
+		desc.Format = (DXGI_FORMAT)78;
+		desc.SampleDesc.Count = 1;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		ID3D11Texture2D* t = nullptr;
+		if (SUCCEEDED(c.call->d3d11->CreateTexture2D(&desc, nullptr, &t)))
+			odd.handle = t;
+	}
+	Json::Value r = Err(odd.handle ? (int)f.comp->Submit(vr::Eye_Left, &odd) : -1);
+	r["texture_made"] = odd.handle != nullptr;
+	c.Record("left DXGI format 78", r);
+	f.comp->Submit(vr::Eye_Right, tex.get());
+	if (odd.handle)
+		((ID3D11Texture2D*)odd.handle)->Release();
+#endif
+
+	vr::Texture_t six[6];
+	for (vr::Texture_t& t : six)
+		t = *tex.get();
+	c.Record("SetSkyboxOverride six faces", Err(f.comp->SetSkyboxOverride(six, 6)));
+	c.core->Cleanup();
+
+	// A Background app submitting (refused at Init on Windows, allowed on Linux for Proton)
+	vr::EVRInitError e = c.core->Init(vr::VRApplication_Background, nullptr);
+	Json::Value bg;
+	bg["init_error"] = (int)e;
+	if (e == vr::VRInitError_None) {
+		vr::EVRInitError le;
+		auto* comp = (vr::IVRCompositor_029::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_029", &le);
+		bg["ret"] = comp ? (int)comp->Submit(vr::Eye_Left, tex.get()) : -1;
+		c.core->Cleanup();
+	}
+	c.Record("Background submit", bg);
+}
+
+} // namespace
+
+const std::map<std::string, CaseFn>& conformance::Cases()
+{
+	static const std::map<std::string, CaseFn> cases = {
+		{ "init-matrix", InitMatrix },
+		{ "init-repeat", InitRepeat },
+		{ "init-other-thread", InitOtherThread },
+		{ "lookup-before-init", LookupBeforeInit },
+		{ "unknown-interface", UnknownInterface },
+		{ "overlay-lifecycle", OverlayLifecycle },
+		{ "input-manifest", InputManifest },
+		{ "frame-loop", FrameLoop },
+		{ "submit-edges", SubmitEdges },
+	};
+	return cases;
+}

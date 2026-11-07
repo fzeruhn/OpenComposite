@@ -1,0 +1,6 @@
+crashed: 1
+ended: 1
+ok: 7
+
+ended: init-matrix/<end>#/-/- (exit 70)
+crashed: unknown-interface/<end>#/-/- (exit 3221226505)

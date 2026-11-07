@@ -40,6 +40,22 @@ if (WIN32)
 	target_compile_options(oc_callers PRIVATE /bigobj)
 endif ()
 add_dependencies(oc_callers OCCore)
+if (NOT MSVC)
+	# The split headers' unused version-string constants (IVRIOBuffer_Version and the like)
+	target_compile_options(oc_callers PUBLIC -Wno-unused-variable)
+endif ()
+
+# The conformance program (conformance/README.md): loads a vrclient DLL and calls everything
+add_executable(oc_conformance
+	conformance/conformance.h
+	conformance/oc_conformance.cpp
+	conformance/cases.cpp
+)
+target_link_libraries(oc_conformance PRIVATE oc_callers)
+target_compile_definitions(oc_conformance PRIVATE OC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/data")
+if (NOT WIN32)
+	target_link_libraries(oc_conformance PRIVATE -ldl -lpthread)
+endif ()
 
 add_executable(oc_unit_tests
 	unit/main.cpp
