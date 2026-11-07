@@ -251,6 +251,19 @@ These scripts are automatically run when buildling the project. If you have adde
 the project, otherwise it will only rebuild a couple of files which is very quick.
 You can read more about why these scripts exist and how they work in the `doc/` folder of this repository.
 
+## Adding a new OpenVR SDK
+
+`tests/conformance/interfaces.txt` lists every interface version Valve has shipped, and `scripts/openvr_inventory.py`
+keeps it up to date. When Valve tags a new SDK:
+
+1. Clone Valve's repository without its files: `git clone --filter=blob:none --no-checkout https://github.com/ValveSoftware/openvr.git <dir>`.
+2. Refresh the list: `python scripts/openvr_inventory.py --valve-repo <dir> --write tests/conformance/interfaces.txt`.
+3. Add the new SDK's `headers/openvr.h` to `OpenVRHeaders/` as `openvr-<version>.h`, byte for byte.
+4. Add a `GEN_INTERFACE` line in the interface's `OpenOVR/Reimpl/CVR*.cpp` file for each new version, and write the
+   `Base*` methods it needs.
+5. Check: `python scripts/openvr_inventory.py --check` lists every version that isn't offered yet. A version answered
+   "not found" on purpose goes in `tests/conformance/not_implemented.txt` with its reason.
+
 # Licence
 
 OpenComposite itself is Free Software under the GPLv3:
