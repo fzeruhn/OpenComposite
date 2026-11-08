@@ -311,8 +311,10 @@ add_library(OCCore STATIC
 	OpenOVR/Misc/Config.cpp
 	OpenOVR/Misc/JsonFile.cpp
 	OpenOVR/Misc/SteamVRPaths.cpp
+	OpenOVR/Misc/SharedStore.cpp
 	OpenOVR/Misc/JsonFile.h
 	OpenOVR/Misc/SteamVRPaths.h
+	OpenOVR/Misc/SharedStore.h
 	OpenOVR/Misc/SoftFail.cpp
 	OpenOVR/Misc/SoftFail.h
 	OpenOVR/Misc/EnumNames.h
