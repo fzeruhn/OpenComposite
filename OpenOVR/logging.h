@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "Misc/SoftFail.h"
+
 // Not strictly a logging thing, but makes clion happy about calling OOVR_ABORT and not returning
 #ifdef _WIN32
 #define OC_NORETURN __declspec(noreturn)
@@ -25,7 +27,6 @@ void oovr_log_raw_format(const char* file, long line, const char* func, const ch
 void oovr_log_set_test_sink(void (*sink)(const char* line));
 
 OC_NORETURN void oovr_abort_raw(const char* file, long line, const char* func, const char* msg, const char* title = nullptr, ...) OC_PRINTF(4, 6);
-void oovr_soft_abort_raw(const char* file, long line, const char* func, int* hit_count, const char* msg, ...) OC_PRINTF(5, 6);
 
 std::string GetEnv(const std::string& var);
 
@@ -54,10 +55,10 @@ std::string GetEnv(const std::string& var);
  * Previously hard aborts were used for this, and unsurprisingly it caused a lot of trouble where what
  * should have been minor issues were making games crash at startup.
  */
-#define OOVR_SOFT_ABORTF(msg, ...)                                                                      \
-	do {                                                                                                \
-		static int soft_abort_hit_count = 0;                                                            \
-		oovr_soft_abort_raw(__FILE__, __LINE__, __FUNCTION__, &soft_abort_hit_count, msg, __VA_ARGS__); \
+#define OOVR_SOFT_ABORTF(msg, ...)                                           \
+	do {                                                                     \
+		static OcSoftSite oovr_soft_site_(__FILE__, __LINE__, __func__);     \
+		oc_soft_fail(&oovr_soft_site_, msg, __VA_ARGS__);                    \
 	} while (0)
 
 // Work on GCC since it needs some varargs, and the actual value doesn't matter

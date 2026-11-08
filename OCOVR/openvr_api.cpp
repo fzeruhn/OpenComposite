@@ -371,6 +371,9 @@ VR_INTERFACE void VR_CALLTYPE VR_ShutdownInternal()
 {
 	OOVR_LOG("OpenComposite shutdown");
 
+	// What the app asked for that OpenComposite doesn't do, with counts
+	oc_soft_log_summary();
+
 	// Reset interfaces
 	// Do this first, while the OVR session is still available in case they
 	//  need to use it for cleanup.

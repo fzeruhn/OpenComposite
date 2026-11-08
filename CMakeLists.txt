@@ -307,6 +307,8 @@ add_library(OCCore STATIC
 	OpenOVR/linux_funcs.cpp
 	OpenOVR/Misc/backtrace.cpp
 	OpenOVR/Misc/Config.cpp
+	OpenOVR/Misc/SoftFail.cpp
+	OpenOVR/Misc/SoftFail.h
 	OpenOVR/Misc/debug_helper.cpp
 	OpenOVR/Misc/xrutil.cpp
 	OpenOVR/Misc/xrmoreutils.cpp

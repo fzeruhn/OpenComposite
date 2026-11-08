@@ -107,6 +107,13 @@ jobs:
         with:
           submodules: recursive
 
+      # No new hard stop (scripts/fatal_sites.txt lists the ones still allowed)
+      - name: Hard stops
+        if: matrix.tests
+        run: |
+          python3 scripts/abort_sites.py --self-test
+          python3 scripts/abort_sites.py --check
+
       - name: Build
         run: sh scripts/ci/build-linux.sh ${{ matrix.tests && '--tests' || '' }} ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"
 

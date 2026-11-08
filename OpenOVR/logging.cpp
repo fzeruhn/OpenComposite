@@ -359,34 +359,6 @@ OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func
 	abort();
 }
 
-void oovr_soft_abort_raw(const char* file, long line, const char* func, int* count, const char* msg, ...)
-{
-	// If this has been hit already, just ignore it - if we needed a crash that would've been done.
-	if (*count > 0) {
-		count++;
-		return;
-	}
-
-	va_list args;
-	va_start(args, msg);
-
-	// Otherwise, if we're in debug mode do a hard abort. Otherwise log and continue.
-	// TODO fix this
-	if (oovr_global_configuration.StopOnSoftAbort()) {
-		oovr_abort_raw_va(file, line, func, msg, "OpenComposite Debug Error", args);
-	}
-
-	char buff[256];
-	vsnprintf(buff, sizeof(buff), msg, args);
-	buff[sizeof(buff) - 1] = 0;
-
-	oovr_log_raw_format(file, line, func, "Soft Abort triggered (in non-debug mode, continuing - this will only print once): %s", buff);
-
-	*count = 1;
-
-	va_end(args);
-}
-
 void oovr_message_raw(const char* message, const char* title)
 {
 	// No need to log this, it will have already been done by the caller
