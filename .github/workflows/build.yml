@@ -59,6 +59,12 @@ jobs:
           -Out build -Version "$env:GITHUB_SHA ($env:GITHUB_REF_NAME)"
           ${{ matrix.tests && '-Tests' || '' }}
 
+      # Every OpenVR interface version Valve has shipped is offered or set aside with a reason (offline: it compares
+      # interfaces.txt with the source)
+      - name: Interface inventory
+        if: matrix.tests
+        run: python scripts/openvr_inventory.py --check
+
       # Nothing may end, crash or hang; every run is checked, and the summaries kept
       - name: Conformance
         if: matrix.tests

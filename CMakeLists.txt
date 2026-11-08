@@ -357,6 +357,7 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/BaseDebug.cpp
 	OpenOVR/Reimpl/BaseIOBuffer.cpp
 	OpenOVR/Reimpl/BaseDriverManager.cpp
+	OpenOVR/Reimpl/BasePaths.cpp
 	OpenOVR/Reimpl/CVRApplications.cpp
 	OpenOVR/Reimpl/CVRChaperone.cpp
 	OpenOVR/Reimpl/CVRChaperoneSetup.cpp
@@ -381,6 +382,7 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/CVRDebug.cpp
 	OpenOVR/Reimpl/CVRIOBuffer.cpp
 	OpenOVR/Reimpl/CVRDriverManager.cpp
+	OpenOVR/Reimpl/CVRPaths.cpp
 	${GENERATED_DIR}/stubs.gen.cpp
 
 	# Exclude from the PCH requirement
@@ -428,6 +430,7 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/BaseDebug.h
 	OpenOVR/Reimpl/BaseIOBuffer.h
 	OpenOVR/Reimpl/BaseDriverManager.h
+	OpenOVR/Reimpl/BasePaths.h
 	OpenOVR/Reimpl/Interfaces.h
 	${GENERATED_DIR}/static_bases.gen.h
 	OpenOVR/resources.h
@@ -446,6 +449,8 @@ add_library(OCCore STATIC
 	OpenVRHeaders/custom_interfaces/IVRMailbox_001.h
 	OpenVRHeaders/custom_interfaces/IVRInputInternal_002.h
 	OpenVRHeaders/custom_interfaces/IVRControlPanel_006.h
+	OpenVRHeaders/custom_interfaces/IVRPaths_001.h
+	OpenVRHeaders/custom_interfaces/IVRPaths_002.h
 
 	RuntimeExtensions/openxr_extension_helpers.h
 	RuntimeExtensions/XR_MNDX_xdev_space.h

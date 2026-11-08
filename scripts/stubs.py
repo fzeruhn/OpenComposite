@@ -76,6 +76,7 @@ interfaces_list = [
     "Debug",
     "IOBuffer",
     "DriverManager",
+    "Paths",
 
     # Driver interfaces
     #"ServerDriverHost",

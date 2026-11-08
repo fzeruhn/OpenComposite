@@ -32,6 +32,9 @@ target_include_directories(oc_callers PUBLIC
 	${CMAKE_SOURCE_DIR}/OpenOVR
 	${GENERATED_DIR}
 	${GENERATED_DIR}/interfaces
+	# The custom interfaces (IVRPaths), which include "generated/interfaces/..."
+	${CMAKE_SOURCE_DIR}/OpenVRHeaders
+	${CMAKE_BINARY_DIR}
 )
 target_link_libraries(oc_callers PUBLIC jsoncpp)
 if (WIN32)

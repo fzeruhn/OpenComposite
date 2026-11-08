@@ -9,6 +9,7 @@
 #include "IVRCompositor_005.h"
 #include "IVRControlPanel_001.h"
 #include "IVRDriverManager_001.h"
+#include "custom_interfaces/IVRPaths_002.h"
 #include "IVRSpatialAnchors_001.h"
 #include "IVRTrackedCamera_006.h"
 #include "IVRInput_003.h"
@@ -738,6 +739,47 @@ void NewInterfaces(CaseContext& c)
 	r["ret"] = (int)camera->HasCamera(vr::k_unTrackedDeviceIndex_Hmd, &has);
 	r["has camera"] = has;
 	c.Record("IVRTrackedCamera_006 HasCamera", r);
+
+	// IVRPaths through the C API, as Valve offers it: openvr_capi.h's VR_IVRPaths_FnTable
+#ifdef _WIN32
+#define OC_FNTABLE __stdcall
+#else
+#define OC_FNTABLE
+#endif
+	using namespace vr::IVRPaths_002;
+	struct PathsFnTable {
+		vr::ETrackedPropertyError(OC_FNTABLE* ReadPathBatch)(vr::PropertyContainerHandle_t, PathRead_t*, uint32_t);
+		vr::ETrackedPropertyError(OC_FNTABLE* WritePathBatch)(vr::PropertyContainerHandle_t, PathWrite_t*, uint32_t);
+		vr::ETrackedPropertyError(OC_FNTABLE* StringToHandle)(PathHandle_t*, const char*);
+		vr::ETrackedPropertyError(OC_FNTABLE* HandleToString)(PathHandle_t, char*, uint32_t, uint32_t*);
+	};
+#undef OC_FNTABLE
+	auto* paths = (PathsFnTable*)c.core->GetGenericInterface("FnTable:IVRPaths_002", &le);
+	r = Json::Value();
+	r["found"] = paths != nullptr;
+	if (paths) {
+		PathHandle_t first = 0, second = 0;
+		r["to handle"] = (int)paths->StringToHandle(&first, "/user/head/proximity");
+		paths->StringToHandle(&second, "/user/head/proximity");
+		r["same handle"] = first == second && first != 0;
+		char path[64] = {};
+		uint32_t used = 0;
+		r["to string"] = (int)paths->HandleToString(first, path, sizeof(path), &used);
+		r["path"] = path;
+		r["used"] = used;
+		r["small buffer"] = (int)paths->HandleToString(first, path, 4, &used);
+		PathRead_t read[2] = {};
+		read[0].ulPath = first;
+		read[1].ulPath = first;
+		r["read"] = (int)paths->ReadPathBatch(0, read, 2);
+		r["entry errors"] = (int)read[0].eError * 10 + (int)read[1].eError;
+		PathWrite_t write[2] = {};
+		write[1].bValueChanged = true; // 002's last field, past 001's struct: the stride is 002's
+		r["write"] = (int)paths->WritePathBatch(0, write, 2);
+		r["write entry errors"] = (int)write[0].eError * 10 + (int)write[1].eError;
+		r["stride kept"] = write[1].bValueChanged;
+	}
+	c.Record("FnTable:IVRPaths_002", r);
 
 	c.core->Cleanup();
 }
