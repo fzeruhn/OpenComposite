@@ -424,6 +424,121 @@ ovr_enum_t BaseCompositor::SetSkyboxOverride(const Texture_t* pTextures, uint32_
 	return BackendManager::Instance().SetSkyboxOverride(pTextures, unTextureCount);
 }
 
+uint32_t BaseCompositor::GetLastError(char* pchBuffer, uint32_t unBufferSize)
+{
+	// Errors are answered by each call's result; there's no last error kept
+	if (pchBuffer && unBufferSize)
+		pchBuffer[0] = '\0';
+	return 0;
+}
+
+void BaseCompositor::SetVSync(bool bVSync)
+{
+	oldVSync = bVSync;
+}
+
+bool BaseCompositor::GetVSync()
+{
+	return oldVSync;
+}
+
+void BaseCompositor::SetGamma(float fGamma)
+{
+	oldGamma = fGamma;
+}
+
+float BaseCompositor::GetGamma()
+{
+	return oldGamma;
+}
+
+void BaseCompositor::SetGraphicsDevice(OOVR_Compositor_DeviceType eType, void* pDevice)
+{
+	// The device itself comes with each texture (D3D11's GetDevice, OpenGL's current context), as for today's Submit
+	oldDeviceType = eType;
+}
+
+BaseCompositor::ovr_enum_t BaseCompositor::SubmitForDevice(EVREye eEye, void* pTexture, const VRTextureBounds_t* pBounds)
+{
+	Texture_t texture = { pTexture, TextureType_DirectX, ColorSpace_Auto };
+	switch (oldDeviceType) {
+	case OOVR_Compositor_DeviceType_D3D11:
+		texture.eType = TextureType_DirectX;
+		break;
+	case OOVR_Compositor_DeviceType_OpenGL:
+		texture.eType = TextureType_OpenGL;
+		break;
+	default:
+		// None (SetGraphicsDevice wasn't called), D3D9, D3D9Ex or D3D10: nothing OpenComposite can show
+		OC_UNSUPPORTED(VRCompositorError_InvalidTexture, "Submit (IVRCompositor_005/006): a texture of device type %d "
+		                                                 "(only D3D11 and OpenGL can be shown)", (int)oldDeviceType);
+	}
+	return Submit(eEye, &texture, pBounds, Submit_Default);
+}
+
+BaseCompositor::ovr_enum_t BaseCompositor::SubmitWithConvention(EVREye eEye, EGraphicsAPIConvention eTextureType, void* pTexture,
+    const VRTextureBounds_t* pBounds, EVRSubmitFlags nSubmitFlags)
+{
+	// API_DirectX and API_OpenGL are TextureType_DirectX and TextureType_OpenGL
+	Texture_t texture = { pTexture, (ETextureType)eTextureType, ColorSpace_Auto };
+	return Submit(eEye, &texture, pBounds, nSubmitFlags);
+}
+
+BaseCompositor::ovr_enum_t BaseCompositor::SetSkyboxOverrideWithConvention(EGraphicsAPIConvention eTextureType, void* pFront,
+    void* pBack, void* pLeft, void* pRight, void* pTop, void* pBottom)
+{
+	Texture_t textures[6];
+	void* faces[6] = { pFront, pBack, pLeft, pRight, pTop, pBottom };
+	for (int i = 0; i < 6; i++)
+		textures[i] = { faces[i], (ETextureType)eTextureType, ColorSpace_Auto };
+	return SetSkyboxOverride(textures, 6);
+}
+
+void BaseCompositor::GetOverlayDefaults(Compositor_OverlaySettings* pSettings)
+{
+	if (!pSettings)
+		return;
+	// The settings a scene overlay would have, though none is drawn: a flat, opaque quad a metre away, its whole texture
+	*pSettings = {};
+	pSettings->size = sizeof(Compositor_OverlaySettings);
+	pSettings->antialias = true;
+	pSettings->scale = 1.0f;
+	pSettings->distance = 1.0f;
+	pSettings->alpha = 1.0f;
+	pSettings->uScale = 1.0f;
+	pSettings->vScale = 1.0f;
+	for (int i = 0; i < 4; i++)
+		pSettings->transform.m[i][i] = 1.0f;
+}
+
+void BaseCompositor::SetOverlay(void* pTexture, Compositor_OverlaySettings* pSettings)
+{
+	OC_UNSUPPORTED_VOID("SetOverlay (IVRCompositor_005): no scene overlay is drawn");
+}
+
+void BaseCompositor::SetOverlayRaw(void* buffer, uint32_t width, uint32_t height, uint32_t depth, Compositor_OverlaySettings* pSettings)
+{
+	OC_UNSUPPORTED_VOID("SetOverlayRaw (IVRCompositor_005): no scene overlay is drawn");
+}
+
+void BaseCompositor::SetOverlayFromFile(const char* pchFilePath, Compositor_OverlaySettings* pSettings)
+{
+	OC_UNSUPPORTED_VOID("SetOverlayFromFile (IVRCompositor_005): no scene overlay is drawn");
+}
+
+void BaseCompositor::ClearOverlay()
+{
+	// No overlay is drawn, so none is left to clear
+}
+
+bool BaseCompositor::ComputeOverlayIntersection(const Compositor_OverlaySettings* pSettings, float fAspectRatio,
+    ETrackingUniverseOrigin eOrigin, HmdVector3_t vSource, HmdVector3_t vDirection,
+    HmdVector2_t* pvecIntersectionUV, HmdVector3_t* pvecIntersectionTrackingSpace)
+{
+	// No overlay is drawn: no intersection
+	return false;
+}
+
 void BaseCompositor::ClearSkyboxOverride()
 {
 	BackendManager::Instance().ClearSkyboxOverride();

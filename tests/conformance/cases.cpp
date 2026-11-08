@@ -3,6 +3,9 @@
 
 #include "conformance.h"
 
+#include "IVRCompositor_005.h"
+#include "IVRCompositor_006.h"
+#include "IVRCompositor_008.h"
 #include "IVRCompositor_029.h"
 #include "IVRInput_010.h"
 #include "IVROverlay_028.h"
@@ -420,6 +423,82 @@ void OldCalls(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// The old compositors' Submit forms on a D3D11 texture (expect/old_submit.json): IVRCompositor_005 and 006 name the
+// device with SetGraphicsDevice, 008 passes the API with each texture. And GetFrameTiming writes only the old struct.
+void OldSubmit(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* c005 = (vr::IVRCompositor_005::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_005", &le);
+	auto* c006 = (vr::IVRCompositor_006::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_006", &le);
+	auto* c008 = (vr::IVRCompositor_008::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_008", &le);
+	if (!c005 || !c006 || !c008) {
+		c.Record("no IVRCompositor_005, 006 or 008", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	void* handle = tex.get() ? tex.get()->handle : nullptr;
+	vr::TrackedDevicePose_t poses[16];
+
+	// 008: the API with each texture
+	Json::Value r;
+	r["wait"] = (int)c008->WaitGetPoses(poses, 16, nullptr, 0);
+	r["left"] = (int)c008->Submit(vr::Eye_Left, API_DirectX, handle, nullptr, vr::Submit_Default);
+	r["right"] = (int)c008->Submit(vr::Eye_Right, API_DirectX, handle, nullptr, vr::Submit_Default);
+	c.Record("IVRCompositor_008 frame", r);
+
+	// 006: no device named yet, so the texture can't be read; then D3D11
+	r = Json::Value();
+	r["wait"] = (int)c006->WaitGetPoses(poses, 16, nullptr, 0);
+	r["left before SetGraphicsDevice"] = (int)c006->Submit(vr::Eye_Left, handle, nullptr);
+	c006->SetGraphicsDevice(vr::IVRCompositor_006::Compositor_DeviceType_D3D11, c.call->d3d11);
+	r["left"] = (int)c006->Submit(vr::Eye_Left, handle, nullptr);
+	r["right"] = (int)c006->Submit(vr::Eye_Right, handle, nullptr);
+	c.Record("IVRCompositor_006 frame", r);
+
+	// 005: the same, with its own bounds struct and no answers; a frame after it still works
+	c005->SetGraphicsDevice(vr::IVRCompositor_005::Compositor_DeviceType_D3D11, c.call->d3d11);
+	c005->WaitGetPoses(poses, 16);
+	vr::IVRCompositor_005::Compositor_TextureBounds bounds = { 0, 0, 1, 1 };
+	c005->Submit(vr::Eye_Left, handle, &bounds);
+	c005->Submit(vr::Eye_Right, handle, &bounds);
+	r = Json::Value();
+	r["wait after"] = (int)f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+	r["left after"] = (int)f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+	c.Record("IVRCompositor_005 frame", r);
+
+	// Frame timing in 005's and 008's own layouts: nothing written past the struct
+	alignas(8) uint8_t buffer[512];
+	memset(buffer, 0xCD, sizeof(buffer));
+	auto* t005 = (vr::IVRCompositor_005::Compositor_FrameTiming*)buffer;
+	t005->size = sizeof(*t005);
+	r = Json::Value();
+	r["ret"] = c005->GetFrameTiming(t005, 0);
+	int overrun = 0;
+	for (size_t i = sizeof(*t005); i < sizeof(buffer); i++)
+		overrun += buffer[i] != 0xCD;
+	r["overrun"] = overrun;
+	r["size kept"] = t005->size == sizeof(*t005);
+	c.Record("IVRCompositor_005 GetFrameTiming", r);
+
+	memset(buffer, 0xCD, sizeof(buffer));
+	auto* t008 = (vr::IVRCompositor_008::Compositor_FrameTiming*)buffer;
+	t008->size = sizeof(*t008);
+	r = Json::Value();
+	r["ret"] = c008->GetFrameTiming(t008, 0);
+	overrun = 0;
+	for (size_t i = sizeof(*t008); i < sizeof(buffer); i++)
+		overrun += buffer[i] != 0xCD;
+	r["overrun"] = overrun;
+	r["size kept"] = t008->size == sizeof(*t008);
+	c.Record("IVRCompositor_008 GetFrameTiming", r);
+
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -493,6 +572,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "frame-loop", FrameLoop },
 		{ "old-events", OldEvents },
 		{ "old-calls", OldCalls },
+		{ "old-submit", OldSubmit },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;
