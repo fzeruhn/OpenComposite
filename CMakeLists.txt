@@ -584,7 +584,7 @@ file(GLOB stub-impls CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE_DIR
 add_custom_command(
 	OUTPUT ${GENERATED_DIR}/interfaces/vrtypes.h
 	COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/split_headers.py ${CMAKE_SOURCE_DIR}/OpenVRHeaders ${GENERATED_DIR}
-	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/split_headers.py ${openvr-headers}
+	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/split_headers.py ${openvr-headers} ${CMAKE_SOURCE_DIR}/OpenVRHeaders/deleted_types.h
 	COMMENT "Splitting headers..."
 	)
 

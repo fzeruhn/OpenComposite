@@ -27,6 +27,7 @@
 # during preprocessing but are parsed by this script) can be used to control the stub generation.
 
 import io
+import re
 from pathlib import Path
 
 # Note: with the Python plugin for CLion, you may need to mark the scripts directory as a source root for
@@ -79,6 +80,37 @@ bases_header_fn = output_dir / "static_bases.gen.h"
 interfaces = [InterfaceSpec(cvr_dir, headers_dir, output_dir, i) for i in interfaces_list]
 
 
+def base_method_names(header):
+    """The names of everything a Base*.h declares as a function (comments stripped); a name match is enough here,
+    the compiler checks the signature."""
+    text = header.read_text(encoding="utf-8", errors="replace")
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    return set(re.findall(r"\b(\w+)\s*\(", text))
+
+
+def report_unmapped():
+    """Writes unmapped.txt: one line per method of a generated version that neither its Base class declares nor its
+    CVR file writes ("<IVRName_NNN> <method> <return> (<args>)"). Returns the lines of versions without ALLOW_UNMAPPED,
+    which fail the build: a version is offered only once every one of its methods has somewhere to go."""
+    lines, failing = [], []
+    for iface in interfaces:
+        for ver in iface.versions:
+            header = cvr_dir / ver.base_header()
+            if not header.exists():
+                continue
+            names = base_method_names(header)
+            for f in ver.functions:
+                if f.user_implemented or f.name in names:
+                    continue
+                line = f"{ver.interface_v()} {f.name} {f.return_type} ({f.args_str()})"
+                lines.append(line)
+                if not ver.has_flag("ALLOW_UNMAPPED"):
+                    failing.append(line)
+    write_if_changed(output_dir / "unmapped.txt", "".join(l + "\n" for l in lines))
+    return failing
+
+
 def write_if_changed(path, content):
     # The GVR headers aren't the build rule's outputs, so a rewrite would only show up in the next build,
     # recompiling everything that includes them
@@ -91,6 +123,14 @@ def write_if_changed(path, content):
     with open(path, "w", newline='\n') as f:
         f.write(content)
 
+
+unmapped = report_unmapped()
+if unmapped:
+    print(f"stubs.py: {len(unmapped)} methods have no Base implementation (see unmapped.txt; ALLOW_UNMAPPED on a "
+          f"GEN_INTERFACE only while a task is in progress):", file=sys.stderr)
+    for line in unmapped:
+        print("  " + line, file=sys.stderr)
+    sys.exit(1)
 
 for iface in interfaces:
     header = io.StringIO()

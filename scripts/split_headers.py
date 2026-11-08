@@ -6,6 +6,7 @@ import io
 import os
 import glob
 import hashlib
+import shutil
 
 from pathlib import Path
 from typing import TextIO, Callable
@@ -15,11 +16,21 @@ from typing import TextIO, Callable
 # This ensures that non-interface files get the
 # latest version available
 versions = [
+    "0.9.0",
+    "0.9.2",
+    "0.9.3",
+    "0.9.5",
+    "0.9.8",
+    "0.9.9",
+    "0.9.11",
     "0.9.12",
+    "0.9.14",
+    "0.9.15",
     "0.9.17",
     "0.9.18",
     "0.9.19",
     "0.9.20",
+    "1.0.0",
     "1.0.1",
     "1.0.2",
     "1.0.4",
@@ -31,6 +42,7 @@ versions = [
     "1.0.12",
     "1.0.15",
     "1.0.16",
+    "1.0.17",
     "1.1.3",
     "1.4.18",
     "1.6.10",
@@ -202,6 +214,12 @@ def write_interface(target: str, result: str, usingiface: bool, interface_checke
     # Fix up the namespaces
     # If this is a versioned namespace (usingiface = True), we place it in its own custom namespace
     if usingiface:
+        # The SDK's accessor (VR_INTERFACE IVRFoo *VR_CALLTYPE VRFoo();) is extern "C": two versions declaring it in
+        # their own namespaces with different return types don't compile together, and nothing here calls it
+        result = re.sub(r"^[ \t]*VR_INTERFACE\s+(?:vr::)?\w+\s*\*\s*VR_CALLTYPE\s+VR\w+\s*\(\s*\)\s*;[ \t]*$",
+                        "\t// (the SDK's extern \"C\" accessor was here, removed while splitting)", result, flags=re.M)
+        # Types the old versions use that the newest vrtypes.h no longer has
+        result = result.replace("#pragma once\n", "#pragma once\n#include \"deleted_types.h\"\n", 1)
         result = result.replace("%%REPLACE%NS%START%%", "namespace vr\n{\nnamespace " + target)
         result = result + "} // Close custom namespace\n"
         result = result.replace("vr::", "")
@@ -253,6 +271,11 @@ def split_header(headerfile: TextIO, interface_checker: Callable = None,
 
     for line in headerfile:
         niceline = line.rstrip("\n")
+
+        # "// End" closes the last interface. What follows is the SDK's tail (VR_Init, COpenVRContext and the old enum
+        # names), which would otherwise land in the last section; nothing uses it from there
+        if niceline.strip() == "// End":
+            break
 
         # check if this line is signifiying the start of a new interface file
         match = matcher.match(niceline)
@@ -311,14 +334,22 @@ def driver_filter(fi, iface):
     return False
 
 
+(output_dir / "interfaces").mkdir(parents=True, exist_ok=True)
+shutil.copyfile(input_dir / "deleted_types.h", output_dir / "interfaces" / "deleted_types.h")
+
 # Go through the list of interface versions backwards.
 # This allows us to build the newest version of each interface without overwriting them
+imports_by_version = {}
+DRIVER_IMPORTS_FROM = "0.9.12"
 for version in versions[::-1]:
     feed = f"openvr-{version}.h"
     print("Reading: " + feed)
 
     with open(input_dir / feed, "r") as headerfile:
-        appapi_imports = split_header(headerfile)
+        imports_by_version[version] = split_header(headerfile)
+# The driver header's interfaces include what the 0.9.12 header sets up; the 0.9.0–0.9.11 headers have fewer shared
+# sections, and would change the driver interfaces
+appapi_imports = imports_by_version[DRIVER_IMPORTS_FROM]
 
 # Does the same thing with driver versions.
 for version in driver_versions[::-1]:
