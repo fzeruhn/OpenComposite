@@ -50,8 +50,12 @@ add_executable(oc_conformance
 	conformance/conformance.h
 	conformance/oc_conformance.cpp
 	conformance/cases.cpp
+	conformance/crash_report.cpp
 )
 target_link_libraries(oc_conformance PRIVATE oc_callers)
+if (WIN32)
+	target_link_libraries(oc_conformance PRIVATE dbghelp)
+endif ()
 target_compile_definitions(oc_conformance PRIVATE OC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/data")
 if (NOT WIN32)
 	target_link_libraries(oc_conformance PRIVATE -ldl -lpthread)

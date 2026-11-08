@@ -115,6 +115,16 @@ class Runner:
             return 124
 
     @staticmethod
+    def take_crash(raw, record):
+        """Attaches oc_conformance's crash report (crash_report.cpp), if it wrote one, to the record of the call that
+        ended it, and removes the file so the next child starts clean."""
+        report = Path(str(raw) + ".crash.txt")
+        if report.exists():
+            record["crash"] = report.read_text(encoding="utf-8", errors="replace").strip()
+            report.unlink()
+        return record
+
+    @staticmethod
     def status_of(code):
         return {0: "ok", 70: "ended", 124: "timeout"}.get(code, "crashed")
 
@@ -133,22 +143,23 @@ class Runner:
                 r["status"] = "ok"
             results += new
             if code == 0:
+                Path(str(raw) + ".crash.txt").unlink(missing_ok=True)
                 break
             if not new and start == 0:
                 # Ended before its first record: in Init or the interface lookup
-                results.append({"interface": version, "apptype": apptype, "argset": argset, "index": -1,
-                                "method": "<init or lookup>", "status": self.status_of(code), "exit_code": code})
+                results.append(self.take_crash(raw, {"interface": version, "apptype": apptype, "argset": argset, "index": -1,
+                                "method": "<init or lookup>", "status": self.status_of(code), "exit_code": code}))
                 break
             if not new:
                 # The first call after the restart ended it again
-                results.append({"interface": version, "apptype": apptype, "argset": argset, "index": start,
-                                "method": f"<call {start}>", "status": self.status_of(code), "exit_code": code})
+                results.append(self.take_crash(raw, {"interface": version, "apptype": apptype, "argset": argset, "index": start,
+                                "method": f"<call {start}>", "status": self.status_of(code), "exit_code": code}))
                 start += 1
                 continue
             # The call after the last one recorded is the one that ended the process
             last = max([r.get("index", -1) for r in new] + [start - 1])
-            results.append({"interface": version, "apptype": apptype, "argset": argset, "index": last + 1,
-                            "method": f"<call {last + 1}>", "status": self.status_of(code), "exit_code": code})
+            results.append(self.take_crash(raw, {"interface": version, "apptype": apptype, "argset": argset, "index": last + 1,
+                            "method": f"<call {last + 1}>", "status": self.status_of(code), "exit_code": code}))
             start = last + 2
             if any(r.get("method") == "<lookup>" for r in new) or last + 1 < 0:
                 break
@@ -165,7 +176,7 @@ class Runner:
         for r in records:
             r["status"] = "ok"
         if code != 0:
-            records.append({"case": name, "method": "<end>", "status": self.status_of(code), "exit_code": code})
+            records.append(self.take_crash(raw, {"case": name, "method": "<end>", "status": self.status_of(code), "exit_code": code}))
         return records
 
     def run(self):
@@ -264,7 +275,8 @@ def main():
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     bad = [r for r in results if r["status"] in ("ended", "crashed", "timeout")]
     lines = [f"{k}: {v}" for k, v in sorted(counts.items())] + [""]
-    lines += [f'{r["status"]}: {key_of(r)} (exit {r.get("exit_code")})' for r in bad]
+    lines += [f'{r["status"]}: {key_of(r)} (exit {r.get("exit_code")})'
+              + (f' - {r["crash"].splitlines()[0]}' if r.get("crash") else "") for r in bad]
     problems = len(bad)
     if args.expected:
         diffs = compare(results, args.expected, args.differences)

@@ -33,6 +33,9 @@ private:
 	FILE* file = nullptr;
 };
 
+// crash_report.cpp: on an abnormal end, writes why and the stack to <outPath>.crash.txt
+void InstallCrashReport(const std::string& outPath);
+
 struct CaseContext {
 	IVRClientCore* core = nullptr;
 	CallContext* call = nullptr;

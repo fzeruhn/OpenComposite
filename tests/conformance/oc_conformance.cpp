@@ -98,6 +98,7 @@ int main(int argc, char** argv)
 		return 2;
 	}
 
+	InstallCrashReport(args["--out"]);
 	Writer out(args["--out"]);
 	CallContext ctx;
 	ctx.againstRealRuntime = args.count("--real-runtime") != 0;

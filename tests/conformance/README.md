@@ -25,7 +25,10 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
 
 `out/summary.txt` has the counts per status (`ok`, `ended`: OpenComposite ended the program, `crashed`, `timeout`) and
 every record that wasn't ok; `out/results.json` has every record. When a child ends early the runner starts it again
-after the call that ended it, so one bad call doesn't hide the rest.
+after the call that ended it, so one bad call doesn't hide the rest. When a child crashes, `crash_report.cpp` writes
+why (the exception, abort or invalid CRT call) and its stack next to its output, and the runner puts that on the
+record (`crash`) and its first line in the summary. A fail-fast inside the DLL (its own CRT's `abort` or `terminate`)
+bypasses it: such a crash has no report.
 
 ## The SteamVR reference
 
