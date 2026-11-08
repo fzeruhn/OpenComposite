@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include <chrono>
+
 #include "Backend.h"
 
 #include "Misc/Config.h"
@@ -47,7 +49,9 @@ vr::TrackedDevicePose_t BackendManager::InvalidPose()
 float BackendManager::GetTimeInSeconds()
 {
 #ifdef OC_XR_PORT
-	XR_STUBBED();
+	// Seconds on a steady clock (only differences are used)
+	static const auto start = std::chrono::steady_clock::now();
+	return std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
 #else
 	return ovr_GetTimeInSeconds();
 #endif
@@ -211,12 +215,15 @@ vr::TrackedDeviceIndex_t ITrackedDevice::DeviceIndex()
 
 void ITrackedDevice::InitialiseDevice(vr::TrackedDeviceIndex_t index)
 {
+	// Both can't happen (the backend numbers each device once): if they do, the first index stays
 	if (deviceIndex != vr::k_unTrackedDeviceIndexInvalid) {
-		OOVR_ABORTF("Cannot initialise tracked device twice - first with ID=%d, then with ID=%d", deviceIndex, index);
+		OOVR_LOGF("Cannot initialise tracked device twice - first with ID=%d, then with ID=%d", deviceIndex, index);
+		return;
 	}
 
 	if (index == vr::k_unTrackedDeviceIndexInvalid) {
-		OOVR_ABORT("Cannot initialise tracked device with ID k_unTrackedDeviceIndexInvalid");
+		OOVR_LOG("Cannot initialise tracked device with ID k_unTrackedDeviceIndexInvalid");
+		return;
 	}
 
 	deviceIndex = index;

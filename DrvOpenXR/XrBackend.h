@@ -11,6 +11,7 @@
 #include "XrController.h"
 #include "XrHMD.h"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 #include <mutex>
@@ -37,9 +38,11 @@ public:
 	 * with ending the session - we're allowed to submit frames after we receive the stopping event, until
 	 * we call xrEndSession.
 	 */
-	bool sessionActive = false;
-	bool sessionLost = false;
-	bool exitExpected = false;
+	std::atomic<bool> sessionActive{ false };
+	std::atomic<bool> sessionLost{ false };
+	std::atomic<bool> exitExpected{ false };
+	// The app's graphics device couldn't be bound: the session stays on the temporary device
+	std::atomic<bool> appGraphicsUnusable{ false };
 
 	/**
 	 * To be called after xrCreateSession. Should only be used by DrvOpenXR.
@@ -85,7 +88,8 @@ private:
 	std::vector<std::shared_ptr<XrGenericTracker>> generic_trackers;
 	std::shared_mutex generic_trackers_mutex;
 
-	void CheckOrInitCompositors(const vr::Texture_t* tex);
+	// False if the texture can't be used (logged): no session switch then, or the switch was undone
+	bool CheckOrInitCompositors(const vr::Texture_t* tex);
 	std::unique_ptr<Compositor> compositors[XruEyeCount];
 	std::unique_ptr<Compositor> skybox_compositor;
 	std::vector<std::shared_ptr<Compositor>> overlay_compositors;
@@ -117,7 +121,7 @@ private:
 	void BindInfoSet();
 
 	// Whether we've restarted the session to use the application's rendering API yet
-	bool usingApplicationGraphicsAPI = false;
+	std::atomic<bool> usingApplicationGraphicsAPI{ false };
 
 	// The views for the two main eye layers
 	XrCompositionLayerProjectionView projectionViews[XruEyeCount];

@@ -1,0 +1,11 @@
+{
+  "default_bindings": [{ "controller_type": "knuckles", "binding_url": "bindings_missing_haptic.json" }],
+  "actions": [
+    { "name": "/actions/main/in/trigger", "type": "vector1" },
+    { "name": "/actions/main/in/grab", "type": "boolean" },
+    { "name": "/actions/main/in/pose", "type": "pose" },
+    { "name": "/actions/main/in/thing", "type": "vector5" },
+    { "name": "/actions/main/out/haptic", "type": "vibration" }
+  ],
+  "action_sets": [{ "name": "/actions/main", "usage": "leftright" }]
+}

@@ -1,0 +1,9 @@
+{
+  "default_bindings": [],
+  "actions": [
+    { "name": "/actions/main/in/trigger", "type": "vector1" },
+    { "name": "/actions/main/in/grab", "type": "boolean" },
+    { "name": "/actions/main/in/pose", "type": "pose" }
+  ],
+  "action_sets": [{ "name": "/actions/main", "usage": "leftright" }]
+}

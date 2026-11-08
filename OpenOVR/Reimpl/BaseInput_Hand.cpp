@@ -505,7 +505,8 @@ EVRInputError BaseInput::getEstimatedBoneData(
 
 EVRInputError BaseInput::getEstimatedSkeletalSummary(ITrackedDevice::TrackedDeviceType hand, VRSkeletalSummaryData_t* pSkeletalSummaryData)
 {
-	OOVR_FALSE_ABORT(hand != ITrackedDevice::HAND_NONE);
+	if (hand != ITrackedDevice::HAND_LEFT && hand != ITrackedDevice::HAND_RIGHT)
+		return vr::VRInputError_InvalidDevice;
 
 	std::fill(std::begin(pSkeletalSummaryData->flFingerSplay), std::end(pSkeletalSummaryData->flFingerSplay), 0.2f);
 

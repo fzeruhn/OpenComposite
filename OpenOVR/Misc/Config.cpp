@@ -20,20 +20,12 @@ using vr::HmdColor_t;
 
 Config oovr_global_configuration;
 
-// OOVR_ABORT doesn't work here for some reason
-// TODO Turtle1331 use OOVR_ABORT from logging.h
-#ifdef WIN32
-#define ABORT(msg)                                                                        \
-	{                                                                                     \
-		MessageBoxA(NULL, string(msg).c_str(), "OpenComposite Config File Error", MB_OK); \
-		exit(1);                                                                          \
-	}
-#else
-#define ABORT(msg) \
-	{              \
-		exit(42);  \
-	}
-#endif
+// A bad value in opencomposite.ini: logged as a warning, and the option keeps its default (parse_* throw this to
+// ini_handler, which catches it; nothing leaves this file)
+struct BadConfigValue {
+	string message;
+};
+#define BAD_VALUE(msg) throw BadConfigValue{ msg }
 
 static string str_tolower(std::string val)
 {
@@ -66,7 +58,7 @@ static bool parse_bool(string orig, string name, int line)
 
 	string err = "Value " + orig + " for in config file for " + name + " on line "
 	    + to_string(line) + " is not a boolean - true/on/enabled/false/off/disabled";
-	ABORT(err);
+	BAD_VALUE(err);
 }
 
 static HmdColor_t parse_HmdColor_t(string orig, string name, int line)
@@ -97,7 +89,7 @@ invalid:
 
 	string err = "Value " + orig + " for in config file for " + name + " on line "
 	    + to_string(line) + " is not a hex (CSS) colour code";
-	ABORT(err);
+	BAD_VALUE(err);
 }
 
 static float parse_float(string orig, string name, int line)
@@ -111,7 +103,7 @@ static float parse_float(string orig, string name, int line)
 	if (end != str + orig.length()) {
 		string err = "Value " + orig + " for in config file for " + name + " on line "
 		    + to_string(line) + " is not a decimal number (eg 12.34)";
-		ABORT(err);
+		BAD_VALUE(err);
 	}
 
 	OOVR_LOGF("Setting config param %s to %f", name.c_str(), result);
@@ -129,10 +121,14 @@ int Config::ini_handler(void* user, const char* pSection,
 
 	Config* cfg = (Config*)user;
 
-#define CFGOPT(type, vname)                             \
-	if (name == #vname) {                               \
-		cfg->vname = parse_##type(value, name, lineno); \
-		return true;                                    \
+#define CFGOPT(type, vname)                                                    \
+	if (name == #vname) {                                                      \
+		try {                                                                  \
+			cfg->vname = parse_##type(value, name, lineno);                    \
+		} catch (const BadConfigValue& bad) {                                  \
+			OOVR_LOGF("Warning: %s; keeping the default", bad.message.c_str()); \
+		}                                                                      \
+		return true;                                                           \
 	}
 
 	if (section == "" || section == "default") {
@@ -153,8 +149,8 @@ int Config::ini_handler(void* user, const char* pSection,
 
 #undef CFGOPT
 
-	string err = "Unknown config option " + name + " on line " + to_string(lineno);
-	ABORT(err);
+	OOVR_LOGF("Unknown opencomposite.ini key '%s' ignored (line %d)", name.c_str(), lineno);
+	return true;
 }
 
 static int wini_parse(const wchar_t* filename, ini_handler handler, void* user)
@@ -235,9 +231,8 @@ Config::Config()
 		//  the defaults are set up as the default values for the variables
 		return;
 	} else if (err) {
-		// err is the line number
-		string str = "Config error on line " + to_string(err);
-		ABORT(str);
+		// err is the line number of the first line ini_parse couldn't read; it read the rest
+		OOVR_LOGF("Warning: opencomposite.ini can't be read on line %d; that line is ignored", err);
 	}
 
 	// Everything should have been set up by ini_handler

@@ -143,6 +143,8 @@ if (NOT OpenXR_FOUND OR NOT jsoncpp_FOUND)
 	)
 
 	target_include_directories(jsoncpp PUBLIC ${XrDir}/src/external/jsoncpp/include)
+	# Type errors and the parser's nesting limit throw instead of calling abort(), as a system jsoncpp does
+	target_compile_definitions(jsoncpp PUBLIC JSON_USE_EXCEPTION=1)
 	if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 		target_compile_options(jsoncpp PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-Wno-volatile>)
 	elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")

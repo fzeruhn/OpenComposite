@@ -97,3 +97,48 @@ TEST_CASE("JsonFile_write_to_a_missing_folder_fails_quietly")
 	Json::Value v(Json::objectValue);
 	CHECK_FALSE(oc_write_json_file(fs::temp_directory_path() / "oc_no_such_folder" / "x" / "a.json", v));
 }
+
+TEST_CASE("Lenient_json_reads_bom_comments_trailing_commas")
+{
+	Json::Value v;
+	std::string error;
+	CHECK(ParseJsonLenient("\xEF\xBB\xBF{ // c\r\n \"a\": [1,2,], /* block, with ] and } */ \"b\": \"x,]\", }", v, error));
+	CHECK(error.empty());
+	CHECK(v["a"].size() == 2);
+	// A comma inside a string isn't trailing
+	CHECK(v["b"].asString() == "x,]");
+}
+
+TEST_CASE("Lenient_json_reports_garbage")
+{
+	Json::Value v;
+	std::string error;
+	CHECK_FALSE(ParseJsonLenient("{ \"a\": [1, 2 ", v, error));
+	CHECK_FALSE(error.empty());
+	CHECK_FALSE(ParseJsonLenient("", v, error));
+	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("Lenient_json_file_reads_the_manifest_fixture")
+{
+	Json::Value v;
+	std::string error;
+	CHECK(ReadJsonFileLenient(fs::path(OC_TEST_DATA_DIR) / "manifest_bom_comments.json", v, error));
+	CHECK(v["actions"].size() == 4);
+	CHECK_FALSE(ReadJsonFileLenient(fs::path(OC_TEST_DATA_DIR) / "no_such_file.json", v, error));
+	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("Json_past_the_nesting_limit_is_unparsable_not_fatal")
+{
+	// jsoncpp throws past its nesting limit (1000)
+	std::string deep = "{\"a\":" + std::string(2000, '[') + std::string(2000, ']') + "}";
+	Json::Value v;
+	std::string error;
+	CHECK_FALSE(ParseJsonLenient(deep, v, error));
+	CHECK_FALSE(error.empty());
+	TempFile f;
+	f.Write(deep);
+	CHECK_FALSE(oc_read_json_file(f.path, v));
+	CHECK(v.isObject());
+}

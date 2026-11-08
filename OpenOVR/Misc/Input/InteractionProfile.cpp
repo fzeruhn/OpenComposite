@@ -58,17 +58,20 @@ void InteractionProfile::AddLegacyBindings(const LegacyControllerActions& ctrl, 
 		// Bind the action to a suggested binding
 		std::string realPath = ctrl.handPath + "/" + path;
 		if (!IsInputPathValid(realPath)) {
-			// No need for a soft abort, will only be called if an input profile gets it's paths wrong
-			OOVR_ABORTF("Found legacy input path %s, not supported by profile", realPath.c_str());
+			// Only if an input profile gets its paths wrong: that binding is left out
+			OOVR_LOGF("Found legacy input path %s, not supported by profile", realPath.c_str());
+			return;
 		}
 
-		// The action must have been defined, if not we'll get a harder-to-debug error from OpenXR later.
-		OOVR_FALSE_ABORT(action != XR_NULL_HANDLE);
+		// The action must have been defined (it isn't if OpenXR couldn't make it): that binding is left out
+		if (action == XR_NULL_HANDLE)
+			return;
 
 		XrActionSuggestedBinding binding = {};
 		binding.action = action;
 
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, realPath.c_str(), &binding.binding));
+		if (XR_FAILED(xrStringToPath(xr_instance, realPath.c_str(), &binding.binding)))
+			return;
 
 		bindings.push_back(binding);
 	};
@@ -123,8 +126,10 @@ InteractionProfile* InteractionProfile::GetProfileByPath(const string& name)
 			byPath[profile->GetPath()] = profile.get();
 		}
 	}
-	if (!byPath.contains(name))
-		OOVR_ABORTF("Could not find interaction profile '%s'", name.c_str());
+	if (!byPath.contains(name)) {
+		OOVR_LOGF("Could not find interaction profile '%s'", name.c_str());
+		return nullptr;
+	}
 	return byPath.at(name);
 }
 

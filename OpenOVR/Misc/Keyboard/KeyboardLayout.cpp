@@ -70,7 +70,7 @@ static wchar_t escapeChar(const wstring& str)
 	string utf = VRKeyboard::CHAR_CONV.to_bytes(str);
 
 	string msg = "Unknown escape sequence '" + utf + "'";
-	OOVR_ABORT(msg.c_str());
+	{ OOVR_LOG(msg.c_str()); return 0; } // the built-in layout is broken: no keyboard
 }
 
 KeyboardLayout::KeyboardLayout(std::vector<char> data)
@@ -107,7 +107,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 
 	auto addNextKey = [&](wchar_t ch, wchar_t shift) {
 		if (!last)
-			OOVR_ABORT("Cannot add bank or unpositioned key as first key!");
+			{ OOVR_LOG("Cannot add bank or unpositioned key as first key!"); return; } // the built-in layout is broken: no keyboard
 
 		addKey(ch, shift, last->x + last->w, last->y);
 	};
@@ -132,7 +132,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 			wstring shift = pullstring(line);
 
 			if (chars.length() != shift.length())
-				OOVR_ABORTF("Keyboard layout: bank lower/upper length mismatch: '%ls' vs '%ls'", chars.c_str(), shift.c_str());
+				{ OOVR_LOGF("Keyboard layout: bank lower/upper length mismatch: '%ls' vs '%ls'", chars.c_str(), shift.c_str()); return; } // the built-in layout is broken: no keyboard
 
 			for (size_t i = 0; i < chars.length(); i++) {
 				addNextKey(chars[i], shift[i]);
@@ -151,7 +151,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 
 			if (!last) {
 				string msg = "Cannot set property '" + utfProp + "' without a prior key!";
-				OOVR_ABORT(msg.c_str());
+				{ OOVR_LOG(msg.c_str()); return; } // the built-in layout is broken: no keyboard
 			}
 
 			if (prop == L"spans_to_right") {
@@ -164,7 +164,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 			}
 
 			string msg = "Unknown property property '" + utfProp + "' for key '" + VRKeyboard::CHAR_CONV.to_bytes(last->label) + "'";
-			OOVR_ABORT(msg.c_str());
+			{ OOVR_LOG(msg.c_str()); return; } // the built-in layout is broken: no keyboard
 
 			continue;
 		}
@@ -179,7 +179,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 
 		if (wx.empty() != wy.empty()) {
 			string msg = string("x/y empty mismatch for keyboard char '") + ((char)ch) + "'";
-			OOVR_ABORT(msg.c_str());
+			{ OOVR_LOG(msg.c_str()); return; } // the built-in layout is broken: no keyboard
 		}
 
 		if (wx.empty()) {
@@ -192,7 +192,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 
 			if (!ww.empty()) {
 				if (wh.empty()) {
-					OOVR_ABORTF("word width/height mismatch for keyboard char '%c'", ch);
+					{ OOVR_LOGF("word width/height mismatch for keyboard char '%c'", ch); return; } // the built-in layout is broken: no keyboard
 				}
 
 				key.w = std::stof(ww);
@@ -202,7 +202,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 	}
 
 	if (width == 0)
-		OOVR_ABORT("Missing keyboard layout width specifier");
+		{ OOVR_LOG("Missing keyboard layout width specifier"); return; } // the built-in layout is broken: no keyboard
 
 	// Calculate the adjacent keys
 	for (Key& key : keys) {

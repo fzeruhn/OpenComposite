@@ -165,10 +165,13 @@ void XrBackend::GetDeviceToAbsoluteTrackingPose(
 	}
 }
 
-static void find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev, uint32_t appFamilyIndex, VkQueue desired_queue, uint32_t& out_queueFamilyIndex, uint32_t& out_queueIndex)
+// False (logged) if desired_queue isn't one of dev's queues
+static bool find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev, uint32_t appFamilyIndex, VkQueue desired_queue, uint32_t& out_queueFamilyIndex, uint32_t& out_queueIndex)
 {
-	if (desired_queue == VK_NULL_HANDLE)
-		OOVR_ABORT("The OpenVR app gave no VkQueue with its texture");
+	if (desired_queue == VK_NULL_HANDLE) {
+		OOVR_LOG("The OpenVR app gave no VkQueue with its texture");
+		return false;
+	}
 
 	uint32_t queue_family_count;
 	vkGetPhysicalDeviceQueueFamilyProperties(pdev, &queue_family_count, NULL);
@@ -194,15 +197,16 @@ static void find_queue_family_and_queue_idx(VkDevice dev, VkPhysicalDevice pdev,
 
 	// Asking for queues of a family the device wasn't created with is invalid, so start with the app's family
 	if (appFamilyIndex < queue_family_count && searchFamily(appFamilyIndex))
-		return;
+		return true;
 	for (uint32_t i = 0; i < queue_family_count; i++) {
 		if (i != appFamilyIndex && searchFamily(i)) {
 			OOVR_LOGF("WARNING: The OpenVR app's VkQueue is in queue family %u, not the %u it gave", i, appFamilyIndex);
-			return;
+			return true;
 		}
 	}
-	OOVR_ABORT("Couldn't find the queue family index/queue index of the queue that the OpenVR app gave us!"
-	           "This is really odd and really shouldn't ever happen");
+	OOVR_LOG("Couldn't find the queue family index/queue index of the queue that the OpenVR app gave us!"
+	         "This is really odd and really shouldn't ever happen");
+	return false;
 }
 
 #ifdef SUPPORT_VK
@@ -240,10 +244,100 @@ static bool is_same_gpu(VkInstance instance, VkPhysicalDevice runtimeDevice, VkP
 #endif
 
 /* Submitting Frames */
-void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
+bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 {
+	// A texture OpenComposite can't use: the eye is left out and Submit answers InvalidTexture
+	if (!tex || !tex->handle)
+		return false;
+
 	// Check we're using the session with the application's device
 	if (!usingApplicationGraphicsAPI) {
+		if (appGraphicsUnusable)
+			return false; // tried once already: the session stays on the temporary device
+
+		// What can be checked before the session goes down is checked here, so a texture that can't be used
+		// leaves the running session alone
+		switch (tex->eType) {
+		case vr::TextureType_DirectX:
+#if !(defined(SUPPORT_DX) && defined(SUPPORT_DX11))
+#ifdef __linux__
+			OOVR_LOG("Application is trying to submit a D3D11 texture, this is likely a Steam Proton bug, please report it");
+#else
+			OOVR_LOG("Application is trying to submit a D3D11 texture, which OpenComposite supports but is disabled in this build");
+#endif
+			appGraphicsUnusable = true;
+			return false;
+#endif
+			break;
+		case vr::TextureType_DirectX12:
+#if !(defined(SUPPORT_DX) && defined(SUPPORT_DX12))
+#ifdef __linux__
+			OOVR_LOG("Application is trying to submit a D3D12 texture, this is likely a Steam Proton bug, please report it");
+#else
+			OOVR_LOG("Application is trying to submit a D3D12 texture, which OpenComposite supports but is disabled in this build");
+#endif
+			appGraphicsUnusable = true;
+			return false;
+#else
+			if (!((D3D12TextureData_t*)tex->handle)->m_pResource) {
+				OOVR_LOG_ONCE("D3D12 texture data without a resource");
+				return false;
+			}
+#endif
+			break;
+		case vr::TextureType_Vulkan: {
+#if !defined(SUPPORT_VK)
+			OOVR_LOG("Application is trying to submit a Vulkan texture, which this build doesn't support");
+			appGraphicsUnusable = true;
+			return false;
+#else
+			const auto* vktex = (const vr::VRVulkanTextureData_t*)tex->handle;
+			if (!vktex->m_pInstance || !vktex->m_pDevice || !vktex->m_pQueue) {
+				OOVR_LOG_ONCE("The OpenVR app's Vulkan texture data has no instance, device or queue");
+				return false;
+			}
+#endif
+			break;
+		}
+		case vr::TextureType_OpenGL:
+#if defined(SUPPORT_GL) && defined(_WIN32)
+			if (!wglGetCurrentContext() || !wglGetCurrentDC()) {
+				OOVR_LOG_ONCEF("Null OpenGL GLRC or DC: %p,%p", (void*)wglGetCurrentContext(), (void*)wglGetCurrentDC());
+				return false;
+			}
+#elif defined(SUPPORT_GL)
+			if (!glXGetCurrentDisplay() || !glXGetCurrentContext()) {
+				OOVR_LOG_ONCE("No current GLX display or context for the app's OpenGL texture");
+				return false;
+			}
+#elif defined(SUPPORT_GLES)
+			if (!OpenComposite_Android_GLES_Binding_Info || OpenComposite_Android_GLES_Binding_Info->type != XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR) {
+				OOVR_LOG("App is trying to use GLES, but OpenComposite_Android_GLES_Binding_Info global is not set (properly).\n"
+				         "Please ensure this is set by the application.");
+				appGraphicsUnusable = true;
+				return false;
+			}
+#else
+			OOVR_LOG("Application is trying to submit an OpenGL texture, which OpenComposite supports but is disabled in this build");
+			appGraphicsUnusable = true;
+			return false;
+#endif
+			break;
+		default:
+			OOVR_LOG_ONCEF("Invalid/unknown texture type %d", tex->eType);
+			return false;
+		}
+
+		// Held through the shutdown, the new session and the fallback. Under Submit's shared lock this waits for the other
+		// threads' shared holds to end, and the shared lock is taken back when this ends.
+		auto restartLock = xr_session.lock();
+
+		// Another thread may have set the session up on the game's device, or given up on it, while this one waited
+		if (appGraphicsUnusable)
+			return false;
+		if (usingApplicationGraphicsAPI)
+			return CheckOrInitCompositors(tex);
+
 		usingApplicationGraphicsAPI = true;
 
 		OOVR_LOG("Recreating OpenXR session for application graphics API");
@@ -252,17 +346,32 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 		// after querying for graphics requirements.
 		DrvOpenXR::ShutdownSession();
 
+		// If the game's device can't be bound after all: back to a session on the temporary device, and no more tries
+		auto giveUp = [&](const char* why) {
+			OOVR_LOGF("Can't use the application's graphics device: %s", why);
+			graphicsBinding = nullptr;
+			usingApplicationGraphicsAPI = false;
+			appGraphicsUnusable = true;
+			if (temporaryGraphics)
+				DrvOpenXR::SetupSession();
+			else
+				OnSessionLost();
+			return false;
+		};
+
 		switch (tex->eType) {
-		case vr::TextureType_DirectX: {
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
+		case vr::TextureType_DirectX: {
 			// The spec requires that we call this before starting a session using D3D. Unfortunately we
 			// can't actually do anything with this information, since the game has already created the device.
 			XrGraphicsRequirementsD3D11KHR graphicsRequirements{ XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR };
-			OOVR_FAILED_XR_ABORT(xr_ext->xrGetD3D11GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
+			OC_XR_LOG(xr_ext->xrGetD3D11GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
 
 			auto* d3dTex = (ID3D11Texture2D*)tex->handle;
 			ID3D11Device* dev = nullptr;
 			d3dTex->GetDevice(&dev);
+			if (!dev)
+				return giveUp("the D3D11 texture has no device");
 
 			XrGraphicsBindingD3D11KHR d3dInfo{};
 			d3dInfo.type = XR_TYPE_GRAPHICS_BINDING_D3D11_KHR;
@@ -271,27 +380,21 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			DrvOpenXR::SetupSession();
 
 			dev->Release();
-#else
-
- #ifdef __linux__
-            OOVR_ABORT("Application is trying to submit a D3D11 texture, this is likely a Steam Proton bug, please report it");
- #else
-            OOVR_ABORT("Application is trying to submit a D3D11 texture, which OpenComposite supports but is disabled in this build");
- #endif
-
-#endif
 			break;
 		}
-		case vr::TextureType_DirectX12: {
+#endif
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX12)
+		case vr::TextureType_DirectX12: {
 			// The spec requires that we call this before starting a session using D3D. Unfortunately we
 			// can't actually do anything with this information, since the game has already created the device.
 			XrGraphicsRequirementsD3D12KHR graphicsRequirements{ XR_TYPE_GRAPHICS_REQUIREMENTS_D3D12_KHR };
-			OOVR_FAILED_XR_ABORT(xr_ext->xrGetD3D12GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
+			OC_XR_LOG(xr_ext->xrGetD3D12GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
 
 			D3D12TextureData_t* d3dTexData = (D3D12TextureData_t*)tex->handle;
 			ComPtr<ID3D12Device> device;
 			d3dTexData->m_pResource->GetDevice(IID_PPV_ARGS(&device));
+			if (!device)
+				return giveUp("the D3D12 resource has no device");
 
 			XrGraphicsBindingD3D12KHR d3dInfo{};
 			d3dInfo.type = XR_TYPE_GRAPHICS_BINDING_D3D12_KHR;
@@ -305,19 +408,11 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
 			debugController->EnableDebugLayer();
 #endif
-
-			device->Release();
-#else
-
- #ifdef __linux__
-           OOVR_ABORT("Application is trying to submit a D3D12 texture, this is likely a Steam Proton bug, please report it");
- #else
-           OOVR_ABORT("Application is trying to submit a D3D12 texture, which OpenComposite supports but is disabled in this build");
- #endif
-
-#endif
+			// The ComPtr releases the device: no explicit Release here
 			break;
 		}
+#endif
+#if defined(SUPPORT_VK)
 		case vr::TextureType_Vulkan: {
 			const vr::VRVulkanTextureData_t* vktex = (vr::VRVulkanTextureData_t*)tex->handle;
 
@@ -325,7 +420,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			// We have to call this, or we get crazy validation errors
 			XrResult desireResult = xr_ext->xrGetVulkanGraphicsDeviceKHR(xr_instance, xr_system, vktex->m_pInstance, &xr_desire);
 			if (XR_FAILED(desireResult) || xr_desire == VK_NULL_HANDLE)
-				OOVR_ABORTF("xrGetVulkanGraphicsDeviceKHR failed for the OpenVR app's VkInstance: %d", desireResult);
+				return giveUp("xrGetVulkanGraphicsDeviceKHR failed for the OpenVR app's VkInstance");
 
 			// XR_KHR_vulkan_enable requires the binding's physical device to be the one the runtime returned (Monado
 			// checks). No Man's Sky under Wine passes a physical device from another of its instances than m_pInstance:
@@ -333,9 +428,10 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			VkPhysicalDevice physicalDevice = vktex->m_pPhysicalDevice;
 			if (xr_desire != physicalDevice) {
 				if (physicalDevice == VK_NULL_HANDLE || !is_same_gpu(vktex->m_pInstance, xr_desire, physicalDevice)) {
-					OOVR_ABORTF("The VkPhysicalDevice that the OpenVR app (%p) used is different from the one that the OpenXR runtime used (%p)!\n"
-					            "This should never happen, except for on multi-gpu, in which case DRI_PRIME=1 should fix things on Linux.",
+					OOVR_LOGF("The VkPhysicalDevice that the OpenVR app (%p) used is different from the one that the OpenXR runtime used (%p)!\n"
+					          "This should never happen, except for on multi-gpu, in which case DRI_PRIME=1 should fix things on Linux.",
 					    (void*)vktex->m_pPhysicalDevice, (void*)xr_desire);
+					return giveUp("the app's VkPhysicalDevice isn't the OpenXR runtime's");
 				}
 				OOVR_LOGF("WARNING: The OpenVR app's VkPhysicalDevice (%p) isn't the runtime's (%p) for its instance, but it's the same GPU: "
 				          "using the runtime's",
@@ -350,35 +446,33 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			binding.physicalDevice = physicalDevice;
 			binding.device = vktex->m_pDevice;
 
-			find_queue_family_and_queue_idx( //
-			    binding.device, //
-			    binding.physicalDevice, //
-			    vktex->m_nQueueFamilyIndex, //
-			    vktex->m_pQueue, //
-			    binding.queueFamilyIndex, //
-			    binding.queueIndex //
-			);
+			if (!find_queue_family_and_queue_idx( //
+			        binding.device, //
+			        binding.physicalDevice, //
+			        vktex->m_nQueueFamilyIndex, //
+			        vktex->m_pQueue, //
+			        binding.queueFamilyIndex, //
+			        binding.queueIndex //
+			        ))
+				return giveUp("the app's VkQueue isn't one of its device's queues");
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingVulkanKHR>>(binding);
 			DrvOpenXR::SetupSession();
 			break;
 		}
+#endif
 		case vr::TextureType_OpenGL: {
 #ifdef SUPPORT_GL
 			// The spec requires that we call this before starting a session using OpenGL. Unfortunately we
 			// can't actually do anything with this information, since the game has already created the context.
 			XrGraphicsRequirementsOpenGLKHR graphicsRequirements{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR };
-			OOVR_FAILED_XR_ABORT(xr_ext->xrGetOpenGLGraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
+			OC_XR_LOG(xr_ext->xrGetOpenGLGraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
 
 			// Platform-specific OpenGL context stuff:
 #ifdef _WIN32
 			XrGraphicsBindingOpenGLWin32KHR binding = { XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR };
 			binding.hGLRC = wglGetCurrentContext();
 			binding.hDC = wglGetCurrentDC();
-
-			if (!binding.hGLRC || !binding.hDC) {
-				OOVR_ABORTF("Null OpenGL GLRC or DC: %p,%p", (void*)binding.hGLRC, (void*)binding.hDC);
-			}
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLWin32KHR>>(binding);
 			DrvOpenXR::SetupSession();
@@ -390,7 +484,7 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			// HACK: Create a separate GLX context since `MaybeRestartForInputs()` may attempt to bind it on a different thread while the app's context is still in use
 			const PFNGLXCREATECONTEXTATTRIBSARBPROC pfn_glXCreateContextAttribsARB = (PFNGLXCREATECONTEXTATTRIBSARBPROC)glXGetProcAddress((const GLubyte*)"glXCreateContextAttribsARB");
 			if (pfn_glXCreateContextAttribsARB == nullptr)
-				OOVR_ABORT("glXCreateContextAttribsARB not available");
+				return giveUp("glXCreateContextAttribsARB not available");
 
 			XrGraphicsBindingOpenGLXlibKHR binding = { XR_TYPE_GRAPHICS_BINDING_OPENGL_XLIB_KHR };
 			binding.xDisplay = glXGetCurrentDisplay();
@@ -403,10 +497,14 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			// clang-format on
 			GLXFBConfig* const configs = glXChooseFBConfig(binding.xDisplay, DefaultScreen(binding.xDisplay), configAttribs, &configCount);
 			if (configs == nullptr || configCount < 1)
-				OOVR_ABORT("No usable GLXFBConfig found");
+				return giveUp("No usable GLXFBConfig found");
 			binding.glxFBConfig = configs[0];
 			XFree(configs);
-			binding.visualid = glXGetVisualFromFBConfig(binding.xDisplay, binding.glxFBConfig)->visualid;
+			XVisualInfo* visual = glXGetVisualFromFBConfig(binding.xDisplay, binding.glxFBConfig);
+			if (!visual)
+				return giveUp("No visual for the GLXFBConfig");
+			binding.visualid = visual->visualid;
+			XFree(visual);
 			binding.glxDrawable = glXGetCurrentDrawable();
 			// clang-format off
 			const int contextAttribs[] = {
@@ -416,6 +514,8 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			};
 			// clang-format on
 			binding.glxContext = pfn_glXCreateContextAttribsARB(binding.xDisplay, binding.glxFBConfig, glXGetCurrentContext(), true, contextAttribs);
+			if (!binding.glxContext)
+				return giveUp("glXCreateContextAttribsARB failed");
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLXlibKHR>>(binding);
 			DrvOpenXR::SetupSession();
@@ -426,39 +526,33 @@ void XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			// The spec requires that we call this before starting a session using OpenGL. We could actually handle this properly
 			// on android since the app has to be modified to work with us, but for now don't bother.
 			XrGraphicsRequirementsOpenGLESKHR graphicsRequirements{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR };
-			OOVR_FAILED_XR_ABORT(xr_ext->xrGetOpenGLESGraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
-
-			if (!OpenComposite_Android_GLES_Binding_Info)
-				OOVR_ABORT("App is trying to use GLES, but OpenComposite_Android_GLES_Binding_Info global is not set.\n"
-				           "Please ensure this is set by the application.");
+			OC_XR_LOG(xr_ext->xrGetOpenGLESGraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
 
 			XrGraphicsBindingOpenGLESAndroidKHR binding = *OpenComposite_Android_GLES_Binding_Info;
-			OOVR_FALSE_ABORT(binding.type == XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR);
 			binding.next = nullptr;
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLESAndroidKHR>>(binding);
 			DrvOpenXR::SetupSession();
-
-#else
-			OOVR_ABORT("Application is trying to submit an OpenGL texture, which OpenComposite supports but is disabled in this build");
 #endif
 			break;
 		}
 		default:
-			OOVR_ABORTF("Invalid/unknown texture type %d", tex->eType);
+			// Checked above
+			break;
 		}
 
 		// Real graphics binding should be setup now - get rid of temporary graphics
 		temporaryGraphics.reset();
 	}
 
+	bool ready = true;
 	for (std::unique_ptr<Compositor>& compositor : compositors) {
 		// Skip a compositor if it's already set up
-		if (compositor)
-			continue;
-
-		compositor = BaseCompositor::CreateCompositorAPI(tex);
+		if (!compositor)
+			compositor = BaseCompositor::CreateCompositorAPI(tex);
+		ready = ready && compositor != nullptr;
 	}
+	return ready;
 }
 
 void XrBackend::WaitForTrackingData()
@@ -563,7 +657,11 @@ IBackend::openvr_enum_t XrBackend::StoreEyeTexture(
 	if (eye != vr::Eye_Left && eye != vr::Eye_Right)
 		return kCompositorInvalidTexture;
 
-	CheckOrInitCompositors(texture);
+	if (!CheckOrInitCompositors(texture)) {
+		// A texture OpenComposite can't use (logged): this eye is left out of the frame
+		projectionViews[eye].subImage.swapchain = XR_NULL_HANDLE;
+		return kCompositorInvalidTexture;
+	}
 
 	XrCompositionLayerProjectionView& layer = projectionViews[eye];
 	layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
@@ -583,6 +681,8 @@ IBackend::openvr_enum_t XrBackend::StoreEyeTexture(
 		XrResult res = comp.LastResult();
 		if (res == XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED)
 			result = kCompositorUnsupportedFormat;
+		else if (res == XR_ERROR_VALIDATION_FAILURE)
+			result = kCompositorInvalidTexture; // the compositor's word for texture data it can't use
 		else if (XR_FAILED(res))
 			result = kCompositorRequestFailed;
 	}
@@ -684,12 +784,24 @@ void XrBackend::SubmitFrames(bool showSkybox, bool postPresent)
 
 IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextures, uint32_t unTextureCount)
 {
-	// Needed for rFactor2 loading screens
+	// Needed for rFactor2 loading screens: one texture (or a stereo pair), shown as a quad. Six faces are a cube
+	// map, which isn't drawn yet: one face as a flat picture would be wrong, so that's RequestFailed.
+	if (unTextureCount >= 6) {
+		OOVR_LOG_ONCE("SetSkyboxOverride with a cube map: not supported yet");
+		return 1; // VRCompositorError_RequestFailed
+	}
 	if (unTextureCount && pTextures) {
-		CheckOrInitCompositors(pTextures);
+		if (!CheckOrInitCompositors(pTextures))
+			return 1; // VRCompositorError_RequestFailed
 
 		if (!sessionActive || !usingApplicationGraphicsAPI)
 			return 0;
+
+		// Taken after CheckOrInitCompositors, which may restart the session, and held to the end: a session restart
+		// on another thread replaces xr_gbl
+		auto lock = xr_session.lock_shared();
+		if (!sessionActive)
+			return 0; // a restart this thread waited behind left no running session
 
 		// Make sure any unfinished frames don't call xrEndFrame after this call
 		renderingFrame = false;
@@ -699,8 +811,9 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 
 		// A waited frame not yet begun (WaitForTrackingData's) is begun here instead
 		if (!frameAwaitingBegin) {
-			if (XR_FAILED(xrWaitFrame(xr_session.get(), &waitInfo, &state))) {
+			if (XrResult res = xrWaitFrame(xr_session.get(), &waitInfo, &state); XR_FAILED(res)) {
 				OOVR_LOG_ONCE("SetSkyboxOverride: xrWaitFrame failed");
+				OnFrameCallFailed(res);
 				return 1; // VRCompositorError_RequestFailed
 			}
 			xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
@@ -721,12 +834,22 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 			OOVR_LOG_ONCE("SetSkyboxOverride: xrBeginFrame failed");
 			if (res == XR_ERROR_CALL_ORDER_INVALID)
 				frameAwaitingBegin = false;
+			OnFrameCallFailed(res);
 			return 1; // VRCompositorError_RequestFailed
 		}
 		frameAwaitingBegin = false;
+		frameCallFailures = 0;
 
 		if (skybox_compositor == nullptr)
 			skybox_compositor = BaseCompositor::CreateCompositorAPI(pTextures);
+		if (skybox_compositor == nullptr) {
+			// No compositor for this texture: end the begun frame empty
+			XrFrameEndInfo empty{ XR_TYPE_FRAME_END_INFO };
+			empty.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+			empty.displayTime = xr_gbl->nextPredictedFrameTime;
+			xrEndFrame(xr_session.get(), &empty);
+			return 1; // VRCompositorError_RequestFailed
+		}
 
 		vr::VRTextureBounds_t bounds;
 		bounds.uMin = 0.0;
@@ -736,6 +859,14 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 
 		XrCompositionLayerQuad layerQuad = { XR_TYPE_COMPOSITION_LAYER_QUAD };
 		skybox_compositor->Invoke(pTextures, &bounds, layerQuad.subImage);
+		if (XR_FAILED(skybox_compositor->LastResult())) {
+			// No image this frame: end the begun frame empty
+			XrFrameEndInfo empty{ XR_TYPE_FRAME_END_INFO };
+			empty.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+			empty.displayTime = xr_gbl->nextPredictedFrameTime;
+			xrEndFrame(xr_session.get(), &empty);
+			return 1; // VRCompositorError_RequestFailed
+		}
 		layerQuad.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
 		layerQuad.next = NULL;
 		layerQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
@@ -1248,6 +1379,8 @@ void XrBackend::CreateGenericTrackers()
 	XrXDevListMNDX generic_tracker_list;
 	std::vector<XrXDevIdMNDX> generic_tracker_ids(MAX_GENERIC_TRACKERS);
 	InteractionProfile* profile = InteractionProfile::GetProfileByPath("/interaction_profiles/htc/vive_tracker_htcx");
+	if (!profile)
+		return;
 
 	uint32_t xdev_count = 0;
 
@@ -1480,9 +1613,12 @@ void XrBackend::VkGetPhysicalDevice(VkInstance instance, VkPhysicalDevice* out)
 {
 	*out = VK_NULL_HANDLE;
 
-	TemporaryVk* vk = temporaryGraphics->GetAsVk();
-	if (vk == nullptr)
-		OOVR_ABORT("Not using temporary Vulkan instance");
+	// VK_NULL_HANDLE (logged) if it can't be found: GetOutputDevice then answers 0, which a game takes as "any"
+	TemporaryVk* vk = temporaryGraphics ? temporaryGraphics->GetAsVk() : nullptr;
+	if (vk == nullptr || instance == VK_NULL_HANDLE) {
+		OOVR_LOG("VkGetPhysicalDevice: not using a temporary Vulkan instance (or no app instance)");
+		return;
+	}
 
 	// Find the UUID of the physical device the temporary instance is running on
 	VkPhysicalDeviceIDProperties idProps = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
@@ -1490,10 +1626,13 @@ void XrBackend::VkGetPhysicalDevice(VkInstance instance, VkPhysicalDevice* out)
 	vkGetPhysicalDeviceProperties2(vk->physicalDevice, &props);
 
 	// Look through all the physical devices on the target instance and find the matching one
-	uint32_t devCount;
-	OOVR_FAILED_VK_ABORT(vkEnumeratePhysicalDevices(instance, &devCount, nullptr));
+	uint32_t devCount = 0;
+	if (vkEnumeratePhysicalDevices(instance, &devCount, nullptr) != VK_SUCCESS)
+		return;
 	std::vector<VkPhysicalDevice> physicalDevices(devCount);
-	OOVR_FAILED_VK_ABORT(vkEnumeratePhysicalDevices(instance, &devCount, physicalDevices.data()));
+	if (vkEnumeratePhysicalDevices(instance, &devCount, physicalDevices.data()) < 0)
+		return;
+	physicalDevices.resize(devCount);
 
 	for (VkPhysicalDevice phy : physicalDevices) {
 		VkPhysicalDeviceIDProperties devIdProps = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
@@ -1508,7 +1647,7 @@ void XrBackend::VkGetPhysicalDevice(VkInstance instance, VkPhysicalDevice* out)
 		return;
 	}
 
-	OOVR_ABORT("Could not find matching Vulkan physical device for instance");
+	OOVR_LOG("Could not find matching Vulkan physical device for instance");
 }
 
 #endif

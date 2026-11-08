@@ -13,12 +13,6 @@
 #include <unistd.h>
 #endif
 
-#define ERR(msg)                                                                                                                                         \
-	do {                                                                                                                                                 \
-		std::string str = "Hit Vulkan-related error " + string(msg) + " at " __FILE__ ":" + std::to_string(__LINE__) + " func " + std::string(__func__); \
-		OOVR_ABORT(str.c_str());                                                                                                                         \
-	} while (0)
-
 static enum VkFormat handle_colorspace_auto(enum VkFormat ovrFormat)
 {
 	switch (ovrFormat) {
@@ -38,7 +32,9 @@ static enum VkFormat handle_colorspace_auto(enum VkFormat ovrFormat)
 		// Todo what games actually use these? and is color space always linear for these?
 		return ovrFormat;
 	default:
-		OOVR_ABORTF("Unsupported texture format used: %d", ovrFormat);
+		// VK_FORMAT_UNDEFINED: Submit answers TextureUsesUnsupportedFormat
+		OOVR_LOGF("Unsupported texture format used: %d", ovrFormat);
+		return VK_FORMAT_UNDEFINED;
 	}
 }
 
@@ -59,7 +55,9 @@ static enum VkFormat handle_colorspace_gamma(enum VkFormat ovrFormat)
 		// Todo what games actually use these? and is color space always linear for these?
 		return ovrFormat;
 	default:
-		OOVR_ABORTF("Unsupported texture format used: %d", ovrFormat);
+		// VK_FORMAT_UNDEFINED: Submit answers TextureUsesUnsupportedFormat
+		OOVR_LOGF("Unsupported texture format used: %d", ovrFormat);
+		return VK_FORMAT_UNDEFINED;
 	}
 }
 
@@ -80,7 +78,9 @@ static enum VkFormat handle_colorspace_linear(enum VkFormat ovrFormat)
 		// Todo what games actually use these? and is color space always linear for these?
 		return ovrFormat;
 	default:
-		OOVR_ABORTF("Unsupported texture format used: %d", ovrFormat);
+		// VK_FORMAT_UNDEFINED: Submit answers TextureUsesUnsupportedFormat
+		OOVR_LOGF("Unsupported texture format used: %d", ovrFormat);
+		return VK_FORMAT_UNDEFINED;
 	}
 }
 
@@ -102,27 +102,43 @@ VkCompositor::VkCompositor(const vr::Texture_t* initialTexture)
 		if (queue == tex->m_pQueue)
 			poolInfo.queueFamilyIndex = binding->queueFamilyIndex;
 	}
-	OOVR_FAILED_VK_ABORT(vkCreateCommandPool(tex->m_pDevice, &poolInfo, nullptr, &appCommandPool));
+	// Without one nothing can be copied: every Submit then answers RequestFailed
+	if (vkCreateCommandPool(tex->m_pDevice, &poolInfo, nullptr, &appCommandPool) != VK_SUCCESS) {
+		OOVR_LOG("vkCreateCommandPool failed: Vulkan textures can't be copied");
+		appCommandPool = VK_NULL_HANDLE;
+	}
 }
 
 VkCompositor::~VkCompositor()
 {
 	// destroying command pool also frees command buffers
-	vkDestroyCommandPool(appDevice, appCommandPool, nullptr);
+	if (appCommandPool)
+		vkDestroyCommandPool(appDevice, appCommandPool, nullptr);
 }
 
 void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds, std::optional<XruEye>, vr::EVRSubmitFlags submitFlags)
 {
 	const vr::VRVulkanTextureData_t* tex = (vr::VRVulkanTextureData_t*)texture->handle;
 
-	if (!tex) {
-		ERR("Cannot use NULL Vulkan image data (VRVulkanTextureData_t)");
+	// XR_ERROR_VALIDATION_FAILURE: Submit answers InvalidTexture
+	if (!tex || !tex->m_pDevice || !tex->m_pQueue) {
+		OOVR_LOG_ONCE("Cannot use NULL Vulkan image data (VRVulkanTextureData_t)");
+		lastResult = XR_ERROR_VALIDATION_FAILURE;
+		return;
 	}
 
 	// OpenXR only guarantees that the queue we initially gave it will have ownership of our swapchain image
 	// We could safeguard against any insane applications with a queue that we manage and copy to it,
 	// but it's simpler (and likely more performant) to just assume our app is sane.
-	OOVR_FALSE_ABORT(appQueue == tex->m_pQueue);
+	if (appQueue != tex->m_pQueue) {
+		OOVR_LOG_ONCE("A Vulkan texture on another queue than the first one: not used");
+		lastResult = XR_ERROR_VALIDATION_FAILURE;
+		return;
+	}
+	if (!appCommandPool) {
+		lastResult = XR_ERROR_RUNTIME_FAILURE;
+		return;
+	}
 
 	bool usable = chain != XR_NULL_HANDLE && CheckChainCompatible(*tex, createInfo, texture->eColorSpace);
 
@@ -136,6 +152,7 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 		// Free old command buffers if necessary
 		if (!appCommandBuffers.empty()) {
 			vkFreeCommandBuffers(appDevice, appCommandPool, appCommandBuffers.size(), appCommandBuffers.data());
+			appCommandBuffers.clear();
 		}
 
 		// Make eye render buffer
@@ -162,6 +179,14 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 			createInfo.format = handle_colorspace_linear((VkFormat)tex->m_nFormat);
 			break;
 		}
+		default:
+			createInfo.format = VK_FORMAT_UNDEFINED;
+			break;
+		}
+		if (createInfo.format == VK_FORMAT_UNDEFINED) {
+			chain = XR_NULL_HANDLE;
+			lastResult = XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+			return;
 		}
 
 		if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &createInfo, &chain), "xrCreateSwapchain")) {
@@ -189,7 +214,15 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 		bufInfo.commandPool = appCommandPool;
 		bufInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		bufInfo.commandBufferCount = chainLength;
-		OOVR_FAILED_VK_ABORT(vkAllocateCommandBuffers(appDevice, &bufInfo, appCommandBuffers.data()));
+		if (vkAllocateCommandBuffers(appDevice, &bufInfo, appCommandBuffers.data()) != VK_SUCCESS) {
+			OOVR_LOG("vkAllocateCommandBuffers failed: this eye is left out");
+			appCommandBuffers.clear();
+			swapchainImages.clear();
+			xrDestroySwapchain(chain);
+			chain = XR_NULL_HANDLE;
+			lastResult = XR_ERROR_RUNTIME_FAILURE;
+			return;
+		}
 	}
 
 	// First find the relevant image to render to
@@ -209,7 +242,19 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 	VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-	OOVR_FAILED_VK_ABORT(vkBeginCommandBuffer(currentCommandBuffer, &beginInfo));
+	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+	// A failed Vulkan call still gives the image back, unwritten, so the swapchain isn't stuck
+	auto vkFailed = [&](VkResult res, const char* what) {
+		if (res == VK_SUCCESS)
+			return false;
+		OOVR_LOGF("%s failed: %d (this eye is left out)", what, (int)res);
+		lastResult = XR_ERROR_RUNTIME_FAILURE;
+		xrReleaseSwapchainImage(chain, &releaseInfo);
+		return true;
+	};
+
+	if (vkFailed(vkBeginCommandBuffer(currentCommandBuffer, &beginInfo), "vkBeginCommandBuffer"))
+		return;
 
 	// transition swapchain image to TRANSFER_DST for copy
 	VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -324,23 +369,26 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 	    0, nullptr,
 	    1, &barrier);
 
-	OOVR_FAILED_VK_ABORT(vkEndCommandBuffer(currentCommandBuffer));
+	if (vkFailed(vkEndCommandBuffer(currentCommandBuffer), "vkEndCommandBuffer"))
+		return;
 
 	VkSubmitInfo submitInfo = {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &currentCommandBuffer;
 
-	OOVR_FAILED_VK_ABORT(vkQueueSubmit(tex->m_pQueue, 1, &submitInfo, VK_NULL_HANDLE));
+	if (vkFailed(vkQueueSubmit(tex->m_pQueue, 1, &submitInfo, VK_NULL_HANDLE), "vkQueueSubmit"))
+		return;
 
 	// Release the swapchain - OpenXR will use the last-released image in a swapchain
-	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 	SwapchainCallFailed(xrReleaseSwapchainImage(chain, &releaseInfo), "xrReleaseSwapchainImage");
 }
 
 void VkCompositor::InvokeCubemap(const vr::Texture_t* textures)
 {
-	OOVR_ABORT("VkCompositor::InvokeCubemap: Not yet supported!");
+	// Not yet: SetSkyboxOverride answers RequestFailed
+	OOVR_LOG_ONCE("VkCompositor::InvokeCubemap: Not yet supported!");
+	lastResult = XR_ERROR_RUNTIME_FAILURE;
 }
 
 bool VkCompositor::CheckChainCompatible(const vr::VRVulkanTextureData_t& tex, const XrSwapchainCreateInfo& chainDesc, vr::EColorSpace colourSpace)
@@ -375,7 +423,8 @@ bool VkCompositor::CheckChainCompatible(const vr::VRVulkanTextureData_t& tex, co
 		break;
 	}
 	default:
-		OOVR_ABORTF("Invalid colorspace given: %d", colourSpace);
+		OOVR_LOGF("Invalid colorspace given: %d", colourSpace);
+		usable = false;
 		break;
 	}
 

@@ -48,13 +48,6 @@ static bool FirstAskForUnknown(const char* interfaceVersion)
 
 static alternativeCoreFactory_t alternativeCoreFactory = nullptr;
 
-OC_NORETURN void ERR(string msg)
-{
-	char buff[4096];
-	snprintf(buff, sizeof(buff), "OpenComposite DLLMain ERROR: %s", msg.c_str());
-	OOVR_ABORT_T(buff, "OpenComposite Error");
-}
-
 class _InheritCVRLayout {
 	virtual void _ignore() = 0;
 };

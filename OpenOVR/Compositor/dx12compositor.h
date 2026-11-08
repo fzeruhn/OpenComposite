@@ -20,7 +20,6 @@ public:
 private:
 	void CheckCreateSwapChain(const vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds, bool cube);
 
-	void ThrowIfFailed(HRESULT test);
 
 	bool CheckChainCompatible(D3D12_RESOURCE_DESC& inputDesc, vr::EColorSpace colourSpace);
 

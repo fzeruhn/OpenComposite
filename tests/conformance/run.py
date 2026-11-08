@@ -93,7 +93,10 @@ class Runner:
         self.out.mkdir(parents=True, exist_ok=True)
         (self.out / "raw").mkdir(exist_ok=True)
         if self.args.ini:
-            shutil.copy(self.args.ini, Path(self.runtime).parent / "opencomposite.ini")
+            # Taken out again when the run ends (Runner.cleanup), with any file that was there put back
+            target = Path(self.runtime).parent / "opencomposite.ini"
+            self.ini_backup = target.read_bytes() if target.exists() else None
+            shutil.copy(self.args.ini, target)
         if unelevated.integrity_above_medium() and self.manifest:
             if not self.args.ci:
                 return  # children run at medium integrity (unelevated.run_medium)
@@ -183,6 +186,14 @@ class Runner:
             records.append(self.take_crash(raw, {"case": name, "method": "<end>", "status": self.status_of(code), "exit_code": code}))
         return records
 
+    def cleanup(self):
+        if self.args.ini:
+            target = Path(self.runtime).parent / "opencomposite.ini"
+            if getattr(self, "ini_backup", None) is not None:
+                target.write_bytes(self.ini_backup)
+            else:
+                target.unlink(missing_ok=True)
+
     def run(self):
         self.prepare()
         jobs = []
@@ -270,7 +281,11 @@ def main():
     if args.cases and not args.only:
         args.cases_only = True
 
-    results = Runner(args).run()
+    runner = Runner(args)
+    try:
+        results = runner.run()
+    finally:
+        runner.cleanup()
     out = Path(args.out)
     (out / "results.json").write_text(json.dumps({"runtime": args.runtime, "records": results}, indent=1),
                                       encoding="utf-8")

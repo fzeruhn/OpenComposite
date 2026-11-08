@@ -31,6 +31,7 @@
 #include <set>
 #include <utility>
 
+#include "Misc/JsonFile.h"
 #include "Misc/xrmoreutils.h"
 
 // Use RenderModels for the pose offsets, which are the same as component positions
@@ -69,32 +70,18 @@ using namespace vr;
 	} while (0)
 
 // This is a duplicate from BaseClientCore.cpp
-static bool ReadJson(const std::wstring& path, Json::Value& result)
+// Manifests and binding files as SteamVR reads them (BOM, comments, trailing commas: Misc/JsonFile.h); false with
+// the reason in error if the file can't be read or isn't JSON
+static bool ReadJson(const std::wstring& path, Json::Value& result, std::string& error)
 {
-#ifndef _WIN32
+#ifndef ANDROID
+	return ReadJsonFileLenient(std::filesystem::path(path), result, error);
+#else
 	typedef std::codecvt_utf8<wchar_t> convert_type;
 	std::wstring_convert<convert_type, wchar_t> converter;
 	const std::string real_path = converter.to_bytes(path);
-#else
-	const std::wstring& real_path = path;
-#endif
-
-#ifndef ANDROID
-	std::ifstream in(real_path, std::ios::binary);
-	if (in) {
-		std::stringstream contents;
-		contents << in.rdbuf();
-		contents >> result;
-		return true;
-	} else {
-		result = Json::Value(Json::ValueType::objectValue);
-		return false;
-	}
-#else
 	std::string contents = OpenComposite_Android_Load_Input_File(real_path.c_str());
-	Json::Reader reader;
-	reader.parse(contents, result, false);
-	return true;
+	return ParseJsonLenient(contents, result, error);
 #endif
 }
 
@@ -303,7 +290,10 @@ T* BaseInput::Registry<T>::Initialise(const std::string& name, std::unique_ptr<T
 		// since we only generate dummy handles before initialization, make sure we only have dummy handles
 		// dummy handles have no associated items
 		handle = handlesByName.find(lowerName)->second;
-		OOVR_FALSE_ABORT(itemsByHandle.find(handle) == itemsByHandle.end());
+		if (itemsByHandle.find(handle) != itemsByHandle.end()) {
+			// Can't happen (an item is only made once per name); if it does, the newer item replaces the older
+			OOVR_LOGF("Input registry: '%s' initialised twice", lowerName.c_str());
+		}
 	}
 
 	// Move the pointer into storage, so we'll own it
@@ -375,11 +365,25 @@ void BaseInput::setStartupManifest(std::string manifest)
 
 EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath)
 {
+	if (!pchActionManifestPath || !*pchActionManifestPath)
+		return VRInputError_InvalidParam;
 	OOVR_LOGF("Loading manifest file '%s'", pchActionManifestPath);
 
 	//////////////
 	//// Load the actions from the manifest file
 	//////////////
+
+	if (hasLoadedActions && loadedActionsPath == pchActionManifestPath)
+		return vr::VRInputError_None; // It stands to reason that nothing would happen if we try to load the same manifest again
+
+	// Read it first: a manifest that can't be read leaves the game on legacy input (and any manifest it had), and
+	// answers InvalidParam as SteamVR does for a path it can't use
+	Json::Value root;
+	std::string manifestError;
+	if (!ReadJson(utf8to16(pchActionManifestPath), root, manifestError) || !root.isObject()) {
+		OOVR_LOGF("Failed to open or parse input manifest: %s", manifestError.empty() ? "not a JSON object" : manifestError.c_str());
+		return VRInputError_InvalidParam;
+	}
 
 	if (hasLoadedActions) {
 		// It stands to reason that nothing would happen if we try to load the same manifest again
@@ -406,18 +410,18 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 	hasLoadedActions = true;
 	loadedActionsPath = pchActionManifestPath;
 
-	Json::Value root;
-	// It says 'open or parse', but really it ignores parse errors - TODO catch those
-	if (!ReadJson(utf8to16(pchActionManifestPath), root))
-		OOVR_ABORTF("Failed to open or parse input manifest (%s)", pchActionManifestPath);
-
 	// Random setting which is in the action manifest
-	allowSetDominantHand = root["supports_dominant_hand_setting"].asBool();
+	const Json::Value& dominantHandSetting = root["supports_dominant_hand_setting"];
+	allowSetDominantHand = dominantHandSetting.isConvertibleTo(Json::booleanValue) && dominantHandSetting.asBool();
 
 	// Parse the actions
 	OOVR_LOG("Parsing actions...");
 	std::set<std::string> skippedActionSets; // the sets of actions we leave out, which the app still syncs
-	for (Json::Value item : root["actions"]) {
+	for (Json::Value item : root["actions"]) try {
+		if (!item.isObject()) {
+			OOVR_LOG("Warning: skipping an action that isn't a JSON object");
+			continue;
+		}
 		std::unique_ptr<Action> actionPtr = std::make_unique<Action>();
 		Action& action = *actionPtr;
 
@@ -429,11 +433,16 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		std::vector<std::string> parts;
 		stringSplit(action.fullName, parts);
 
-		if (parts.size() != 4)
-			OOVR_ABORTF("Invalid action name '%s' - wrong number of parts %zu", action.fullName.c_str(), parts.size());
+		// A bad entry is skipped with a warning; the rest of the manifest is used
+		if (parts.size() != 4) {
+			OOVR_LOGF("Warning: skipping action '%s' - wrong number of parts %zu", action.fullName.c_str(), parts.size());
+			continue;
+		}
 
-		if (parts.at(0) != "actions")
-			OOVR_ABORTF("Invalid action name '%s' - bad first parts '%s'", action.fullName.c_str(), parts.at(0).c_str());
+		if (parts.at(0) != "actions") {
+			OOVR_LOGF("Warning: skipping action '%s' - bad first part '%s'", action.fullName.c_str(), parts.at(0).c_str());
+			continue;
+		}
 
 		action.setName = parts.at(1);
 		action.shortName = parts.at(3);
@@ -443,8 +452,10 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			action.haptic = false;
 		else if (inOut == "out")
 			action.haptic = true;
-		else
-			OOVR_ABORTF("Invalid action name '%s' - bad in/out value '%s'", action.fullName.c_str(), inOut.c_str());
+		else {
+			OOVR_LOGF("Warning: skipping action '%s' - bad in/out value '%s'", action.fullName.c_str(), inOut.c_str());
+			continue;
+		}
 
 		// Parse the requirement
 		// TODO default to optional
@@ -455,8 +466,10 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			action.requirement = ActionRequirement::Suggested;
 		else if (requirement == "optional")
 			action.requirement = ActionRequirement::Optional;
-		else
-			OOVR_ABORTF("Invalid action requirement value '%s' for action '%s'", requirement.c_str(), action.fullName.c_str());
+		else {
+			OOVR_LOGF("Warning: invalid requirement '%s' for action '%s', using suggested", requirement.c_str(), action.fullName.c_str());
+			action.requirement = ActionRequirement::Suggested;
+		}
 
 		// Parse the type
 		std::string type = item["type"].asString();
@@ -466,8 +479,12 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			action.type = ActionType::Vector1;
 		else if (type == "vector2")
 			action.type = ActionType::Vector2;
-		else if (type == "vector3")
-			action.type = ActionType::Vector3;
+		else if (type == "vector3") {
+			// Not yet: the action is left out (its handle still works and reads as inactive)
+			OOVR_LOGF("Warning: skipping vector3 action '%s' (not supported yet)", action.fullName.c_str());
+			skippedActionSets.insert(action.setName);
+			continue;
+		}
 		else if (type == "vibration")
 			action.type = ActionType::Vibration;
 		else if (type == "pose")
@@ -481,11 +498,16 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			OOVR_LOGF("Skipping eye tracking action '%s'", action.fullName.c_str());
 			skippedActionSets.insert(action.setName);
 			continue;
-		} else
-			OOVR_ABORTF("Invalid action type '%s' for action '%s'", type.c_str(), action.fullName.c_str());
+		} else {
+			OOVR_LOGF("Warning: skipping action '%s' of unknown type '%s'", action.fullName.c_str(), type.c_str());
+			skippedActionSets.insert(action.setName);
+			continue;
+		}
 
-		if (actions.LookupItem(action.fullName) != nullptr)
-			OOVR_ABORTF("Duplicate action name '%s'", action.fullName.c_str());
+		if (actions.LookupItem(action.fullName) != nullptr) {
+			OOVR_LOGF("Warning: skipping duplicate action '%s'", action.fullName.c_str());
+			continue;
+		}
 
 		// If this is a skeletal action, see what hand it's bound to. Uniquely, this is done in the actions manifest itself
 		if (action.type == ActionType::Skeleton) {
@@ -507,11 +529,18 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 
 		std::string name = action.fullName; // Array index may be evaluated first iirc, so pull this out now
 		actions.Initialise(name, std::move(actionPtr));
+	} catch (const std::exception& e) {
+		// A wrong-typed value in this entry (Json::LogicError): only the entry is left out
+		OOVR_SOFT_ABORTF("Skipping an action of the manifest: %s", e.what());
 	}
 
 	// Parse the action sets
 	OOVR_LOG("Parsing action sets...");
-	for (Json::Value item : root["action_sets"]) {
+	for (Json::Value item : root["action_sets"]) try {
+		if (!item.isObject()) {
+			OOVR_LOG("Warning: skipping an action set that isn't a JSON object");
+			continue;
+		}
 		ActionSet set = {};
 
 		set.fullName = actionSets.ShortenOrLookupName(item["name"].asString());
@@ -522,11 +551,19 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		std::vector<std::string> parts;
 		stringSplit(set.fullName, parts);
 
-		if (parts.size() != 2)
-			OOVR_ABORTF("Invalid action set name '%s' - wrong number of parts %zu", set.fullName.c_str(), parts.size());
+		if (parts.size() != 2) {
+			OOVR_LOGF("Warning: skipping action set '%s' - wrong number of parts %zu", set.fullName.c_str(), parts.size());
+			continue;
+		}
 
-		if (parts.at(0) != "actions")
-			OOVR_ABORTF("Invalid action name '%s' - bad first parts '%s'", set.fullName.c_str(), parts.at(0).c_str());
+		if (parts.at(0) != "actions") {
+			OOVR_LOGF("Warning: skipping action set '%s' - bad first part '%s'", set.fullName.c_str(), parts.at(0).c_str());
+			continue;
+		}
+		if (actionSets.LookupItem(set.fullName) != nullptr) {
+			OOVR_LOGF("Warning: skipping duplicate action set '%s'", set.fullName.c_str());
+			continue;
+		}
 
 		set.name = parts.at(1);
 
@@ -538,11 +575,15 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			set.usage = ActionSetUsage::Single;
 		else if (usage == "hidden")
 			set.usage = ActionSetUsage::Hidden;
-		else
-			OOVR_ABORTF("Invalid action set usage '%s' for action set '%s'", usage.c_str(), set.name.c_str());
+		else {
+			OOVR_LOGF("Warning: invalid usage '%s' for action set '%s', using leftright", usage.c_str(), set.name.c_str());
+			set.usage = ActionSetUsage::LeftRight;
+		}
 
 		// Register it
 		actionSets.Initialise(set.fullName, std::make_unique<ActionSet>(set));
+	} catch (const std::exception& e) {
+		OOVR_SOFT_ABORTF("Skipping an action set of the manifest: %s", e.what());
 	}
 
 	// Make sure all the actions have a corresponding set
@@ -599,8 +640,8 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			info.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT;
 			break;
 		case ActionType::Vector3:
-			STUBBED(); // Not XR_STUBBED since this didn't work before, and I've certainly never heard of a use for it
-			break;
+			// Skipped while parsing (not supported yet)
+			continue;
 		case ActionType::Vibration:
 			info.actionType = XR_ACTION_TYPE_VIBRATION_OUTPUT;
 			break;
@@ -612,6 +653,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			continue;
 		default:
 			OOVR_SOFT_ABORTF("Bad action type while remapping action %s: %d", act->fullName.c_str(), static_cast<int>(act->type));
+			continue;
 		}
 
 		// Listen on all the subactions
@@ -803,9 +845,12 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 	if (!profile.CanHaveBindings())
 		return;
 
+	// A binding file that can't be used leaves this controller type without bindings; the others still load
 	Json::Value bindingsRoot;
-	if (!ReadJson(utf8to16(bindingsPath), bindingsRoot)) {
-		OOVR_ABORTF("Failed to read and parse JSON binding descriptor: %s", bindingsPath.c_str());
+	std::string bindingsError;
+	if (!ReadJson(utf8to16(bindingsPath), bindingsRoot, bindingsError)) {
+		OOVR_LOGF("Warning: can't read the binding file, no bindings for %s: %s", profile.GetPath().c_str(), bindingsError.c_str());
+		return;
 	}
 
 	// TODO aliases, if anyone uses them
@@ -813,8 +858,10 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 		OOVR_LOGF("WARNING: Ignoring alias_info from binding descriptor %s", bindingsPath.c_str());
 
 	const Json::Value& bindingsJson = bindingsRoot["bindings"];
-	if (!bindingsJson.isObject())
-		OOVR_ABORTF("Invalid bindings file %s, missing or invalid bindings object", bindingsPath.c_str());
+	if (!bindingsJson.isObject()) {
+		OOVR_LOGF("Warning: bindings file %s has no bindings object, no bindings for %s", bindingsPath.c_str(), profile.GetPath().c_str());
+		return;
+	}
 
 	// Index controllers require special handling of grip and touchpads
 	auto isKnuckles = bindingsRoot["controller_type"] == "knuckles";
@@ -830,7 +877,8 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 
 		std::string prefix = "/actions/";
 		if (strncmp(prefix.c_str(), setFullName.c_str(), prefix.size()) != 0) {
-			OOVR_ABORTF("Invalid action set name '%s' in bindings file '%s' - missing or bad prefix", setFullName.c_str(), bindingsPath.c_str());
+			OOVR_LOGF("Warning: skipping action set '%s' in bindings file '%s' - missing or bad prefix", setFullName.c_str(), bindingsPath.c_str());
+			continue;
 		}
 		std::string setName = setFullName.substr(prefix.size());
 
@@ -1031,11 +1079,15 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 
 			std::string actionName = lowerStr(item["output"].asString());
 			Action* action = actions.LookupItem(actionName);
-			if (action == nullptr)
-				OOVR_ABORTF("Missing haptic action '%s' in bindings file '%s'", actionName.c_str(), bindingsPath.c_str());
+			// A haptic binding for an action the manifest doesn't have, or to a path the controller doesn't have, is skipped
+			if (action == nullptr) {
+				OOVR_LOGF("Warning: skipping haptic binding for missing action '%s' in bindings file '%s'", actionName.c_str(), bindingsPath.c_str());
+				continue;
+			}
 
 			if (!profile.IsInputPathValid(pathStr)) {
-				OOVR_ABORTF("Built invalid input path %s from pose action %s", pathStr.c_str(), actionName.c_str());
+				OOVR_LOGF("Warning: skipping haptic binding to invalid path %s for action %s", pathStr.c_str(), actionName.c_str());
+				continue;
 			}
 
 			XrPath path = XR_NULL_PATH;
@@ -1281,12 +1333,16 @@ void BaseInput::CreateLegacyActions()
 
 EVRInputError BaseInput::GetActionSetHandle(const char* pchActionSetName, VRActionSetHandle_t* pHandle)
 {
+	if (!pchActionSetName || !pHandle)
+		return VRInputError_InvalidParam;
 	*pHandle = actionSets.LookupHandle(pchActionSetName);
 	return vr::VRInputError_None;
 }
 
 EVRInputError BaseInput::GetActionHandle(const char* pchActionName, VRActionHandle_t* pHandle)
 {
+	if (!pchActionName || !pHandle)
+		return VRInputError_InvalidParam;
 	*pHandle = actions.LookupHandle(pchActionName);
 	return vr::VRInputError_None;
 }
@@ -1546,7 +1602,8 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 			// read state of parent
 			XrActionStateVector2f parent_state = { XR_TYPE_ACTION_STATE_VECTOR2F };
 			auto iter = DpadBindingInfo::parents.find(parent_name);
-			OOVR_FALSE_ABORT(iter != DpadBindingInfo::parents.end());
+			if (iter == DpadBindingInfo::parents.end())
+				return XR_ERROR_HANDLE_INVALID; // no parent dpad action: the binding reads as inactive
 			XrActionStateGetInfo info2 = *getInfo;
 			info2.action = iter->second.vectorAction;
 			OC_XR_LOG(xrGetActionStateVector2f(xr_session.get(), &info2, &parent_state));
@@ -2014,7 +2071,8 @@ EVRInputError BaseInput::GetSkeletalActionData(VRActionHandle_t actionHandle, In
 		originPath = "/user/hand/left";
 	else
 		originPath = "/user/hand/right";
-	OOVR_FALSE_ABORT(GetInputSourceHandle(originPath.c_str(), &out->activeOrigin) == vr::VRInputError_None);
+	if (GetInputSourceHandle(originPath.c_str(), &out->activeOrigin) != vr::VRInputError_None)
+		out->activeOrigin = vr::k_ulInvalidInputValueHandle;
 
 	out->bActive = ivhToDev(out->activeOrigin) != nullptr;
 	return vr::VRInputError_None;
@@ -2025,6 +2083,8 @@ EVRInputError BaseInput::GetDominantHand(vr::ETrackedControllerRole* peDominantH
 	// The API documentation says we need allowSetDominantHand for this, but that
 	// seems like a mistake (i.e. that comment was probably meant to be on
 	// SetDominantHand), so I'll just allow it always.
+	if (!peDominantHand)
+		return VRInputError_InvalidParam;
 	*peDominantHand = dominantHand;
 	return VRInputError_None;
 }
@@ -2040,6 +2100,8 @@ EVRInputError BaseInput::SetDominantHand(vr::ETrackedControllerRole eDominantHan
 EVRInputError BaseInput::GetBoneCount(VRActionHandle_t action, uint32_t* pBoneCount)
 {
 	// Maybe we should check the action?
+	if (!pBoneCount)
+		return VRInputError_InvalidParam;
 	*pBoneCount = (int)eBone_Count;
 	return vr::VRInputError_None;
 }
@@ -2145,11 +2207,13 @@ EVRInputError BaseInput::GetSkeletalBoneData(VRActionHandle_t actionHandle, EVRS
 	// Hand labs is in parent transform space, and usually 'with controller' motion range
 	// OOVR_LOGF("skeletal data %d %d", eTransformSpace, eMotionRange);
 
-	// Check for the right number of bones
-	OOVR_FALSE_ABORT(unTransformArrayCount == 31);
+	// Check for the right number of bones (and a hand), as SteamVR answers a wrong count
+	if (!pTransformArray || unTransformArrayCount != 31)
+		return vr::VRInputError_InvalidParam;
 
 	const auto hand = action->skeletalHand;
-	OOVR_FALSE_ABORT(static_cast<int>(hand) < 2);
+	if (static_cast<int>(hand) >= 2)
+		return vr::VRInputError_InvalidSkeleton;
 
 	std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDeviceByHand(hand);
 	if (!dev)
@@ -2346,7 +2410,8 @@ EVRInputError BaseInput::TriggerHapticVibrationAction(VRActionHandle_t action, f
 	GET_ACTION_FROM_HANDLE(act, action);
 
 	if (act->type != ActionType::Vibration) {
-		OOVR_ABORTF("Cannot trigger vibration on non-vibration (type=%d) action '%s'", static_cast<int>(act->type), act->fullName.c_str());
+		OOVR_LOGF("Cannot trigger vibration on non-vibration (type=%d) action '%s'", static_cast<int>(act->type), act->fullName.c_str());
+		return VRInputError_WrongType;
 	}
 
 	// TODO check the subaction stuff works properly
@@ -2383,7 +2448,9 @@ EVRInputError BaseInput::GetActionOrigins(VRActionSetHandle_t actionSetHandle, V
 
 	// TODO find something that passes in non-matching values and see what results it wants, or try it with SteamVR
 	if (act->set != set) {
-		OOVR_ABORTF("GetActionOrigins: set mismatch %s vs %s", set->name.c_str(), act->fullName.c_str());
+		// The action isn't in that set: no origins for it there
+		OOVR_LOGF("GetActionOrigins: set mismatch %s vs %s", set->name.c_str(), act->fullName.c_str());
+		return VRInputError_InvalidHandle;
 	}
 
 	if (act->type == ActionType::Skeleton || act->type == ActionType::Pose) {
@@ -2420,7 +2487,8 @@ EVRInputError BaseInput::GetActionOrigins(VRActionSetHandle_t actionSetHandle, V
 	for (const std::string& path : sources) {
 		if (i >= originOutCount)
 			return vr::VRInputError_MaxCapacityReached; // TODO check this is correct
-		OOVR_FALSE_ABORT(GetInputSourceHandle(path.c_str(), &originsOut[i]) == vr::VRInputError_None);
+		if (GetInputSourceHandle(path.c_str(), &originsOut[i]) != vr::VRInputError_None)
+			continue;
 		i++;
 	}
 
@@ -2582,7 +2650,8 @@ EVRInputError BaseInput::GetActionBindingInfo(VRActionHandle_t actionHandle, OOV
 			strcpy_arr(bindingInfo->rchInputSourceType, "joystick");
 			break;
 		default:
-			OOVR_ABORTF("Unimplemented action type %d for %s", static_cast<int>(action->type), pathStr.c_str());
+			OOVR_LOGF("Unimplemented action type %d for %s: no mode name", static_cast<int>(action->type), pathStr.c_str());
+			break;
 		}
 	}
 
@@ -2627,7 +2696,7 @@ EVRInputError BaseInput::OpenBindingUI(const char* pchAppKey, VRActionSetHandle_
 
 EVRInputError BaseInput::GetBindingVariant(vr::VRInputValueHandle_t ulDevicePath, char* pchVariantArray, uint32_t unVariantArraySize)
 {
-	if (unVariantArraySize == 0) {
+	if (!pchVariantArray || unVariantArraySize == 0) {
 		return VRInputError_MaxCapacityReached;
 	}
 
@@ -2722,8 +2791,8 @@ VRInputValueHandle_t BaseInput::activeOriginFromSubaction(Action* action, const 
 	for (int i = 0; i < (int)action->sourcesCount; i++) {
 		const std::string& str = action->sourceNames[i];
 		if (strncmp(str.c_str(), subactionPath, strlen(subactionPath)) == 0) {
-			VRInputValueHandle_t handle;
-			OOVR_FALSE_ABORT(GetInputSourceHandle(str.c_str(), &handle) == vr::VRInputError_None);
+			VRInputValueHandle_t handle = vr::k_ulInvalidInputValueHandle;
+			GetInputSourceHandle(str.c_str(), &handle);
 			return handle;
 		}
 	}
@@ -2732,8 +2801,8 @@ VRInputValueHandle_t BaseInput::activeOriginFromSubaction(Action* action, const 
 	// an actual crash, and we'll soft-abort on it since this shouldn't actually happen, unless the user has just
 	// connected a device and pressed a button before it had time to update.
 	OOVR_SOFT_ABORTF("Couldn't find matching source for subaction path '%s' on action '%s'", subactionPath, action->fullName.c_str());
-	VRInputValueHandle_t handle;
-	OOVR_FALSE_ABORT(GetInputSourceHandle(subactionPath, &handle) == vr::VRInputError_None);
+	VRInputValueHandle_t handle = vr::k_ulInvalidInputValueHandle;
+	GetInputSourceHandle(subactionPath, &handle);
 	return handle;
 }
 

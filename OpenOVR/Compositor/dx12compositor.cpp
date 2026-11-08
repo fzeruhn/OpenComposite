@@ -91,7 +91,10 @@ void DX12Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		// Figure out what format we need to use
 		DxgiFormatInfo info = {};
 		if (!GetFormatInfo(srcDesc.Format, info)) {
-			OOVR_ABORTF("Unknown (by OC) DXGI texture format %d", srcDesc.Format);
+			// Submit answers TextureUsesUnsupportedFormat; the eye is left out
+			OOVR_LOGF("Unknown (by OC) DXGI texture format %d", srcDesc.Format);
+			lastResult = XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+			return;
 		}
 		bool useLinearFormat;
 		switch (texture->eColorSpace) {
@@ -111,7 +114,9 @@ void DX12Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		DXGI_FORMAT type = useLinearFormat ? info.linear : info.srgb;
 
 		if (type == DXGI_FORMAT_UNKNOWN) {
-			OOVR_ABORTF("Invalid DXGI target format found: useLinear=%d type=DXGI_FORMAT_UNKNOWN fmt=%d", useLinearFormat, srcDesc.Format);
+			OOVR_LOGF("Invalid DXGI target format found: useLinear=%d type=DXGI_FORMAT_UNKNOWN fmt=%d", useLinearFormat, srcDesc.Format);
+			lastResult = XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+			return;
 		}
 
 		// Set aside the old format for checking later

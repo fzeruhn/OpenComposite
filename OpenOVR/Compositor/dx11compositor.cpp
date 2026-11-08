@@ -48,35 +48,6 @@ float4 ps_fs(psIn inputPS) : SV_TARGET
 	return textureColor;
 })_";
 
-static void XTrace(LPCSTR lpszFormat, ...)
-{
-	va_list args;
-	va_start(args, lpszFormat);
-	int nBuf;
-	char szBuffer[512]; // get rid of this hard-coded buffer
-	nBuf = _vsnprintf_s(szBuffer, 511, lpszFormat, args);
-	OutputDebugStringA(szBuffer);
-	OOVR_LOG(szBuffer);
-	va_end(args);
-}
-
-#define ERR(msg)                                                                                                                                       \
-	{                                                                                                                                                  \
-		std::string str = "Hit DX11-related error " + string(msg) + " at " __FILE__ ":" + std::to_string(__LINE__) + " func " + std::string(__func__); \
-		OOVR_LOG(str.c_str());                                                                                                                         \
-		OOVR_MESSAGE(str.c_str(), "Errored func!");                                                                                                    \
-		/**((int*)NULL) = 0;*/                                                                                                                         \
-		throw str;                                                                                                                                     \
-	}
-
-void DX11Compositor::ThrowIfFailed(HRESULT test)
-{
-	if ((test) != S_OK) {
-		OOVR_FAILED_DX_ABORT(device->GetDeviceRemovedReason());
-		throw "ThrowIfFailed err";
-	}
-}
-
 ID3DBlob* d3d_compile_shader(const char* hlsl, const char* entrypoint, const char* target)
 {
 	DWORD flags = D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS;
@@ -86,9 +57,14 @@ ID3DBlob* d3d_compile_shader(const char* hlsl, const char* entrypoint, const cha
 	flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
 #endif
 
-	ID3DBlob *compiled, *errors;
-	if (FAILED(D3DCompile(hlsl, strlen(hlsl), nullptr, nullptr, nullptr, entrypoint, target, flags, 0, &compiled, &errors)))
-		OOVR_ABORTF("Error: D3DCompile failed %s", (char*)errors->GetBufferPointer());
+	// nullptr if it doesn't compile: the compositor then copies without the shader (inverted images stay inverted)
+	ID3DBlob *compiled = nullptr, *errors = nullptr;
+	if (FAILED(D3DCompile(hlsl, strlen(hlsl), nullptr, nullptr, nullptr, entrypoint, target, flags, 0, &compiled, &errors))) {
+		OOVR_LOGF("Error: D3DCompile failed %s", errors ? (char*)errors->GetBufferPointer() : "(no message)");
+		if (compiled)
+			compiled->Release();
+		compiled = nullptr;
+	}
 	if (errors)
 		errors->Release();
 
@@ -107,7 +83,9 @@ ID3D11RenderTargetView* d3d_make_rtv(ID3D11Device* d3d_device, XrBaseInStructure
 	target_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 	target_desc.Format = format;
 	target_desc.Texture2D.MipSlice = 0;
-	OOVR_FAILED_DX_ABORT(d3d_device->CreateRenderTargetView(d3d_swapchain_img.texture, &target_desc, &result));
+	// nullptr if it can't be made: the shader path is then off for this swapchain
+	if (FAILED(d3d_device->CreateRenderTargetView(d3d_swapchain_img.texture, &target_desc, &result)))
+		result = nullptr;
 
 	return result;
 }
@@ -117,11 +95,19 @@ DX11Compositor::DX11Compositor(ID3D11Texture2D* initial)
 	initial->GetDevice(&device);
 	device->GetImmediateContext(&context);
 
-	// Shaders for inverting copy
+	// Shaders for inverting copy. Anything here that fails turns the shader path off (shadersUsable), and textures
+	// are then copied as they are.
 	ID3DBlob* fs_vert_shader_blob = d3d_compile_shader(fs_shader_code, "vs_fs", "vs_5_0");
 	ID3DBlob* fs_pixel_shader_blob = d3d_compile_shader(fs_shader_code, "ps_fs", "ps_5_0");
-	OOVR_FAILED_DX_ABORT(device->CreateVertexShader(fs_vert_shader_blob->GetBufferPointer(), fs_vert_shader_blob->GetBufferSize(), nullptr, &fs_vshader));
-	OOVR_FAILED_DX_ABORT(device->CreatePixelShader(fs_pixel_shader_blob->GetBufferPointer(), fs_pixel_shader_blob->GetBufferSize(), nullptr, &fs_pshader));
+	shadersUsable = fs_vert_shader_blob && fs_pixel_shader_blob;
+	if (shadersUsable && FAILED(device->CreateVertexShader(fs_vert_shader_blob->GetBufferPointer(), fs_vert_shader_blob->GetBufferSize(), nullptr, &fs_vshader)))
+		shadersUsable = false;
+	if (shadersUsable && FAILED(device->CreatePixelShader(fs_pixel_shader_blob->GetBufferPointer(), fs_pixel_shader_blob->GetBufferSize(), nullptr, &fs_pshader)))
+		shadersUsable = false;
+	if (fs_vert_shader_blob)
+		fs_vert_shader_blob->Release();
+	if (fs_pixel_shader_blob)
+		fs_pixel_shader_blob->Release();
 
 	// Create a texture sampler state description.
 	D3D11_SAMPLER_DESC samplerDesc;
@@ -140,7 +126,8 @@ DX11Compositor::DX11Compositor(ID3D11Texture2D* initial)
 	samplerDesc.MaxLOD = 0;
 
 	// Create the texture sampler state.
-	OOVR_FAILED_DX_ABORT(device->CreateSamplerState(&samplerDesc, &quad_sampleState));
+	if (FAILED(device->CreateSamplerState(&samplerDesc, &quad_sampleState)))
+		shadersUsable = false;
 
 	// Create a constant buffer, to store the source area of the texture
 	D3D11_BUFFER_DESC constantBufferDesc = {};
@@ -148,13 +135,17 @@ DX11Compositor::DX11Compositor(ID3D11Texture2D* initial)
 	constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	constantBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
 	constantBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-	OOVR_FAILED_DX_ABORT(device->CreateBuffer(&constantBufferDesc, nullptr, &constBuffer));
+	if (FAILED(device->CreateBuffer(&constantBufferDesc, nullptr, &constBuffer)))
+		shadersUsable = false;
+	if (!shadersUsable)
+		OOVR_LOG("The D3D11 compositor's shaders couldn't be set up: inverted textures are copied as they are");
 }
 
 DX11Compositor::~DX11Compositor()
 {
 	for (auto&& rtv : swapchain_rtvs)
-		rtv->Release();
+		if (rtv)
+			rtv->Release();
 
 	swapchain_rtvs.clear();
 
@@ -214,7 +205,8 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		}
 
 		for (auto&& rtv : swapchain_rtvs)
-			rtv->Release();
+			if (rtv)
+				rtv->Release();
 
 		swapchain_rtvs.clear();
 
@@ -226,7 +218,10 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		// Figure out what format we need to use
 		DxgiFormatInfo info = {};
 		if (!GetFormatInfo(srcDesc.Format, info)) {
-			OOVR_ABORTF("Unknown (by OC) DXGI texture format %d", srcDesc.Format);
+			// Submit answers TextureUsesUnsupportedFormat; the eye is left out
+			OOVR_LOGF("Unknown (by OC) DXGI texture format %d", srcDesc.Format);
+			lastResult = XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+			return;
 		}
 		bool useLinearFormat;
 		switch (texture->eColorSpace) {
@@ -246,7 +241,9 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		DXGI_FORMAT type = useLinearFormat ? info.linear : info.srgb;
 
 		if (type == DXGI_FORMAT_UNKNOWN) {
-			OOVR_ABORTF("Invalid DXGI target format found: useLinear=%d type=DXGI_FORMAT_UNKNOWN fmt=%d", useLinearFormat, srcDesc.Format);
+			OOVR_LOGF("Invalid DXGI target format found: useLinear=%d type=DXGI_FORMAT_UNKNOWN fmt=%d", useLinearFormat, srcDesc.Format);
+			lastResult = XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+			return;
 		}
 
 		// Set aside the old format for checking later
@@ -321,8 +318,18 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 			resDesc.MiscFlags = 0;
 
 			resolvedMSAATextures.assign(imagesHandles.size(), nullptr);
-			for (auto&& tex : resolvedMSAATextures)
-				OOVR_FAILED_DX_ABORT(device->CreateTexture2D(&resDesc, nullptr, &tex));
+			for (auto&& tex : resolvedMSAATextures) {
+				if (FAILED(device->CreateTexture2D(&resDesc, nullptr, &tex))) {
+					// Without them the multisampled texture can't be copied: this eye is left out
+					OOVR_LOG("Couldn't make the textures to resolve a multisampled texture into");
+					for (auto&& made : resolvedMSAATextures)
+						if (made)
+							made->Release();
+					resolvedMSAATextures.clear();
+					lastResult = XR_ERROR_RUNTIME_FAILURE;
+					return;
+				}
+			}
 		}
 	}
 }
@@ -390,10 +397,10 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 
 	// Bounds describe an inverted image so copy texture using pixel shader inverting on copy.
 	// (Not for textures the shader can't read, multisampled or not bound as shader resources: they're copied as they are.)
-	if (bounds && bounds->vMin > bounds->vMax && oovr_global_configuration.InvertUsingShaders() && !swapchain_rtvs.empty()
-	    && srcDesc.SampleDesc.Count == 1 && (srcDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)) {
-		auto* src = (ID3D11Texture2D*)texture->handle;
-
+	bool useShader = shadersUsable && bounds && bounds->vMin > bounds->vMax && oovr_global_configuration.InvertUsingShaders()
+	    && !swapchain_rtvs.empty() && currentIndex < swapchain_rtvs.size() && swapchain_rtvs[currentIndex]
+	    && srcDesc.SampleDesc.Count == 1 && (srcDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE);
+	if (useShader) {
 		// A one-slice array view reads this eye's slice of an array texture, and a plain texture's only slice
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 		srvDesc.Format = typedFormat;
@@ -402,7 +409,13 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		srvDesc.Texture2DArray.MipLevels = 1;
 		srvDesc.Texture2DArray.FirstArraySlice = arrayIndex;
 		srvDesc.Texture2DArray.ArraySize = 1;
-		OOVR_FAILED_DX_ABORT(device->CreateShaderResourceView(src, &srvDesc, &quad_texture_view));
+		quad_texture_view = nullptr;
+		if (FAILED(device->CreateShaderResourceView(src, &srvDesc, &quad_texture_view)) || !quad_texture_view) {
+			OOVR_LOG_ONCE("CreateShaderResourceView failed: copying the texture as it is");
+			useShader = false;
+		}
+	}
+	if (useShader) {
 
 		float blend_factor[4] = { 1.f, 1.f, 1.f, 1.f };
 		context->OMSetBlendState(nullptr, nullptr, 0xffffffff);
@@ -434,14 +447,16 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 		context->ClearRenderTargetView(swapchain_rtvs[currentIndex], clear_colour);
 
 		// Update the source region in the constant buffer
+		// (If it can't be mapped, the last frame's area is used)
 		D3D11_MAPPED_SUBRESOURCE mappedConstData = {};
-		OOVR_FAILED_DX_ABORT(context->Map(constBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedConstData));
-		ShaderConstData* constData = (ShaderConstData*)mappedConstData.pData;
-		constData->offsetX = bounds->uMin;
-		constData->offsetY = bounds->vMin;
-		constData->scaleX = bounds->uMax - bounds->uMin;
-		constData->scaleY = bounds->vMax - bounds->vMin;
-		context->Unmap(constBuffer, 0);
+		if (SUCCEEDED(context->Map(constBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedConstData))) {
+			ShaderConstData* constData = (ShaderConstData*)mappedConstData.pData;
+			constData->offsetX = bounds->uMin;
+			constData->offsetY = bounds->vMin;
+			constData->scaleX = bounds->uMax - bounds->uMin;
+			constData->scaleY = bounds->vMax - bounds->vMin;
+			context->Unmap(constBuffer, 0);
+		}
 
 		// Set the active shaders and constant buffers, keeping the app's vertex constant buffer to put back
 		ID3D11Buffer* appConstBuffer = nullptr;
@@ -489,8 +504,11 @@ void DX11Compositor::InvokeCubemap(const vr::Texture_t* textures)
 	CheckCreateSwapChain(&textures[0], nullptr, true);
 
 #ifdef OC_XR_PORT
+	// Not yet: SetSkyboxOverride answers RequestFailed
+	OOVR_LOG_ONCE("Cube map skyboxes aren't supported yet");
+	lastResult = XR_ERROR_RUNTIME_FAILURE;
+	return;
 	ID3D11Texture2D* tex = nullptr;
-	ERR("TODO cubemap");
 #else
 	int currentIndex = 0;
 	OOVR_FAILED_OVR_ABORT(ovr_GetTextureSwapChainCurrentIndex(OVSS, chain, &currentIndex));

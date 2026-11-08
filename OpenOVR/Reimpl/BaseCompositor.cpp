@@ -212,7 +212,7 @@ std::unique_ptr<Compositor> BaseCompositor::CreateCompositorAPI(const vr::Textur
 		dxcomp = (DX11Compositor*)comp;
 #else
 		else
-			STUBBED();
+			OOVR_LOG_ONCE("D3D10 textures aren't supported in the OpenXR port yet: no compositor");
 #endif
 
 		break;
@@ -231,8 +231,9 @@ std::unique_ptr<Compositor> BaseCompositor::CreateCompositorAPI(const vr::Textur
 	}
 #endif
 	default:
-		string err = "[BaseCompositor::Submit] Unsupported texture type: " + to_string(texture->eType);
-		OOVR_ABORT(err.c_str());
+		// No compositor: the eye is left out, and Submit answers an error
+		OOVR_LOG_ONCEF("[BaseCompositor::Submit] Unsupported texture type: %d", (int)texture->eType);
+		break;
 	}
 
 	return comp;
@@ -241,8 +242,12 @@ std::unique_ptr<Compositor> BaseCompositor::CreateCompositorAPI(const vr::Textur
 ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VRTextureBounds_t* bounds, EVRSubmitFlags submitFlags)
 {
 	if (BaseClientCore::appType == vr::VRApplication_Background) {
-		OOVR_ABORT("Error - application with type VRApplication_Background should not be submitting!");
+		// As SteamVR answers a Background app that submits
+		OOVR_LOG_ONCE("A VRApplication_Background app is submitting frames: refused");
+		return VRCompositorError_IsNotSceneApplication;
 	}
+	if (!texture || (eye != Eye_Left && eye != Eye_Right))
+		return VRCompositorError_InvalidTexture;
 
 	bool isFirstEye = !leftEyeSubmitted && !rightEyeSubmitted;
 	ovr_enum_t result = VRCompositorError_None;
@@ -254,7 +259,9 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 		eyeState = rightEyeSubmitted;
 
 	if (eyeState) {
-		OOVR_ABORT("Eye already submitted!");
+		// The first texture for this eye stays
+		OOVR_LOG_ONCE("An eye was submitted twice in one frame: the second is refused");
+		return VRCompositorError_AlreadySubmitted;
 	}
 
 	if (eye == Eye_Left)
@@ -270,7 +277,11 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 	if (isFirstEye) {
 		isNullRender = textureNull;
 	} else if (textureNull != isNullRender) {
-		OOVR_ABORT("Cannot mismatch first and second eye renders");
+		// One eye null and the other not: this frame isn't submitted, and the next starts afresh
+		OOVR_LOG_ONCE("One eye's texture is null and the other's isn't: that frame is dropped");
+		leftEyeSubmitted = false;
+		rightEyeSubmitted = false;
+		return VRCompositorError_InvalidTexture;
 	}
 
 	{
@@ -294,7 +305,13 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 
 ovr_enum_t BaseCompositor::SubmitWithArrayIndex(vr::EVREye eye, const vr::Texture_t* texture, uint32_t idx, const vr::VRTextureBounds_t* bounds, vr::EVRSubmitFlags submitFlags)
 {
-	return Submit(eye, &texture[idx], bounds, submitFlags);
+	// The texture is one array texture, and idx its slice (not an index into an array of Texture_t); slices beyond
+	// the first aren't supported yet, so the texture is submitted whole
+	if (!texture)
+		return VRCompositorError_InvalidTexture;
+	if (idx != 0)
+		OOVR_LOG_ONCE("SubmitWithArrayIndex: only slice 0 of array textures is used");
+	return Submit(eye, texture, bounds, submitFlags);
 }
 
 void BaseCompositor::ClearLastSubmittedFrame()

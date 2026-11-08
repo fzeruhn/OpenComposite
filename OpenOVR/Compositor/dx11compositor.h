@@ -19,7 +19,6 @@ public:
 protected:
 	void CheckCreateSwapChain(const vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds, bool cube);
 
-	void ThrowIfFailed(HRESULT test);
 
 	bool CheckChainCompatible(D3D11_TEXTURE2D_DESC& inputDesc, vr::EColorSpace colourSpace);
 
@@ -27,9 +26,11 @@ protected:
 	ID3D11DeviceContext* context = nullptr;
 
 	ID3D11ShaderResourceView* quad_texture_view;
-	ID3D11SamplerState* quad_sampleState;
-	ID3D11VertexShader* fs_vshader;
-	ID3D11PixelShader* fs_pshader;
+	ID3D11SamplerState* quad_sampleState = nullptr;
+	ID3D11VertexShader* fs_vshader = nullptr;
+	ID3D11PixelShader* fs_pshader = nullptr;
+	// False if the shaders above couldn't be made: textures are then copied without them
+	bool shadersUsable = false;
 	ID3D11Buffer* constBuffer = nullptr; // the source area for fs_vshader
 
 	std::vector<XrSwapchainImageD3D11KHR> imagesHandles;

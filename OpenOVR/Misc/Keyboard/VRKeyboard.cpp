@@ -29,7 +29,7 @@ std::wstring_convert<std::codecvt_utf8<wchar_t>> VRKeyboard::CHAR_CONV;
 
 VRKeyboard::~VRKeyboard()
 {
-	XR_STUBBED();
+	// The OpenXR port has no keyboard textures to release (the keyboard isn't implemented yet)
 }
 wstring VRKeyboard::contents()
 {
@@ -301,8 +301,9 @@ void VRKeyboard::Refresh()
 	CComPtr<ID3D11Texture2D> tex;
 	HRESULT rres = dev->CreateTexture2D(&desc, init, &tex);
 	// HRESULT hrr = dev->GetDeviceRemovedReason();
-	OOVR_FAILED_DX_ABORT(rres);
 	delete[] pixels;
+	if (FAILED(rres))
+		return; // the keyboard isn't drawn this time
 
 	////
 
@@ -342,7 +343,7 @@ void VRKeyboard::SubmitEvent(vr::EVREventType ev, wchar_t ch)
 		string utf8 = CHAR_CONV.to_bytes(ch);
 
 		if (utf8.length() > sizeof(data.cNewInput)) {
-			OOVR_ABORTF("Cannot write symbol '%s' with too many bytes (%d bytes UTF8)", utf8.c_str(), (int)utf8.length());
+			{ OOVR_LOGF("Cannot write symbol \'%s\' with too many bytes (%d bytes UTF8)", utf8.c_str(), (int)utf8.length()); return; }
 		}
 
 		memcpy(data.cNewInput, utf8.c_str(), utf8.length());

@@ -35,6 +35,8 @@ typedef void(APIENTRY* PFNGLFRAMEBUFFERTEXTURE2DEXTPROC)(GLenum target, GLenum a
 #endif
 
 static PFNGLGETTEXTURELEVELPARAMETERIVPROC glGetTextureLevelParameteriv = nullptr;
+// Set if the driver lacks one of the functions below (GLCompositor's constructor)
+static bool glFunctionsMissing = false;
 static PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData = nullptr;
 static PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer = nullptr;
 static PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers = nullptr;
@@ -52,9 +54,12 @@ static void* getGlProcAddr(const char* name)
 GLCompositor::GLCompositor(GLuint initialTexture)
 {
 	if (!glGetTextureLevelParameteriv) {
-#define LOAD_FUNC(x)                                \
-	if (!(*(void**)& x = (void*)getGlProcAddr(#x))) \
-	OOVR_ABORT("Could not get function " #x)
+		// A function the driver doesn't have: no OpenGL copies (Submit answers RequestFailed), nothing ends
+#define LOAD_FUNC(x)                                    \
+	if (!(*(void**)& x = (void*)getGlProcAddr(#x))) { \
+		OOVR_LOG("Could not get function " #x);         \
+		glFunctionsMissing = true;                      \
+	}
 		LOAD_FUNC(glGetTextureLevelParameteriv);
 		LOAD_FUNC(glCopyImageSubData);
 		LOAD_FUNC(glBindFramebuffer);
@@ -63,6 +68,8 @@ GLCompositor::GLCompositor(GLuint initialTexture)
 		LOAD_FUNC(glFramebufferTexture2D);
 	}
 #undef LOAD_FUNC
+	if (glFunctionsMissing)
+		return;
 	glGenFramebuffers(2, fboId);
 }
 
@@ -90,6 +97,10 @@ void GLCompositor::ReadSwapchainImages()
 
 void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds, std::optional<XruEye>, vr::EVRSubmitFlags)
 {
+	if (glFunctionsMissing) {
+		lastResult = XR_ERROR_RUNTIME_FAILURE;
+		return;
+	}
 	// TODO: support array textures
 	// Clear any pre-existing OpenGL errors
 	while (glGetError() != GL_NO_ERROR) {
@@ -179,7 +190,9 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 
 void GLBaseCompositor::InvokeCubemap(const vr::Texture_t* textures)
 {
-	OOVR_ABORT("GLCompositor::InvokeCubemap: Not yet supported!");
+	// Not yet: SetSkyboxOverride answers RequestFailed
+	OOVR_LOG_ONCE("GLCompositor::InvokeCubemap: Not yet supported!");
+	lastResult = XR_ERROR_RUNTIME_FAILURE;
 }
 
 void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpace c_space, GLsizei rawformat)
