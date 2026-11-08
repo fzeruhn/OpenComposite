@@ -9,6 +9,8 @@
 
 #include "json/json.h"
 
+#include "Misc/JsonFile.h"
+
 #ifdef _WIN32
 #include <ShlObj.h>
 #endif
@@ -17,36 +19,27 @@ using namespace vr;
 
 static std::wstring_convert<std::codecvt_utf8<wchar_t>> CHAR_CONV;
 
-#ifdef _WIN32
-#define APISTR(str) (str)
-#else
-#define APISTR(str) (CHAR_CONV.to_bytes(str))
-#endif
-
-static bool ReadJson(wstring path, Json::Value& result)
+// applist.json, apps-config.json and openvrpaths.vrpath are shared with other programs: a broken or half-written
+// one reads as empty instead of ending the program, and writes replace the file in one step (Misc/JsonFile.h)
+static bool ReadJson(const wstring& path, Json::Value& result)
 {
-	std::ifstream in(APISTR(path), std::ios::binary);
-	if (in) {
-		std::stringstream contents;
-		contents << in.rdbuf();
-		contents >> result;
-		return true;
-	} else {
-		result = Json::Value(Json::ValueType::objectValue);
-		return false;
-	}
+	return oc_read_json_file(std::filesystem::path(path), result);
 }
 
-static void WriteJson(wstring path, const Json::Value& value)
+// False if applist.json is there but couldn't be read: writing it back would delete every other program's entry
+static bool ReadAppList(const wstring& path, Json::Value& root)
 {
-	std::ofstream out(APISTR(path), std::ios::binary);
-	if (!out) {
-		// The game goes on: the list only records which programs loaded OpenComposite
-		OOVR_LOGF("Failed to write applist json: %s", strerror(errno));
-		return;
-	}
+	std::error_code ec;
+	if (oc_read_json_file(std::filesystem::path(path), root) || (!std::filesystem::exists(path, ec) && !ec))
+		return true;
+	OOVR_LOG_ONCE("applist.json couldn't be read: leaving it as it is");
+	return false;
+}
 
-	out << value;
+static void WriteJson(const wstring& path, const Json::Value& value)
+{
+	// The game goes on if it fails: the list only records which programs loaded OpenComposite
+	oc_write_json_file(std::filesystem::path(path), value);
 }
 
 enum Runtime {
@@ -87,11 +80,10 @@ bool BaseClientCore::CheckAppEnabled()
 
 	string apppath = GetAppPath();
 	Json::Value root;
-	ReadJson(listname, root);
-
-	root[apppath] = tag;
-
-	WriteJson(listname, root);
+	if (ReadAppList(listname, root)) {
+		root[apppath] = tag;
+		WriteJson(listname, root);
+	}
 
 	// Check what runtime the app should use, as set in the config menu
 	Json::Value config;
@@ -289,7 +281,8 @@ void BaseClientCore::SetManifestPath(string filename)
 {
 	wstring listname = GetDllDir() + L"applist.json";
 	Json::Value root;
-	ReadJson(listname, root);
+	if (!ReadAppList(listname, root))
+		return;
 
 	Json::Value& tag = root[GetAppPath()];
 
