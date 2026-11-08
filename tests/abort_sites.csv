@@ -5,3 +5,6 @@ OpenOVR/Compositor/dx10compositor.cpp,26,DX10Compositor::DX10Compositor,OOVR_FAL
 OpenOVR/Compositor/dx10compositor.cpp,29,DX10Compositor::DX10Compositor,OOVR_FALSE_ABORT,"context1 != nullptr",""
 OpenOVR/Compositor/dx10compositor.cpp,40,DX10Compositor::DX10Compositor,OOVR_FAILED_DX_ABORT,"device1->CreateDeviceContextState(",""
 OpenOVR/Compositor/dx10compositor.cpp,53,DX10Compositor::Invoke,OOVR_FALSE_ABORT,"src != nullptr","void"
+OpenOVR/logging.cpp,353,oovr_abort_raw_va,_Exit,"70","OC_NORETURN void"
+OpenOVR/logging.cpp,359,oovr_abort_raw_va,abort,"","OC_NORETURN void"
+OpenOVR/logging.cpp,373,oovr_message_raw,MessageBoxA,"nullptr, message, title, MB_OK","void"

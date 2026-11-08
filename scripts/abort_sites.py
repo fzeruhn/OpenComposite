@@ -22,8 +22,11 @@ DIRS = ["OpenOVR", "OCOVR", "DrvOpenXR"]
 MACROS = ["STUBBED", "OOVR_ABORT_T", "OOVR_ABORTF", "OOVR_ABORT", "OOVR_FAILED_XR_ABORT", "OOVR_FALSE_ABORT",
           "OOVR_FAILED_DX_ABORT", "OOVR_FAILED_VK_ABORT", "ERR", "LINUX_STUBBED", "XR_STUBBED", "OC_FATAL",
           # Config.cpp's ABORT (exit()), and DX11Compositor::ThrowIfFailed and `throw` (an uncaught exception ends it)
-          "ABORT", "ThrowIfFailed", "exit"]
-USE = re.compile(r"(?<![\w#.:>])(" + "|".join(MACROS) + r")\s*\(|(?<![\w#])(throw)\b")
+          "ABORT", "ThrowIfFailed"]
+# The C++ library's and Windows' own, also as std:: or :: (a message box stalls a game whose window is in the headset)
+CALLS = ["exit", "_Exit", "abort", "terminate", "ExitProcess", "TerminateProcess", "MessageBoxA", "MessageBoxW"]
+USE = re.compile(r"(?<![\w#.:>])(" + "|".join(MACROS) + r")\s*\(|(?<![\w#.:>])(?:std::|::)?(" + "|".join(CALLS) +
+                 r")\s*\(|(?<![\w#])(throw)\b")
 FUNC = re.compile(r"^(?!\s)(?!(?:if|for|while|switch|return|else|do|case|#|//|typedef|namespace|class|struct|enum)\b)"
                   r".*?\b((?:\w+::)*~?\w+)\s*\([^;]*$")
 SKIP_FILES = {"OpenOVR/logging.h", "OpenOVR/Misc/SoftFail.h", "OpenOVR/BaseCommon.h", "OpenOVR/Misc/xrutil.h"}
@@ -58,7 +61,7 @@ def scan(root):
                     ret = " ".join(line[:m.start(1)].split())
                 code = line.split("//", 1)[0]
                 for use in USE.finditer(code):
-                    macro = use.group(1) or use.group(2)
+                    macro = use.group(1) or use.group(2) or use.group(3)
                     if macro == "ThrowIfFailed" and "::ThrowIfFailed" in code:
                         continue  # its definition, not a use
                     message = code[use.end():].strip().rstrip(";").rstrip(")")[:100]
@@ -107,10 +110,10 @@ def self_test():
         (root / "OpenOVR").mkdir()
         (root / "OpenOVR" / "a.cpp").write_text(
             "int Foo::Bar(int x)\n{\n\tSTUBBED();\n}\n// OOVR_ABORT(\"comment\");\nvoid Baz()\n{\n"
-            "\tOOVR_ABORTF(\"x %d\", 1);\n\tOOVR_SOFT_ABORT(\"soft\");\n}\n")
+            "\tOOVR_ABORTF(\"x %d\", 1);\n\tOOVR_SOFT_ABORT(\"soft\");\n\tstd::terminate();\n\tapp->exit(0);\n}\n")
         sites = scan(root)
         got = [(s[2], s[3]) for s in sites]
-        want = [("Foo::Bar", "STUBBED"), ("Baz", "OOVR_ABORTF")]
+        want = [("Foo::Bar", "STUBBED"), ("Baz", "OOVR_ABORTF"), ("Baz", "terminate")]
         if got != want:
             print("self-test FAILED: got", got, "want", want)
             return 1

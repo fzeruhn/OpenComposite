@@ -59,18 +59,23 @@ jobs:
           -Out build -Version "$env:GITHUB_SHA ($env:GITHUB_REF_NAME)"
           ${{ matrix.tests && '-Tests' || '' }}
 
-      # For now these only report; the summaries are kept as artifacts
+      # Nothing may end, crash or hang; every run is checked, and the summaries kept
       - name: Conformance
         if: matrix.tests
         shell: pwsh
         run: |
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime none --ci --allow-failures --out conformance/none
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --allow-failures --out conformance/stand-in
-          # What OpenComposite does when OpenXR calls fail (expect/xr_failures.json): this one has to pass
+          $failed = 0
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime none --ci --out conformance/none
+          if ($LASTEXITCODE) { $failed++ }
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --out conformance/stand-in --expected tests/conformance/expected/steamvr-1792185270.json --differences tests/conformance/differences.json
+          if ($LASTEXITCODE) { $failed++ }
+          # What OpenComposite does when OpenXR calls fail (expect/xr_failures.json)
           python tests/conformance/xr_failures.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --ci --out conformance/xr-failures
+          if ($LASTEXITCODE) { $failed++ }
+          exit $failed
 
       - uses: actions/upload-artifact@v7
-        if: matrix.tests
+        if: always() && matrix.tests
         with:
           name: conformance-windows
           path: conformance/*/summary.txt
@@ -121,10 +126,10 @@ jobs:
 
       - name: Conformance
         if: matrix.tests
-        run: python3 tests/conformance/run.py --runtime build/bin/linux64/vrclient.so --conformance build/tests/oc_conformance --xr-runtime none --allow-failures --out conformance/none
+        run: python3 tests/conformance/run.py --runtime build/bin/linux64/vrclient.so --conformance build/tests/oc_conformance --xr-runtime none --out conformance/none
 
       - uses: actions/upload-artifact@v7
-        if: matrix.tests
+        if: always() && matrix.tests
         with:
           name: conformance-linux
           path: conformance/*/summary.txt
