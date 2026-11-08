@@ -44,6 +44,14 @@ def check(name, want, out):
     frames = [r for r in records if r.get("case") == "frame-loop" and str(r.get("method", "")).startswith("frame ")]
     if "frames" in want and len(frames) != want["frames"]:
         misses.append(f"frame-loop: {len(frames)} frames recorded, expected {want['frames']}")
+    # Every frame-loop run: no swapchain image left acquired, and the call order never broken
+    dump_path = out / "raw" / "case-frame-loop.dump.json"
+    if dump_path.exists():
+        dump = json.loads(dump_path.read_text(encoding="utf-8"))
+        if dump.get("images_left_acquired", 0):
+            misses.append(f"frame-loop: {dump['images_left_acquired']} swapchain images still acquired when their swapchain went")
+        if dump.get("swapchain_call_order_errors"):
+            misses.append(f"frame-loop: swapchain calls out of order: {dump['swapchain_call_order_errors']}")
     if "frames_ended_min" in want:
         dump_path = out / "raw" / "case-frame-loop.dump.json"
         dump = json.loads(dump_path.read_text(encoding="utf-8")) if dump_path.exists() else {}

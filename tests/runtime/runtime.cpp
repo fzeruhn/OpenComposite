@@ -103,6 +103,23 @@ XrPosef SpaceInStage(const RtSpace* sp)
 	return Compose(base, sp->offset);
 }
 
+// The dump's record of the app breaking the swapchain call order, and of images still acquired at destruction
+static void NoteSwapchainMisuse(const char* what)
+{
+	Dump& d = GetDump();
+	std::lock_guard<std::mutex> dg(d.lock);
+	Json::Value& n = d.root["swapchain_call_order_errors"][what];
+	n = n.asInt() + 1;
+}
+
+static void NoteSwapchainDestroyed(const RtSwapchain* sc)
+{
+	Dump& d = GetDump();
+	std::lock_guard<std::mutex> dg(d.lock);
+	Json::Value& n = d.root["images_left_acquired"];
+	n = n.asInt() + sc->acquired;
+}
+
 #define FAIL_POINT(name)                       \
 	do {                                       \
 		XrResult injected;                     \
@@ -159,6 +176,7 @@ XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* info, XrInstance*
 		enabled.insert(name);
 	}
 	St().instanceAlive = true;
+	St().d3d11RequirementsQueried = false;
 	St().enabledExtensions = enabled;
 	{
 		Dump& d = GetDump();
@@ -179,8 +197,10 @@ XrResult XRAPI_CALL DestroyInstance(XrInstance)
 {
 	{
 		std::lock_guard<std::recursive_mutex> g(St().lock);
-		for (auto& [p, sc] : St().swapchains)
+		for (auto& [p, sc] : St().swapchains) {
+			NoteSwapchainDestroyed(sc.get());
 			RtD3D11DestroySwapchain(sc.get());
+		}
 		St().swapchains.clear();
 		St().spaces.clear();
 		if (St().session && St().session->device)
@@ -334,6 +354,10 @@ XrResult XRAPI_CALL EnumerateViewConfigurationViews(XrInstance, XrSystemId, XrVi
 XrResult XRAPI_CALL GetD3D11GraphicsRequirements(XrInstance, XrSystemId, XrGraphicsRequirementsD3D11KHR* reqs)
 {
 	FAIL_POINT("xrGetD3D11GraphicsRequirementsKHR");
+	{
+		std::lock_guard<std::recursive_mutex> g(St().lock);
+		St().d3d11RequirementsQueried = true;
+	}
 	return RtD3D11Requirements(reqs);
 }
 
@@ -353,6 +377,8 @@ XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, X
 			binding = "d3d11";
 		}
 	}
+	if (binding == "d3d11" && !St().d3d11RequirementsQueried)
+		return XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING;
 	if (!RtExtensionsSessionInfo(info, session.get()))
 		return XR_ERROR_VALIDATION_FAILURE;
 	if (session->headless)
@@ -381,8 +407,10 @@ XrResult XRAPI_CALL DestroySession(XrSession session)
 	RtSession* s = St().session.get();
 	if (!s || (XrSession)s != session)
 		return XR_ERROR_HANDLE_INVALID;
-	for (auto& [p, sc] : St().swapchains)
+	for (auto& [p, sc] : St().swapchains) {
+		NoteSwapchainDestroyed(sc.get());
 		RtD3D11DestroySwapchain(sc.get());
+	}
 	St().swapchains.clear();
 	St().spaces.clear();
 	if (s->device)
@@ -414,6 +442,8 @@ XrResult XRAPI_CALL EndSession(XrSession)
 		return XR_ERROR_HANDLE_INVALID;
 	if (!s->running)
 		return XR_ERROR_SESSION_NOT_RUNNING;
+	if (s->state != XR_SESSION_STATE_STOPPING)
+		return XR_ERROR_SESSION_NOT_STOPPING;
 	s->running = false;
 	QueueState(s, XR_SESSION_STATE_IDLE);
 	if (s->exitRequested)
@@ -544,6 +574,7 @@ XrResult XRAPI_CALL DestroySwapchain(XrSwapchain swapchain)
 	auto it = St().swapchains.find((RtSwapchain*)swapchain);
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
+	NoteSwapchainDestroyed(it->second.get());
 	RtD3D11DestroySwapchain(it->second.get());
 	St().swapchains.erase(it);
 	return XR_SUCCESS;
@@ -575,17 +606,30 @@ XrResult XRAPI_CALL AcquireSwapchainImage(XrSwapchain swapchain, const XrSwapcha
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
 	RtSwapchain* sc = it->second.get();
-	if (sc->acquired >= (int)sc->textures.size())
+	if (sc->acquired >= (int)sc->textures.size()) {
+		NoteSwapchainMisuse("acquire");
 		return XR_ERROR_CALL_ORDER_INVALID;
+	}
 	*index = sc->next;
 	sc->next = (sc->next + 1) % (uint32_t)sc->textures.size();
 	sc->acquired++;
+	sc->unwaited++;
 	return XR_SUCCESS;
 }
 
-XrResult XRAPI_CALL WaitSwapchainImage(XrSwapchain, const XrSwapchainImageWaitInfo*)
+XrResult XRAPI_CALL WaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo*)
 {
+	// An injected XR_TIMEOUT_EXPIRED leaves the image unwaited, as a real runtime's would
 	FAIL_POINT("xrWaitSwapchainImage");
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	auto it = St().swapchains.find((RtSwapchain*)swapchain);
+	if (it == St().swapchains.end())
+		return XR_ERROR_HANDLE_INVALID;
+	if (it->second->unwaited <= 0) {
+		NoteSwapchainMisuse("wait");
+		return XR_ERROR_CALL_ORDER_INVALID;
+	}
+	it->second->unwaited--;
 	return XR_SUCCESS;
 }
 
@@ -596,8 +640,11 @@ XrResult XRAPI_CALL ReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapcha
 	auto it = St().swapchains.find((RtSwapchain*)swapchain);
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
-	if (it->second->acquired <= 0)
+	// Only a waited image can be released (the oldest acquired one)
+	if (it->second->acquired - it->second->unwaited <= 0) {
+		NoteSwapchainMisuse("release");
 		return XR_ERROR_CALL_ORDER_INVALID;
+	}
 	it->second->acquired--;
 	return XR_SUCCESS;
 }

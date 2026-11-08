@@ -103,7 +103,8 @@ struct RtSwapchain {
 	XrSwapchainCreateInfo info{};
 	std::vector<ID3D11Texture2D*> textures;
 	uint32_t next = 0;
-	int acquired = 0;
+	int acquired = 0; // acquired and not yet released
+	int unwaited = 0; // of those, not yet waited on (the spec: wait before writing, release only waited images)
 };
 
 struct RtSession {
@@ -127,6 +128,7 @@ struct RtSession {
 struct RtState {
 	std::recursive_mutex lock;
 	bool instanceAlive = false;
+	bool d3d11RequirementsQueried = false; // xrGetD3D11GraphicsRequirementsKHR called: a D3D11 session needs it first
 	std::set<std::string> enabledExtensions;
 	std::unique_ptr<RtSession> session;
 	std::map<RtSpace*, std::unique_ptr<RtSpace>> spaces;

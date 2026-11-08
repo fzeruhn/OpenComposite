@@ -1,39 +1,83 @@
 {
  "#": "What OpenComposite does when OpenXR calls fail. xr_failures.py runs each script (scripts/<name>.json) on the stand-in runtime with the cases below and checks these; every script also checks that nothing ended or crashed.",
  "fail_instance": {
-  "cases": ["init-matrix"],
-  "init_error": { "Init(1)": 124 }
+  "cases": [
+   "init-matrix"
+  ],
+  "init_error": {
+   "Init(1)": 124
+  }
  },
  "fail_system": {
-  "cases": ["init-matrix"],
-  "init_error": { "Init(1)": 108 },
+  "cases": [
+   "init-matrix"
+  ],
+  "init_error": {
+   "Init(1)": 108
+  },
   "hmd_present": false
  },
  "fail_frame": {
-  "cases": ["frame-loop"],
+  "cases": [
+   "frame-loop"
+  ],
   "frames": 120,
   "frames_ended_min": 119
  },
  "lost": {
-  "cases": ["frame-loop"],
+  "cases": [
+   "frame-loop"
+  ],
   "frames": 120,
   "quit_events": 1,
   "quit_from_frame": 60
  },
  "exiting": {
-  "cases": ["frame-loop"],
+  "cases": [
+   "frame-loop"
+  ],
   "frames": 120,
   "quit_events": 1,
   "quit_from_frame": 60
  },
  "fail_swapchain": {
-  "cases": ["frame-loop"],
+  "cases": [
+   "frame-loop"
+  ],
   "frames": 120,
-  "failed_submits": { "answer": 1, "count": 1 },
+  "failed_submits": {
+   "answer": 1,
+   "count": 1
+  },
   "other_submits": 0
  },
  "fail_suggest": {
-  "cases": ["input-manifest"],
+  "cases": [
+   "input-manifest"
+  ],
   "manifest_handles": true
+ },
+ "timeout_swapchain": {
+  "cases": [
+   "frame-loop"
+  ],
+  "frames": 120,
+  "frames_ended_min": 119,
+  "failed_submits": {
+   "answer": 1,
+   "count": 1
+  },
+  "other_submits": 0
+ },
+ "fail_session_restart": {
+  "cases": [
+   "frame-loop"
+  ],
+  "frames": 120,
+  "failed_submits": {
+   "answer": 102,
+   "count": 240
+  },
+  "other_submits": 0
  }
 }
