@@ -9,10 +9,11 @@ public:
 	static std::string GetAlternativeRuntimePath();
 	void SetManifestPath(std::string filename);
 	static inline vr::EVRApplicationType appType = vr::VRApplication_Max;
+	// The folder of OpenComposite's DLL, ending with a separator
+	static std::wstring GetDllDir();
 
 private:
 	static std::string GetAppPath();
-	static std::wstring GetDllDir();
 
 public:
 	/** Initializes the system */

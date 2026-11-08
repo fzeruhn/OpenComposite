@@ -41,7 +41,9 @@ static void WriteJson(wstring path, const Json::Value& value)
 {
 	std::ofstream out(APISTR(path), std::ios::binary);
 	if (!out) {
-		OOVR_ABORTF("Failed to write applist json: %s", strerror(errno));
+		// The game goes on: the list only records which programs loaded OpenComposite
+		OOVR_LOGF("Failed to write applist json: %s", strerror(errno));
+		return;
 	}
 
 	out << value;
