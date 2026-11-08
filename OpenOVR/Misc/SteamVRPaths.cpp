@@ -20,9 +20,14 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// Empty for text that isn't UTF-8 (MSVC throws on it)
 fs::path FromUtf8(const std::string& s)
 {
-	return fs::path(std::u8string(s.begin(), s.end()));
+	try {
+		return fs::path(std::u8string(s.begin(), s.end()));
+	} catch (const std::exception&) {
+		return {};
+	}
 }
 
 bool IsDirectory(const fs::path& p)
@@ -92,10 +97,12 @@ std::optional<fs::path> FromPathsFile(const fs::path& pathsFile)
 		fs::path p = FromUtf8(entry.asString());
 		while (!p.empty() && !p.has_filename() && p.has_parent_path() && p.parent_path() != p)
 			p = p.parent_path();
-		std::string name = p.filename().string();
-		for (char& c : name)
-			c = (char)tolower((unsigned char)c);
-		if (name == "steamvr" && IsSteamVRInstall(p))
+		// Compared as UTF-8: a narrow conversion of another runtime's folder name could throw or mangle it
+		std::u8string name = p.filename().u8string();
+		for (char8_t& c : name)
+			if (c >= u8'A' && c <= u8'Z')
+				c = (char8_t)(c - u8'A' + u8'a');
+		if (name == u8"steamvr" && IsSteamVRInstall(p))
 			return p;
 	}
 	return std::nullopt;
@@ -118,7 +125,8 @@ std::optional<fs::path> FromSteamLibraries(const fs::path& steamDir)
 					i++;
 				unescaped += raw[i];
 			}
-			libraries.push_back(FromUtf8(unescaped));
+			if (fs::path library = FromUtf8(unescaped); !library.empty())
+				libraries.push_back(library);
 		}
 	}
 	for (const fs::path& library : libraries) {
@@ -133,6 +141,8 @@ std::optional<fs::path> FromSteamLibraries(const fs::path& steamDir)
 
 std::optional<fs::path> FindSteamVRInstall(const fs::path* pathsFileOverride, const fs::path* steamDirOverride)
 {
+	// Called from games' IVRResources calls: nothing may escape
+	try {
 	std::optional<fs::path> pathsFile = pathsFileOverride ? std::optional<fs::path>(*pathsFileOverride) : DefaultPathsFile();
 	if (pathsFile) {
 		if (auto found = FromPathsFile(*pathsFile))
@@ -141,13 +151,18 @@ std::optional<fs::path> FindSteamVRInstall(const fs::path* pathsFileOverride, co
 	std::optional<fs::path> steamDir = steamDirOverride ? std::optional<fs::path>(*steamDirOverride) : DefaultSteamDir();
 	if (steamDir)
 		return FromSteamLibraries(*steamDir);
+	} catch (const std::exception&) {
+	}
 	return std::nullopt;
 }
 
 std::optional<fs::path> FindSteamConfigDir()
 {
-	std::optional<fs::path> steamDir = DefaultSteamDir();
-	if (!steamDir || !IsDirectory(*steamDir / "config"))
-		return std::nullopt;
-	return *steamDir / "config";
+	try {
+		std::optional<fs::path> steamDir = DefaultSteamDir();
+		if (steamDir && IsDirectory(*steamDir / "config"))
+			return *steamDir / "config";
+	} catch (const std::exception&) {
+	}
+	return std::nullopt;
 }

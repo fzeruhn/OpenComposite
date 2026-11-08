@@ -379,6 +379,12 @@ std::set<InlineRenderModel*> inlineModels;
 
 static_assert(sizeof(OOVR_RenderModel_Vertex_t) == sizeof(vr::IVRRenderModels_001::RenderModel_Vertex_t),
     "the old vertex is today's");
+// The old inline model as the SDK lays it out (packed to 4 on Linux, 8 on Windows)
+#if defined(__linux__) || defined(__APPLE__)
+static_assert(offsetof(vr::IVRRenderModels_001::RenderModel_t, rIndexData) == (sizeof(void*) == 8 ? 20 : 16), "Linux packs to 4");
+#else
+static_assert(offsetof(vr::IVRRenderModels_001::RenderModel_t, rIndexData) == (sizeof(void*) == 8 ? 24 : 16), "Windows packs to 8");
+#endif
 
 bool BaseRenderModels::LoadRenderModelInline(const char* pchRenderModelName, vr::IVRRenderModels_001::RenderModel_t* pRenderModel)
 {

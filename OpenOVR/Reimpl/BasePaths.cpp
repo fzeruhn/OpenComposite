@@ -29,7 +29,7 @@ vr::ETrackedPropertyError BasePaths::HandleToString(OOVR_PathHandle_t pHandle, c
 		std::lock_guard<std::mutex> guard(lock);
 		if (pHandle == 0 || pHandle > paths.size())
 			return vr::TrackedProp_InvalidOperation;
-		path = paths[pHandle - 1];
+		path = paths[(size_t)(pHandle - 1)];
 	}
 	uint32_t needed = (uint32_t)path.size() + 1;
 	if (punBufferSizeUsed)

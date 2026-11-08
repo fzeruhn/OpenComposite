@@ -62,6 +62,7 @@ vr::EVRSpatialAnchorError BaseSpatialAnchors::CreateSpatialAnchorFromDescriptor(
 
 	// "<prefix> <origin> <12 floats>", as GetSpatialAnchorDescriptor writes it
 	std::istringstream in(pchDescriptor);
+	in.imbue(std::locale::classic()); // a game's setlocale doesn't change what a descriptor means
 	std::string prefix;
 	int origin = -1;
 	Anchor anchor = {};
@@ -119,14 +120,15 @@ vr::EVRSpatialAnchorError BaseSpatialAnchors::GetSpatialAnchorDescriptor(vr::Spa
 	if (!punDescriptorBufferLenInOut)
 		return VRSpatialAnchorError_InvalidArgument;
 
-	std::string descriptor = std::string(kDescriptorPrefix) + " " + std::to_string((int)anchor.origin);
-	for (const auto& row : anchor.pose.m) {
-		for (float v : row) {
-			char number[32];
-			snprintf(number, sizeof(number), " %.9g", v);
-			descriptor += number;
-		}
-	}
+	// Written in the classic locale, as CreateSpatialAnchorFromDescriptor reads it, whatever the game's setlocale says
+	std::ostringstream out;
+	out.imbue(std::locale::classic());
+	out.precision(9);
+	out << kDescriptorPrefix << " " << (int)anchor.origin;
+	for (const auto& row : anchor.pose.m)
+		for (float v : row)
+			out << " " << v;
+	std::string descriptor = out.str();
 	uint32_t needed = (uint32_t)descriptor.size() + 1;
 	bool fits = pchDescriptorOut && *punDescriptorBufferLenInOut >= needed;
 	*punDescriptorBufferLenInOut = needed;

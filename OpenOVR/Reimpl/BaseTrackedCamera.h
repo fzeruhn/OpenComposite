@@ -113,6 +113,8 @@ public:
 	template <typename... Args>
 	NotSupported IsVideoStreamPaused(Args...) { return {}; }
 	template <typename... Args>
+	NotSupported SupportsPauseResume(Args...) { return {}; } // 0.9.12's slot 13, which 0.9.14 removed in place
+	template <typename... Args>
 	NotSupported GetCameraDistortion(Args...) { return {}; }
 
 

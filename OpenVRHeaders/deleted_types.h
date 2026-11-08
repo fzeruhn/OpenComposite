@@ -14,6 +14,13 @@ enum EGraphicsAPIConvention {
 };
 #endif
 
+// The SDK packs its structs to 4 on Linux and macOS (openvr.h), 8 elsewhere: these are its structs
+#if defined(__linux__) || defined(__APPLE__)
+#pragma pack(push, 4)
+#else
+#pragma pack(push, 8)
+#endif
+
 namespace vr {
 
 // Renamed: the values are today's (Eye_Left 0, Eye_Right 1; TrackingUniverseSeated 0, Standing 1, RawAndUncalibrated 2)
@@ -71,3 +78,5 @@ namespace IVRSystem_003 {
 } // namespace IVRSystem_003
 
 } // namespace vr
+
+#pragma pack(pop)

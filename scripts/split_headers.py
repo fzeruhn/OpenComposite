@@ -93,6 +93,67 @@ output_dir.mkdir(exist_ok=True)
 # List of files we've already written, this prevents us from overwriting newer files
 files_written = []
 
+# Valve changed some versions in place. Growing at the end is harmless (an older caller never reaches the new slots), so
+# the newest header's copy is kept; anything else shifts slots, and the header to generate from is chosen here, with
+# why. Every other change fails the split (check_vtable_prefixes).
+PINNED = {
+    "IVRTrackedCamera_001": "0.9.12",
+}
+KNOWN_INPLACE_CHANGES = {
+    # 0.9.11 has 17 methods, 0.9.12 19, 0.9.14 18 (SupportsPauseResume gone from slot 13). The 0.9.12 form is the longest:
+    # no caller runs off its end, and on x64 a shifted slot only answers "no camera". On 32-bit a 0.9.14 game's
+    # GetCameraDistortion lands on IsVideoStreamPaused, which pops fewer bytes: camera apps of that SDK only.
+    "IVRTrackedCamera_001": "0.9.14 removed SupportsPauseResume mid-table without a new version",
+    # Slot 3 was spelt GetCameraIntrinisics until 1.0.4: renamed in place, same slot and arguments
+    "IVRTrackedCamera_003": "GetCameraIntrinisics renamed GetCameraIntrinsics in 1.0.5",
+    # The arguments of one method changed without a new version. The newest form is generated, and CVR*.cpp answers
+    # it without using the arguments an older caller doesn't pass (on 32-bit the callee still pops the newest form's).
+    "IVRChaperone_003": "GetBoundsColor gained flCollisionBoundsFadeDistance in 0.9.12 and pOutputCameraColor in 0.9.14",
+    "IVRSettings_001": "Sync(peError) became Sync(bForce, peError) in 0.9.17",
+}
+methods_by_header = {}  # versioned target -> {header version: [method signatures]}
+current_header = None  # the header being split
+
+
+def method_names(text):
+    """The virtual methods a section declares, in vtable order: each as its return type, name and argument types
+    (without argument names, defaults, const or VR_ annotations), so a signature changed in place counts as a change"""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    sigs = []
+    for m in re.finditer(r"\bvirtual\b([^;{(]*?)(~?\w+)\s*\(", text):
+        depth, i = 1, m.end()
+        while depth and i < len(text):
+            depth += {"(": 1, ")": -1}.get(text[i], 0)
+            i += 1
+        args = re.sub(r"\bVR_\w+\s*\([^()]*\)", "", text[m.end():i - 1])
+        types = []
+        for arg in args.split(","):
+            arg = re.sub(r"\bconst\b|\bvr::", "", arg.split("=")[0])
+            arg = re.sub(r"\s*([*&])\s*", r"\1", " ".join(arg.split()))
+            types.append(re.sub(r"(?<=[\w*&])\s+\w+$|(?<=[*&])\w+$", "", arg))
+        ret = re.sub(r"\s*([*&])\s*", r"\1", " ".join(re.sub(r"\bconst\b|\bvr::", "", m.group(1)).split()))
+        sigs.append(f"{ret} {m.group(2)}({','.join(t for t in types if t and t != 'void')})")
+    return sigs
+
+
+def check_vtable_prefixes():
+    """Fails unless every header's method list for a version is a prefix of the one generated, or is a known change"""
+    problems = []
+    for target, by_header in sorted(methods_by_header.items()):
+        chosen = PINNED.get(target) or next(iter(by_header))  # the newest header comes first
+        if chosen not in by_header:
+            problems.append(f"{target}: pinned to {chosen}, which has no such section")
+            continue
+        generated = by_header[chosen]
+        for header, methods in by_header.items():
+            if methods != generated[:len(methods)] and target not in KNOWN_INPLACE_CHANGES:
+                problems.append(f"{target}: {header}'s {len(methods)} methods aren't a prefix of {chosen}'s {len(generated)} "
+                                f"(first difference at slot {next(i for i, (a, b) in enumerate(zip(methods + [None], generated + [None])) if a != b)})")
+    if problems:
+        raise Exception("Valve changed these versions in place, other than at the end of the vtable; pin each one's header "
+                        "in PINNED with a KNOWN_INPLACE_CHANGES reason:\n  " + "\n  ".join(problems))
+
 # Matches a comment indicating the start of a new interface (such as "// ivrcompositor.h")
 matcher = re.compile(r"^\/\/ ([\w_-]+)\.h$")
 
@@ -205,6 +266,11 @@ def write_interface(target: str, result: str, usingiface: bool, interface_checke
     # if filename in files_to_delete:
     #   files_to_delete.remove(filename)
 
+    if usingiface:
+        methods_by_header.setdefault(target, {})[current_header] = method_names(result)
+        if target in PINNED and PINNED[target] != current_header:
+            return  # only the pinned header's copy is generated
+
     if filename in files_written:
         # This file is already written by a later version
         return
@@ -218,17 +284,19 @@ def write_interface(target: str, result: str, usingiface: bool, interface_checke
         # their own namespaces with different return types don't compile together, and nothing here calls it
         result = re.sub(r"^[ \t]*VR_INTERFACE\s+(?:vr::)?\w+\s*\*\s*VR_CALLTYPE\s+VR\w+\s*\(\s*\)\s*;[ \t]*$",
                         "\t// (the SDK's extern \"C\" accessor was here, removed while splitting)", result, flags=re.M)
-        # Types the old versions use that the newest vrtypes.h no longer has
-        result = result.replace("#pragma once\n", "#pragma once\n#include \"deleted_types.h\"\n", 1)
         result = result.replace("%%REPLACE%NS%START%%", "namespace vr\n{\nnamespace " + target)
         result = result + "} // Close custom namespace\n"
         result = result.replace("vr::", "")
     else:
         result = result.replace("%%REPLACE%NS%START%%", "namespace vr")
 
-    # Apply any manual patches
+    # Apply any manual patches (their line numbers are the section's own, so before anything is inserted)
     if target in patches:
         result = patch(result, input_dir / f"patches/{target}.ipatch")
+
+    # Types the old versions use that the newest vrtypes.h no longer has (the driver interfaces need none)
+    if usingiface and not target.startswith("driver_"):
+        result = result.replace("#pragma once\n", "#pragma once\n#include \"deleted_types.h\"\n", 1)
 
     # if nooverwrite and os.path.isfile(outfile):
     #   # Check the hashes of the files, in case the headers have been modified, a new
@@ -344,6 +412,7 @@ DRIVER_IMPORTS_FROM = "0.9.12"
 for version in versions[::-1]:
     feed = f"openvr-{version}.h"
     print("Reading: " + feed)
+    current_header = version
 
     with open(input_dir / feed, "r") as headerfile:
         imports_by_version[version] = split_header(headerfile)
@@ -355,11 +424,14 @@ appapi_imports = imports_by_version[DRIVER_IMPORTS_FROM]
 for version in driver_versions[::-1]:
     feed = "openvr-%s-driver.h" % version
     print("Reading: " + feed)
+    current_header = version + "-driver"
 
     # Note we have to use Latin-1, since EVRSkeletalTrackingLevel's first comment includes
     # a character outside of the plain ASCII range
     with open(input_dir / feed, "r", encoding="latin-1") as headerfile:
         split_header(headerfile, driver_filter, imports=appapi_imports)
+
+check_vtable_prefixes()
 
 # for fi in files_to_delete:
 #    os.remove(fi)

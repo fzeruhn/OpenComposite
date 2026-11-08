@@ -103,14 +103,14 @@ def read_context(context, filename, namespace):
             if match:
                 name = match.group("name")
                 context[name] = namespace + "::" + name  # TODO
-
-            # "class IVRSystem *Get...()" (IVRControlPanel_001) declares IVRSystem in the header's own namespace
-            for elaborated in re.findall(r"\bclass\s+(\w+)\s*\*", line):
-                context.setdefault(elaborated, namespace + "::" + elaborated)
             else:
                 match = typedef_struct.match(line)
                 if match:
                     tdstruct_start = line
+
+            # "class IVRSystem *Get...()" (IVRControlPanel_001) declares IVRSystem in the header's own namespace
+            for elaborated in re.findall(r"\bclass\s+(\w+)\s*\*", line):
+                context.setdefault(elaborated, namespace + "::" + elaborated)
 
         if tdstruct_start:
             raise Exception("Cound not find closing for structure '%s'" % tdstruct_start)

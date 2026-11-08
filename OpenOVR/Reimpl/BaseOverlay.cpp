@@ -1043,7 +1043,7 @@ bool BaseOverlay::PollNextOverlayEventOld(VROverlayHandle_t ulOverlayHandle, VRE
 {
 	if (!pEvent)
 		return false;
-	memset(pEvent, 0, 32); // the old event's size
+	memset(pEvent, 0, BaseSystem::kOldEventSize);
 	VREvent_t event = {};
 	if (!PollNextOverlayEvent(ulOverlayHandle, &event, sizeof(event)))
 		return false;

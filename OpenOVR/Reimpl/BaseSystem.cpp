@@ -843,14 +843,26 @@ void BaseSystem::ResetSeatedZeroPose()
 }
 
 namespace {
-// VREvent_t as SDKs 0.9.0 to 0.9.14 laid it out (the data union was 16 bytes: two uint64s, so it's aligned as they are)
+// VREvent_t as SDKs 0.9.0 to 0.9.14 laid it out (the data union was 16 bytes: two uint64s), packed as the SDK packs its
+// structs: 8 on Windows, 4 on Linux and macOS, where it's 28 bytes
+#if defined(__linux__) || defined(__APPLE__)
+#pragma pack(push, 4)
+#else
+#pragma pack(push, 8)
+#endif
 struct VREvent_0914_t {
 	uint32_t eventType;
 	vr::TrackedDeviceIndex_t trackedDeviceIndex;
 	uint64_t data[2];
 	float eventAgeSeconds;
 };
+#pragma pack(pop)
 static_assert(offsetof(VREvent_0914_t, data) == 8, "0.9.x events have their data at 8");
+#if defined(__linux__) || defined(__APPLE__)
+static_assert(sizeof(VREvent_0914_t) == 28, "0.9.x events are 28 bytes on Linux");
+#else
+static_assert(sizeof(VREvent_0914_t) == 32, "0.9.x events are 32 bytes on Windows");
+#endif
 } // namespace
 
 bool BaseSystem::PollNextEventOld(ETrackingUniverseOrigin eOrigin, VREvent_t* pEvent, vr::TrackedDevicePose_t* pTrackedDevicePose)
@@ -858,6 +870,7 @@ bool BaseSystem::PollNextEventOld(ETrackingUniverseOrigin eOrigin, VREvent_t* pE
 	if (!pEvent)
 		return false;
 	memset(pEvent, 0, sizeof(VREvent_0914_t));
+	static_assert(sizeof(VREvent_0914_t) == kOldEventSize, "the old event's size");
 
 	VREvent_t event = {};
 	if (!PollNextEventWithPose(eOrigin, &event, sizeof(event), pTrackedDevicePose))

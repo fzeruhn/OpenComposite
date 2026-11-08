@@ -2457,6 +2457,9 @@ EVRInputError BaseInput::GetSkeletalActionData(VRActionHandle_t action, EVRSkele
 	EVRInputError err = GetSkeletalActionData(action, pActionData, unActionDataSize);
 	if (err != vr::VRInputError_None)
 		return err;
+	// A caller that only wants the action data passes no bones
+	if (!pTransformArray && unTransformArrayCount == 0)
+		return vr::VRInputError_None;
 	return GetSkeletalBoneData(action, eBoneParent, vr::VRSkeletalMotionRange_WithController, pTransformArray, unTransformArrayCount);
 }
 

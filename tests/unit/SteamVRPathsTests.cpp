@@ -91,3 +91,37 @@ TEST_CASE("SteamVRPaths_from_steam_library")
 	REQUIRE(found.has_value());
 	CHECK(fs::equivalent(*found, library / "steamapps" / "common" / "SteamVR"));
 }
+
+TEST_CASE("SteamVRPaths_non_ansi_entry")
+{
+	// Another runtime in a folder whose name the ANSI code page can't spell comes first: it's passed over, not thrown on
+	TempDir tmp;
+	fs::path other = tmp.path / fs::path(u8"テスト");
+	fs::path steamvr = tmp.path / "SteamVR";
+	fs::create_directories(other / "bin");
+	fs::create_directories(steamvr / "bin");
+	fs::path pathsFile = tmp.path / "openvrpaths.vrpath";
+	std::ofstream(pathsFile) << "{ \"runtime\": [ \"" << JsonString(other) << "\", \"" << JsonString(steamvr) << "\" ] }";
+	fs::path noSteam = tmp.path / "no steam";
+
+	std::optional<fs::path> found;
+	CHECK_NOTHROW(found = FindSteamVRInstall(&pathsFile, &noSteam));
+	REQUIRE(found.has_value());
+	CHECK(fs::equivalent(*found, steamvr));
+}
+
+TEST_CASE("SteamVRPaths_bad_utf8_library")
+{
+	// A library path that isn't UTF-8 (libraryfolders.vdf is read as bytes) is passed over, not thrown on
+	TempDir tmp;
+	fs::path steam = tmp.path / "Steam";
+	fs::create_directories(steam / "steamapps" / "common" / "SteamVR" / "bin");
+	std::ofstream(steam / "steamapps" / "libraryfolders.vdf", std::ios::binary)
+	    << "\"libraryfolders\"\n{\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"C:\\\xff\xfe\xc3\"\n\t}\n}\n";
+	fs::path missing = tmp.path / "missing.vrpath";
+
+	std::optional<fs::path> found;
+	CHECK_NOTHROW(found = FindSteamVRInstall(&missing, &steam));
+	REQUIRE(found.has_value());
+	CHECK(fs::equivalent(*found, steam / "steamapps" / "common" / "SteamVR"));
+}

@@ -406,8 +406,13 @@ public:
 	 */
 	bool PollNextEventOld(vr::ETrackingUniverseOrigin eOrigin, vr::VREvent_t* pEvent, vr::TrackedDevicePose_t* pTrackedDevicePose);
 
-	/** Writes event into pOld as SDK 0.9.x laid VREvent_t out: 32 bytes, no more (also IVROverlay_001-008's) */
+	/** Writes event into pOld as SDK 0.9.x laid VREvent_t out, no more than kOldEventSize (also IVROverlay_001-008's) */
 	static void WriteOldEvent(const vr::VREvent_t& event, vr::VREvent_t* pOld);
+#if defined(__linux__) || defined(__APPLE__)
+	static constexpr size_t kOldEventSize = 28; // the SDK packs its structs to 4 there
+#else
+	static constexpr size_t kOldEventSize = 32;
+#endif
 
 	// IVRSystem_003-007 (0.9.0 to 0.9.11): the extended-display calls, answered as IVRExtendedDisplay answers them
 	void GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight);
