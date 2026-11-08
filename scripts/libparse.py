@@ -44,6 +44,12 @@ def nice_lines(fi):
             carry = line
             continue
 
+        # A declaration whose parentheses are still open goes on (0.9.0's HandleControllerOverlayInteractionAsMouse
+        # ends its last argument line without a comma, and its ") = 0;" is on the next)
+        if line.startswith("virtual ") and line.count("(") > line.count(")"):
+            carry = line + " "
+            continue
+
         lines.append(line)
 
     return lines

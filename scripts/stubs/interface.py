@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from pathlib import Path
+import re
 import typing
 from typing import List
 
@@ -171,6 +173,14 @@ def _read_headers(interface: InterfaceDef) -> List[Function]:
 
             func = Function(func.name, func.return_type, func.args, user_defined)
             funcs.append(func)
+
+    # A method the parser can't read would shift every later one in the vtable: count the declarations to be sure
+    text = re.sub(r"/\*.*?\*/", "", Path(filename).read_text(encoding="latin-1"), flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    declared = len(re.findall(r"\bvirtual\b", text))
+    if declared != len(funcs):
+        raise Exception(f"{filename}: {declared} virtual methods declared, but {len(funcs)} parsed: "
+                        f"{[f.name for f in funcs]}")
 
     return funcs
 
