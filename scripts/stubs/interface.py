@@ -159,6 +159,7 @@ class Function:
 def _read_headers(interface: InterfaceDef) -> List[Function]:
     filename = interface.header_prefix() / interface.header_filename()
     context = dict(_get_global_context())
+    context.update(deleted_types_context().get(interface.interface_v(), {}))
     libparse.read_context(context, filename, interface.namespace())
 
     funcs = []
@@ -198,4 +199,32 @@ def _get_global_context():
     headers_dir = InterfaceDef.INTERFACES_DIR
     libparse.read_context(_global_ctx, headers_dir / "interfaces/public_vrtypes.h", "vr")
     libparse.read_context(_global_ctx, headers_dir / "interfaces/vrtypes.h", "vr")
+    _global_ctx.update(deleted_types_context()[None])
     return _global_ctx
+
+
+_deleted_ctx = None
+
+
+def deleted_types_context():
+    """The names deleted_types.h defines for the old versions: under None the ones in vr, under "IVRFoo_NNN" the
+    ones in that version's own namespace block (vr::IVRFoo_NNN::Name), which no other version sees."""
+    global _deleted_ctx
+    if _deleted_ctx is not None:
+        return _deleted_ctx
+
+    text = (InterfaceDef.INTERFACES_DIR / "interfaces/deleted_types.h").read_text(encoding="utf-8")
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    names = r"\b(?:struct|enum|union)\s+(\w+)\s*\{|\btypedef\b[^;{]*?(\w+)\s*;|\busing\s+(?:\w+::)*(\w+)\s*;"
+
+    def found(body):
+        return [next(g for g in m.groups() if g) for m in re.finditer(names, body)]
+
+    _deleted_ctx = {None: {}}
+    blocks = re.compile(r"\bnamespace\s+(IVR\w+_\d{3})\s*\{(.*?)\n\}", flags=re.S)
+    for m in blocks.finditer(text):
+        _deleted_ctx[m.group(1)] = {n: f"vr::{m.group(1)}::{n}" for n in found(m.group(2))}
+    for n in found(blocks.sub("", text)):
+        _deleted_ctx[None][n] = "::" + n if n.startswith("EGraphicsAPIConvention") else "vr::" + n
+    return _deleted_ctx

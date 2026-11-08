@@ -1,0 +1,1 @@
+{"#": "As exiting.json, for case old-events: the runtime ends the session at frame 60, and IVRSystem_009 polls the quit into the old 32-byte event", "events": [{"frame": 60, "type": "session_state", "state": "EXITING"}]}

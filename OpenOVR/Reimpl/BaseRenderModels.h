@@ -2,6 +2,7 @@
 #include "BaseCommon.h"
 
 #include "Drivers/Backend.h"
+#include "generated/interfaces/deleted_types.h"
 
 #include <set>
 #include <string>
@@ -36,6 +37,13 @@ public:
 	/** Frees a previously returned render model
 	 *   It is safe to call this on a null ptr. */
 	void FreeRenderModel(OOVR_RenderModel_t* pRenderModel);
+
+	/** IVRSystem_003 and IVRRenderModels_001: the whole model in one call, with its texture inline (a model without
+	 * one gets the 1x1 placeholder, as the old struct always has a texture). False if the model can't be loaded. */
+	bool LoadRenderModelInline(const char* pchRenderModelName, vr::IVRRenderModels_001::RenderModel_t* pRenderModel);
+
+	/** Frees what LoadRenderModelInline gave, and zeroes the struct. Anything else is ignored. */
+	void FreeRenderModelInline(vr::IVRRenderModels_001::RenderModel_t* pRenderModel);
 
 	/** Loads and returns a texture for use in the application. */
 	OOVR_EVRRenderModelError LoadTexture_Async(OOVR_TextureID_t textureId, OOVR_RenderModel_TextureMap_t** ppTexture);

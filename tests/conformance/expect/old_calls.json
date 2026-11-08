@@ -1,0 +1,61 @@
+{
+ "#": "The old IVRSystem calls on the stand-in (run.py --cases old-calls --expect expect/old_calls.json)",
+ "old-calls/ApplyTransform/-/-": {
+  "position": [
+   13.0,
+   2.0,
+   -1.0
+  ],
+  "velocity": [
+   0.0,
+   0.0,
+   -1.0
+  ],
+  "angular_velocity": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "valid": true
+ },
+ "old-calls/ApplyTransform IVRSystem_007/-/-": {
+  "position": [
+   13.0,
+   2.0,
+   -1.0
+  ],
+  "velocity": [
+   0.0,
+   0.0,
+   -1.0
+  ],
+  "angular_velocity": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "valid": true
+ },
+ "old-calls/GetDXGIOutputInfo IVRSystem_003/-/-": {
+  "output": 0,
+  "adapter_set": true
+ },
+ "old-calls/AttachToWindow/-/-": {
+  "ret": true
+ },
+ "old-calls/LoadRenderModel renderLeftHand/-/-": {
+  "ret": true,
+  "has_vertices": true,
+  "has_triangles": true,
+  "texture": "1x1",
+  "has_texture_data": true
+ },
+ "old-calls/FreeRenderModel/-/-": {
+  "handle": 0,
+  "vertices": 0
+ },
+ "old-calls/LoadRenderModel unknown/-/-": {
+  "ret": false,
+  "handle": 0
+ }
+}

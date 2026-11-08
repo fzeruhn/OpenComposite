@@ -6,7 +6,12 @@
 #include "IVRCompositor_029.h"
 #include "IVRInput_010.h"
 #include "IVROverlay_028.h"
+#include "IVRSystem_003.h"
+#include "IVRSystem_007.h"
+#include "IVRSystem_009.h"
 #include "IVRSystem_022.h"
+
+#include <cstring>
 
 #include <thread>
 
@@ -294,6 +299,127 @@ void FrameLoop(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// IVRSystem_003-010 poll into SDK 0.9.x's 32-byte VREvent_t, not today's 64-byte one. 120 frames as frame-loop, polling
+// through IVRSystem_009 into a 64-byte buffer: each frame records its events and how many bytes past 32 were written
+void OldEvents(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* old = (vr::IVRSystem_009::IVRSystem*)c.core->GetGenericInterface("IVRSystem_009", &le);
+	if (!old) {
+		c.Record("no IVRSystem_009", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	for (int frame = 1; frame <= 120; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		Json::Value r;
+		Json::Value events(Json::arrayValue);
+		int overrun = 0;
+		for (int n = 0; n < 64; n++) {
+			alignas(8) uint8_t buffer[64];
+			memset(buffer, 0xCD, sizeof(buffer));
+			if (!old->PollNextEvent((vr::VREvent_t*)buffer))
+				break;
+			uint32_t type;
+			memcpy(&type, buffer, sizeof(type));
+			events.append((int)type);
+			for (int i = 32; i < 64; i++)
+				overrun += buffer[i] != 0xCD;
+		}
+		r["events"] = events;
+		r["overrun"] = overrun;
+		c.Record("frame " + std::to_string(frame), r);
+	}
+	c.core->Cleanup();
+}
+
+Json::Value PoseRecord(const vr::TrackedDevicePose_t& p)
+{
+	Json::Value r;
+	for (int i = 0; i < 3; i++)
+		r["position"].append(p.mDeviceToAbsoluteTracking.m[i][3]);
+	for (int i = 0; i < 3; i++)
+		r["velocity"].append(p.vVelocity.v[i]);
+	for (int i = 0; i < 3; i++)
+		r["angular_velocity"].append(p.vAngularVelocity.v[i]);
+	r["valid"] = p.bPoseIsValid;
+	return r;
+}
+
+// The old IVRSystem calls whose answers can be checked without frames (expect/old_calls.json)
+void OldCalls(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	auto* sys007 = (vr::IVRSystem_007::IVRSystem*)c.core->GetGenericInterface("IVRSystem_007", &le);
+	auto* sys003 = (vr::IVRSystem_003::IVRSystem*)c.core->GetGenericInterface("IVRSystem_003", &le);
+	if (!sys || !sys007 || !sys003) {
+		c.Record("no IVRSystem_022, 007 or 003", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	// A pose at (1, 2, 3) moving along +x and turning about +y, moved by a quarter turn about +y then 10 m along +x
+	vr::TrackedDevicePose_t pose = {};
+	pose.mDeviceToAbsoluteTracking = { { { 1, 0, 0, 1 }, { 0, 1, 0, 2 }, { 0, 0, 1, 3 } } };
+	pose.vVelocity = { { 1, 0, 0 } };
+	pose.vAngularVelocity = { { 0, 1, 0 } };
+	pose.bPoseIsValid = true;
+	vr::HmdMatrix34_t transform = { { { 0, 0, 1, 10 }, { 0, 1, 0, 0 }, { -1, 0, 0, 0 } } };
+	vr::TrackedDevicePose_t out = {};
+	sys->ApplyTransform(&out, &pose, &transform);
+	c.Record("ApplyTransform", PoseRecord(out));
+	vr::TrackedDevicePose_t byRef = {};
+	sys007->ApplyTransform(&byRef, pose, transform);
+	c.Record("ApplyTransform IVRSystem_007", PoseRecord(byRef));
+
+	int32_t adapter = -2, output = -2;
+	sys003->GetDXGIOutputInfo(&adapter, &output);
+	Json::Value dxgi;
+	dxgi["output"] = output;
+	dxgi["adapter_set"] = adapter != -2;
+	c.Record("GetDXGIOutputInfo IVRSystem_003", dxgi);
+
+	Json::Value attach;
+	attach["ret"] = sys003->AttachToWindow(nullptr);
+	c.Record("AttachToWindow", attach);
+
+	vr::IVRSystem_003::RenderModel_t model;
+	memset(&model, 0xCD, sizeof(model));
+	Json::Value load;
+	load["ret"] = sys003->LoadRenderModel("renderLeftHand", &model);
+	load["has_vertices"] = model.unVertexCount > 0 && model.rVertexData != nullptr;
+	load["has_triangles"] = model.unTriangleCount > 0 && model.rIndexData != nullptr;
+	load["texture"] = std::to_string(model.diffuseTexture.unWidth) + "x" + std::to_string(model.diffuseTexture.unHeight);
+	load["has_texture_data"] = model.diffuseTexture.rubTextureMapData != nullptr;
+	c.Record("LoadRenderModel renderLeftHand", load);
+	sys003->FreeRenderModel(&model);
+	Json::Value freed;
+	freed["handle"] = (Json::UInt64)model.ulInternalHandle;
+	freed["vertices"] = model.unVertexCount;
+	c.Record("FreeRenderModel", freed);
+	sys003->FreeRenderModel(&model); // again: ignored
+
+	memset(&model, 0xCD, sizeof(model));
+	Json::Value unknown;
+	unknown["ret"] = sys003->LoadRenderModel("no such model", &model);
+	unknown["handle"] = (Json::UInt64)model.ulInternalHandle;
+	c.Record("LoadRenderModel unknown", unknown);
+
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -365,6 +491,8 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "overlay-lifecycle", OverlayLifecycle },
 		{ "input-manifest", InputManifest },
 		{ "frame-loop", FrameLoop },
+		{ "old-events", OldEvents },
+		{ "old-calls", OldCalls },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

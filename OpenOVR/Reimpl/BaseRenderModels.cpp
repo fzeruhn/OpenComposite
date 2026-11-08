@@ -367,6 +367,68 @@ void BaseRenderModels::FreeRenderModel(RenderModel_t* renderModel)
 	delete renderModel;
 }
 
+namespace {
+// What an inline render model's ulInternalHandle points at
+struct InlineRenderModel {
+	RenderModel_t* model;
+	RenderModel_TextureMap_t* texture;
+};
+std::mutex inlineModelsLock;
+std::set<InlineRenderModel*> inlineModels;
+} // namespace
+
+static_assert(sizeof(OOVR_RenderModel_Vertex_t) == sizeof(vr::IVRRenderModels_001::RenderModel_Vertex_t),
+    "the old vertex is today's");
+
+bool BaseRenderModels::LoadRenderModelInline(const char* pchRenderModelName, vr::IVRRenderModels_001::RenderModel_t* pRenderModel)
+{
+	if (!pRenderModel)
+		return false;
+	*pRenderModel = {};
+
+	RenderModel_t* model = nullptr;
+	if (LoadRenderModel_Async(pchRenderModelName, &model) != VRRenderModelError_None || !model)
+		return false;
+	RenderModel_TextureMap_t* texture = nullptr;
+	if (LoadTexture_Async(std::max(model->diffuseTextureId, 0), &texture) != VRRenderModelError_None || !texture) {
+		FreeRenderModel(model);
+		return false;
+	}
+
+	auto* holder = new InlineRenderModel{ model, texture };
+	{
+		std::lock_guard<std::mutex> guard(inlineModelsLock);
+		inlineModels.insert(holder);
+	}
+	pRenderModel->ulInternalHandle = (uint64_t)(uintptr_t)holder;
+	pRenderModel->rVertexData = (const vr::IVRRenderModels_001::RenderModel_Vertex_t*)model->rVertexData;
+	pRenderModel->unVertexCount = model->unVertexCount;
+	pRenderModel->rIndexData = model->rIndexData;
+	pRenderModel->unTriangleCount = model->unTriangleCount;
+	pRenderModel->diffuseTexture.unWidth = texture->unWidth;
+	pRenderModel->diffuseTexture.unHeight = texture->unHeight;
+	pRenderModel->diffuseTexture.rubTextureMapData = texture->rubTextureMapData;
+	return true;
+}
+
+void BaseRenderModels::FreeRenderModelInline(vr::IVRRenderModels_001::RenderModel_t* pRenderModel)
+{
+	if (!pRenderModel)
+		return;
+	auto* holder = (InlineRenderModel*)(uintptr_t)pRenderModel->ulInternalHandle;
+	{
+		std::lock_guard<std::mutex> guard(inlineModelsLock);
+		if (!inlineModels.erase(holder)) {
+			OOVR_LOG_ONCE("FreeRenderModel: not a render model from LoadRenderModel (or freed already), ignored");
+			return;
+		}
+	}
+	FreeTexture(holder->texture);
+	FreeRenderModel(holder->model);
+	delete holder;
+	*pRenderModel = {};
+}
+
 EVRRenderModelError BaseRenderModels::LoadTexture_Async(TextureID_t textureId, RenderModel_TextureMap_t** texture)
 {
 	if (!texture)

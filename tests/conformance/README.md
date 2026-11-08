@@ -47,7 +47,9 @@ Records SteamVR answered while restarting between children (init errors 115, 117
 `xr_failures.py --runtime <dll> --conformance <exe> --out <dir>` runs the stand-in runtime with each script in
 `scripts/` (a failing `xrCreateInstance`, no headset, a dropped frame, a lost or exiting session, a failed swapchain,
 refused binding suggestions) and checks what `expect/xr_failures.json` says OpenComposite does for each: the init
-error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that nothing ends or crashes. The script
+error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that nothing ends or crashes.
+`exiting_old_events` polls that quit through IVRSystem_009, whose game passes SDK 0.9.x's 32-byte `VREvent_t`
+(case `old-events`): nothing may be written past it. The script
 format is described at the top of `tests/runtime/script.h`.
 
 ## Elevated shells

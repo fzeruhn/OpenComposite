@@ -2,7 +2,9 @@
 #include "stdafx.h"
 #define BASE_IMPL
 #include "BaseCompositor.h"
+#include "BaseExtendedDisplay.h"
 #include "BaseInput.h"
+#include "BaseRenderModels.h"
 #include "BaseOverlay.h"
 #include "BaseSystem.h"
 #include "Drivers/Backend.h"
@@ -141,6 +143,13 @@ int32_t BaseSystem::GetD3D9AdapterIndex()
 {
 	// The first adapter, until the OpenXR runtime's adapter is looked up for D3D9 too
 	return 0;
+}
+
+void BaseSystem::GetDXGIOutputInfo(int32_t* pnAdapterIndex, int32_t* pnAdapterOutputIndex)
+{
+	GetDXGIOutputInfo(pnAdapterIndex);
+	if (pnAdapterOutputIndex)
+		*pnAdapterOutputIndex = 0;
 }
 
 void BaseSystem::GetDXGIOutputInfo(int32_t* adapterIndex)
@@ -287,7 +296,21 @@ EDeviceActivityLevel BaseSystem::GetTrackedDeviceActivityLevel(vr::TrackedDevice
 
 void BaseSystem::ApplyTransform(TrackedDevicePose_t* pOutputPose, const TrackedDevicePose_t* pTrackedDevicePose, const HmdMatrix34_t* pTransform)
 {
-	OOVR_SOFT_ABORT("ApplyTransform is not implemented! This will probably break things if they're using it!");
+	if (!pOutputPose || !pTrackedDevicePose || !pTransform)
+		return;
+	// As SteamVR does: the pose is moved by the transform, and its velocities turned by the transform's rotation
+	TrackedDevicePose_t out = *pTrackedDevicePose;
+	glm::mat4 transform = S2G_m34(*pTransform);
+	out.mDeviceToAbsoluteTracking = G2S_m34(transform * S2G_m34(pTrackedDevicePose->mDeviceToAbsoluteTracking));
+	glm::mat3 rotation(transform);
+	out.vVelocity = G2S_v3f(rotation * S2G_v3f(pTrackedDevicePose->vVelocity));
+	out.vAngularVelocity = G2S_v3f(rotation * S2G_v3f(pTrackedDevicePose->vAngularVelocity));
+	*pOutputPose = out;
+}
+
+void BaseSystem::ApplyTransform(TrackedDevicePose_t* pOutputPose, const TrackedDevicePose_t& trackedDevicePose, const HmdMatrix34_t& transform)
+{
+	ApplyTransform(pOutputPose, &trackedDevicePose, &transform);
 }
 
 vr::TrackedDeviceIndex_t BaseSystem::GetTrackedDeviceIndexForControllerRole(vr::ETrackedControllerRole unDeviceType)
@@ -817,6 +840,72 @@ void BaseSystem::ResetSeatedZeroPose()
 			xr_gbl->seatedSpace = newSpace;
 		}
 	}
+}
+
+namespace {
+// VREvent_t as SDKs 0.9.0 to 0.9.14 laid it out (the data union was 16 bytes: two uint64s, so it's aligned as they are)
+struct VREvent_0914_t {
+	uint32_t eventType;
+	vr::TrackedDeviceIndex_t trackedDeviceIndex;
+	uint64_t data[2];
+	float eventAgeSeconds;
+};
+static_assert(offsetof(VREvent_0914_t, data) == 8, "0.9.x events have their data at 8");
+} // namespace
+
+bool BaseSystem::PollNextEventOld(ETrackingUniverseOrigin eOrigin, VREvent_t* pEvent, vr::TrackedDevicePose_t* pTrackedDevicePose)
+{
+	if (!pEvent)
+		return false;
+	memset(pEvent, 0, sizeof(VREvent_0914_t));
+
+	VREvent_t event = {};
+	if (!PollNextEventWithPose(eOrigin, &event, sizeof(event), pTrackedDevicePose))
+		return false;
+
+	VREvent_0914_t old = {};
+	old.eventType = event.eventType;
+	old.trackedDeviceIndex = event.trackedDeviceIndex;
+	// Each event's data starts at the union's start in both, so the first 16 bytes are the old union's
+	memcpy(old.data, &event.data, sizeof(old.data));
+	old.eventAgeSeconds = event.eventAgeSeconds;
+	memcpy(pEvent, &old, sizeof(old));
+	return true;
+}
+
+void BaseSystem::GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)
+{
+	GetCreateBaseExtendedDisplay()->GetWindowBounds(pnX, pnY, pnWidth, pnHeight);
+}
+
+void BaseSystem::GetEyeOutputViewport(EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)
+{
+	GetCreateBaseExtendedDisplay()->GetEyeOutputViewport(eEye, pnX, pnY, pnWidth, pnHeight);
+}
+
+bool BaseSystem::AttachToWindow(void* hWnd)
+{
+	// The OpenXR runtime shows the frames on the headset itself: there's no window to use, and nothing for the game to
+	// do differently, so this succeeds
+	return true;
+}
+
+bool BaseSystem::LoadRenderModel(const char* pchRenderModelName, vr::IVRRenderModels_001::RenderModel_t* pRenderModel)
+{
+	return GetCreateBaseRenderModels()->LoadRenderModelInline(pchRenderModelName, pRenderModel);
+}
+
+void BaseSystem::FreeRenderModel(vr::IVRRenderModels_001::RenderModel_t* pRenderModel)
+{
+	GetCreateBaseRenderModels()->FreeRenderModelInline(pRenderModel);
+}
+
+bool BaseSystem::HandleControllerOverlayInteractionAsMouse(const vr::Compositor_OverlaySettings& overlaySettings,
+    HmdVector2_t vecWindowClientPositionOnScreen, HmdVector2_t vecWindowClientSize,
+    TrackedDeviceIndex_t unControllerDeviceIndex, EVRControllerEventOutputType eOutputType)
+{
+	// Not pointed at the overlay: no mouse event sent
+	OC_UNSUPPORTED(false, "HandleControllerOverlayInteractionAsMouse (IVRSystem_003): no mouse events from compositor overlays");
 }
 
 bool BaseSystem::PollNextEventWithPoseAndOverlays(ETrackingUniverseOrigin eOrigin, VREvent_t* pEvent, uint32_t uncbVREvent,
