@@ -406,6 +406,9 @@ public:
 	 */
 	bool PollNextEventOld(vr::ETrackingUniverseOrigin eOrigin, vr::VREvent_t* pEvent, vr::TrackedDevicePose_t* pTrackedDevicePose);
 
+	/** Writes event into pOld as SDK 0.9.x laid VREvent_t out: 32 bytes, no more (also IVROverlay_001-008's) */
+	static void WriteOldEvent(const vr::VREvent_t& event, vr::VREvent_t* pOld);
+
 	// IVRSystem_003-007 (0.9.0 to 0.9.11): the extended-display calls, answered as IVRExtendedDisplay answers them
 	void GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight);
 	void GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight);

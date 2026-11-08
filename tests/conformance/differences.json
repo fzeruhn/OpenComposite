@@ -20,6 +20,7 @@
  {"interface": "IVRApplications_\\d+", "method": "GetApplicationKeyByIndex|GetApplicationKeyByProcessId|GetStartingApplication|GetSceneApplicationKey", "field": "out", "reason": "which applications are installed and running is the PC's own"},
  {"interface": "IVROverlay_\\d+", "method": "IsDashboardVisible|IsActiveDashboardOverlay", "field": "ret", "reason": "SteamVR's dashboard opens with the null HMD; OpenComposite has no dashboard"},
  {"interface": "IVROverlay_\\d+", "method": "FindOverlay|CreateOverlay|CreateSubviewOverlay", "field": "out", "reason": "overlay handles are numbers each runtime picks"},
+ {"interface": "IVROverlay_012", "method": "CreateOverlay", "field": "ret", "reason": "SteamVR still held the previous child's overlay key when it recorded 012 (KeyInUse, 17); every other version answers 0"},
  {"interface": "IVRInput_\\d+", "method": "GetActionSetHandle|GetActionHandle|GetInputSourceHandle", "field": "out", "reason": "handles are numbers each runtime picks (OpenComposite's are pointers)"},
  {"interface": "IVRInput_\\d+", "method": "GetPoseActionData|GetPoseActionDataRelativeToNow|GetPoseActionDataForNextFrame|GetSkeletalActionData|GetBoneCount|GetDominantHand|GetEyeTrackingDataRelativeToNow|GetEyeTrackingDataForNextFrame", "field": "out", "reason": "live input values, and the null driver has no controllers"},
  {"interface": "IVRSettings_\\d+", "method": "Get(Bool|Int32|Float|String)", "field": "ret", "reason": "the values are the PC's own steamvr.vrsettings"},

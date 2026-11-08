@@ -8,6 +8,9 @@
 #include "IVRCompositor_008.h"
 #include "IVRCompositor_029.h"
 #include "IVRInput_010.h"
+#include "IVROverlay_001.h"
+#include "IVROverlay_006.h"
+#include "IVROverlay_007.h"
 #include "IVROverlay_028.h"
 #include "IVRSystem_003.h"
 #include "IVRSystem_007.h"
@@ -499,6 +502,102 @@ void OldSubmit(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// An event polled into SDK 0.9.x's 32-byte VREvent_t: its type, the keyboard user value at its data's offset 8 (16), and
+// how many bytes past 32 were written
+Json::Value OldEventRecord(bool polled, const uint8_t* buffer)
+{
+	Json::Value r;
+	r["polled"] = polled;
+	uint32_t type;
+	uint64_t userValue;
+	memcpy(&type, buffer, sizeof(type));
+	memcpy(&userValue, buffer + 16, sizeof(userValue));
+	r["type"] = (int)type;
+	r["user value"] = (Json::UInt64)userValue;
+	int overrun = 0;
+	for (int i = 32; i < 64; i++)
+		overrun += buffer[i] != 0xCD;
+	r["overrun"] = overrun;
+	return r;
+}
+
+// The old overlay calls (expect/old_overlay.json): events in the old layout, flags as bit numbers (up to 020) and as
+// masks (021 on), the 0.9.x gamma and visibility calls, and 001's texture of the device SetGraphicsDevice named
+void OldOverlay(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* ov = (vr::IVROverlay_028::IVROverlay*)c.core->GetGenericInterface("IVROverlay_028", &le);
+	auto* ov007 = (vr::IVROverlay_007::IVROverlay*)c.core->GetGenericInterface("IVROverlay_007", &le);
+	auto* ov006 = (vr::IVROverlay_006::IVROverlay*)c.core->GetGenericInterface("IVROverlay_006", &le);
+	auto* ov001 = (vr::IVROverlay_001::IVROverlay*)c.core->GetGenericInterface("IVROverlay_001", &le);
+	auto* sys009 = (vr::IVRSystem_009::IVRSystem*)c.core->GetGenericInterface("IVRSystem_009", &le);
+	if (!ov || !ov007 || !ov006 || !ov001 || !sys009) {
+		c.Record("no IVROverlay_028, 007, 006, 001 or IVRSystem_009", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
+	c.Record("CreateOverlay", Err(ov->CreateOverlay("oc.old", "Old", &h)));
+
+	// The keyboard sends KeyboardDone at once: polled through 007 (the overlay's) and IVRSystem_009 (the system's)
+	alignas(8) uint8_t buffer[64];
+	ov007->ShowKeyboardForOverlay(h, vr::IVROverlay_007::k_EGamepadTextInputModeNormal, vr::IVROverlay_007::k_EGamepadTextInputLineModeSingleLine, "", 8, "",
+	    false, 0x1122334455667788ull);
+	memset(buffer, 0xCD, sizeof(buffer));
+	c.Record("IVROverlay_007 PollNextOverlayEvent", OldEventRecord(ov007->PollNextOverlayEvent(h, (vr::VREvent_t*)buffer), buffer));
+	ov007->HideKeyboard();
+	ov007->ShowKeyboard(vr::IVROverlay_007::k_EGamepadTextInputModeNormal, vr::IVROverlay_007::k_EGamepadTextInputLineModeSingleLine, "", 8, "", false, 0x55aaull);
+	memset(buffer, 0xCD, sizeof(buffer));
+	c.Record("IVRSystem_009 PollNextEvent", OldEventRecord(sys009->PollNextEvent((vr::VREvent_t*)buffer), buffer));
+	ov007->HideKeyboard();
+
+	// Flags: 007 passes NoDashboardTab as 3, 028 as 1 << 3; both are bit 3 of GetOverlayFlags
+	Json::Value flags;
+	flags["set 007"] = (int)ov007->SetOverlayFlag(h, (vr::IVROverlay_007::VROverlayFlags)3, true);
+	uint32_t all = 0;
+	ov->GetOverlayFlags(h, &all);
+	flags["after 007"] = all;
+	ov007->SetOverlayFlag(h, (vr::IVROverlay_007::VROverlayFlags)3, false);
+	flags["set 028"] = (int)ov->SetOverlayFlag(h, vr::IVROverlay_028::VROverlayFlags_SideBySide_Parallel, true);
+	bool enabled = false;
+	ov->GetOverlayFlag(h, vr::IVROverlay_028::VROverlayFlags_SideBySide_Parallel, &enabled);
+	flags["028 enabled"] = enabled;
+	all = 0;
+	ov->GetOverlayFlags(h, &all);
+	flags["after 028"] = all;
+	enabled = false;
+	ov007->GetOverlayFlag(h, (vr::IVROverlay_007::VROverlayFlags)10, &enabled); // SideBySide_Parallel's bit number
+	flags["007 sees it"] = enabled;
+	c.Record("flags", flags);
+
+	Json::Value gamma;
+	gamma["set"] = (int)ov006->SetOverlayGamma(h, 0.5f);
+	float got = -1;
+	gamma["get"] = (int)ov006->GetOverlayGamma(h, &got);
+	gamma["value"] = got;
+	c.Record("IVROverlay_006 gamma", gamma);
+
+	Json::Value vis;
+	vis["set"] = (int)ov001->SetOverlayVisibility(h, vr::IVROverlay_001::VROverlayVisibility_SystemOverlay);
+	vr::IVROverlay_001::VROverlayVisibility v = vr::IVROverlay_001::VROverlayVisibility_Manual;
+	vis["get"] = (int)ov001->GetOverlayVisibility(h, &v);
+	vis["value"] = (int)v;
+	vis["system overlay visible"] = ov001->IsSystemOverlayVisible();
+	c.Record("IVROverlay_001 visibility", vis);
+
+	// No IVRCompositor::SetGraphicsDevice: 001 can't tell what the texture is
+	Json::Value tex;
+	tex["ret"] = (int)ov001->SetOverlayTexture(h, nullptr);
+	c.Record("IVROverlay_001 SetOverlayTexture", tex);
+
+	ov->DestroyOverlay(h);
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -573,6 +672,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "old-events", OldEvents },
 		{ "old-calls", OldCalls },
 		{ "old-submit", OldSubmit },
+		{ "old-overlay", OldOverlay },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

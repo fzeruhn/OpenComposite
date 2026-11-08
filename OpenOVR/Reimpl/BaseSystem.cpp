@@ -862,15 +862,19 @@ bool BaseSystem::PollNextEventOld(ETrackingUniverseOrigin eOrigin, VREvent_t* pE
 	VREvent_t event = {};
 	if (!PollNextEventWithPose(eOrigin, &event, sizeof(event), pTrackedDevicePose))
 		return false;
+	WriteOldEvent(event, pEvent);
+	return true;
+}
 
+void BaseSystem::WriteOldEvent(const VREvent_t& event, VREvent_t* pOld)
+{
 	VREvent_0914_t old = {};
 	old.eventType = event.eventType;
 	old.trackedDeviceIndex = event.trackedDeviceIndex;
 	// Each event's data starts at the union's start in both, so the first 16 bytes are the old union's
 	memcpy(old.data, &event.data, sizeof(old.data));
 	old.eventAgeSeconds = event.eventAgeSeconds;
-	memcpy(pEvent, &old, sizeof(old));
-	return true;
+	memcpy(pOld, &old, sizeof(old));
 }
 
 void BaseSystem::GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)

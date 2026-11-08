@@ -458,21 +458,27 @@ void BaseCompositor::SetGraphicsDevice(OOVR_Compositor_DeviceType eType, void* p
 	oldDeviceType = eType;
 }
 
+bool BaseCompositor::OldDeviceTextureType(ETextureType* pType) const
+{
+	switch (oldDeviceType) {
+	case OOVR_Compositor_DeviceType_D3D11:
+		*pType = TextureType_DirectX;
+		return true;
+	case OOVR_Compositor_DeviceType_OpenGL:
+		*pType = TextureType_OpenGL;
+		return true;
+	default:
+		// None (SetGraphicsDevice wasn't called), D3D9, D3D9Ex or D3D10: nothing OpenComposite can show
+		return false;
+	}
+}
+
 BaseCompositor::ovr_enum_t BaseCompositor::SubmitForDevice(EVREye eEye, void* pTexture, const VRTextureBounds_t* pBounds)
 {
 	Texture_t texture = { pTexture, TextureType_DirectX, ColorSpace_Auto };
-	switch (oldDeviceType) {
-	case OOVR_Compositor_DeviceType_D3D11:
-		texture.eType = TextureType_DirectX;
-		break;
-	case OOVR_Compositor_DeviceType_OpenGL:
-		texture.eType = TextureType_OpenGL;
-		break;
-	default:
-		// None (SetGraphicsDevice wasn't called), D3D9, D3D9Ex or D3D10: nothing OpenComposite can show
+	if (!OldDeviceTextureType(&texture.eType))
 		OC_UNSUPPORTED(VRCompositorError_InvalidTexture, "Submit (IVRCompositor_005/006): a texture of device type %d "
 		                                                 "(only D3D11 and OpenGL can be shown)", (int)oldDeviceType);
-	}
 	return Submit(eEye, &texture, pBounds, Submit_Default);
 }
 

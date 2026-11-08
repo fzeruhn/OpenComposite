@@ -407,6 +407,9 @@ public:
 	/** IVRCompositor_005 and 006: what Submit's texture pointers are (D3D11 or OpenGL; D3D9 and D3D10 can't be shown) */
 	void SetGraphicsDevice(OOVR_Compositor_DeviceType eType, void* pDevice);
 
+	/** The texture type of the device SetGraphicsDevice named: false unless D3D11 or OpenGL (also IVROverlay_001's) */
+	bool OldDeviceTextureType(vr::ETextureType* pType) const;
+
 	/** IVRCompositor_005 and 006's Submit: a bare texture of the API SetGraphicsDevice named */
 	ovr_enum_t SubmitForDevice(vr::EVREye eEye, void* pTexture, const vr::VRTextureBounds_t* pBounds);
 
