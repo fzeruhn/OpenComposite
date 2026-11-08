@@ -1,0 +1,1 @@
+{ "#": "Every binding suggestion is refused: the manifest still gives handles, and nothing ends", "fail": [{ "function": "xrSuggestInteractionProfileBindings", "result": "XR_ERROR_PATH_UNSUPPORTED", "count": 1000 }] }

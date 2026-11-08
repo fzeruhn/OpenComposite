@@ -1,0 +1,1 @@
+{ "#": "The first xrCreateSwapchain fails: the first Submit answers RequestFailed, the next ones work", "fail": [{ "function": "xrCreateSwapchain", "result": "XR_ERROR_RUNTIME_FAILURE", "count": 1 }] }

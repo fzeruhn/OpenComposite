@@ -159,8 +159,9 @@ vr::HmdMatrix34_t XrHMD::GetEyeToHeadTransform(vr::EVREye eEye)
 	if (time != xr_gbl->GetBestTime()) {
 		const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->viewSpace);
 		const XrViewState& viewState = cachedViews.viewState;
-		if (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) {
-			OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
+		// Without both views the last ones stay
+		if (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT
+		    && cachedViews.viewCount == XruEyeCount) {
 			views[0] = cachedViews.views[0];
 			views[1] = cachedViews.views[1];
 			time = xr_gbl->GetBestTime();
@@ -201,7 +202,8 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 		xrType = XR_VISIBILITY_MASK_TYPE_LINE_LOOP_KHR;
 		break;
 	default:
-		OOVR_ABORTF("Invalid vr::EHiddenAreaMeshType value %d", type);
+		// As SteamVR answers a mesh type it doesn't know: no mesh
+		return vr::HiddenAreaMesh_t{ nullptr, 0 };
 	}
 
 	// Note: the OpenXR and OpenVR eye indexes are the same, so we can just cast between them.
@@ -210,9 +212,11 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 	// First find out what size we need to allocate
 	// Note that this doesn't return XR_ERROR_SIZE_INSUFFICIENT, since setting one of the input counts to zero is special-cased
 	XrVisibilityMaskKHR mask = { XR_TYPE_VISIBILITY_MASK_KHR };
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask));
-
-	// TODO handle cases where a mask isn't available
+	if (eye >= XruEyeCount || !xr_session.get() || XR_FAILED(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask))
+	    || mask.indexCountOutput == 0) {
+		// No mask from the runtime: what the docs say to return when there's none
+		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+	}
 
 	// Allocate memory for the mesh
 	mask.vertexCapacityInput = mask.vertexCountOutput;
@@ -221,7 +225,11 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 	mask.vertices = new XrVector2f[mask.vertexCapacityInput];
 
 	// Now actually request the mask data
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask));
+	if (XR_FAILED(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask))) {
+		delete[] mask.indices;
+		delete[] mask.vertices;
+		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+	}
 
 	// Convert the data into something usable by SteamVR - it doesn't use indices
 	vr::HiddenAreaMesh_t result = {};
@@ -292,11 +300,11 @@ float XrHMD::GetIPD()
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->viewSpace);
 	const XrViewState& state = cachedViews.viewState;
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
-	OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
 
 	static float ipd = 0.0064;
 
-	if (state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)
+	// Without both views the last IPD stays
+	if (cachedViews.viewCount == XruEyeCount && state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)
 		ipd = views[vr::Eye_Right].pose.position.x - views[vr::Eye_Left].pose.position.x;
 
 	return ipd;

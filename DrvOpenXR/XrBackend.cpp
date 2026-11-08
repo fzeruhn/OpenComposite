@@ -45,6 +45,7 @@
 #include <chrono>
 #include <cinttypes>
 #include <mutex>
+#include <thread>
 
 using namespace vr;
 
@@ -59,16 +60,22 @@ XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx)
 #if defined(SUPPORT_VK)
 	if (useVulkanTmpGfx) {
 		temporaryGraphics = std::make_unique<TemporaryVk>();
+		if (!temporaryGraphics->usable)
+			temporaryGraphics.reset(); // D3D11 next
 	}
 #endif
 
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
 	if (!temporaryGraphics && useD3D11TmpGfx) {
 		temporaryGraphics = std::make_unique<TemporaryD3D11>();
+		if (!temporaryGraphics->usable)
+			temporaryGraphics.reset();
 	}
 #endif
 
-	OOVR_FALSE_ABORT(temporaryGraphics);
+	// Without one, CreateOpenXRBackend gives up (HasTemporaryGraphics)
+	if (!temporaryGraphics)
+		OOVR_LOG("No temporary graphics API available for the OpenXR session");
 
 	// setup the device indexes
 	for (vr::TrackedDeviceIndex_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++) {
@@ -81,6 +88,10 @@ XrBackend::XrBackend(bool useVulkanTmpGfx, bool useD3D11TmpGfx)
 
 XrBackend::~XrBackend()
 {
+	// The whole teardown under the session lock, as every other change to the session is. VR_Shutdown waits for it
+	// as long as it takes; process exit without VR_Shutdown waits at most a second (see lock_for_teardown).
+	auto lock = BackendManager::IsResetting() ? xr_session.lock() : xr_session.lock_for_teardown(std::chrono::seconds(1));
+
 	// First clear out the compositors, since they might try and access the OpenXR instance
 	// in their destructor.
 	PrepareForSessionShutdown();
@@ -455,25 +466,52 @@ void XrBackend::WaitForTrackingData()
 	// Make sure the OpenXR session is active before doing anything else, and if not then skip
 	if (!sessionActive) {
 		renderingFrame = false;
+		// No xrWaitFrame to pace the game: about one frame's wait instead of a busy loop
+		std::this_thread::sleep_for(std::chrono::milliseconds(11));
 		return;
 	}
 
 	XrFrameWaitInfo waitInfo{ XR_TYPE_FRAME_WAIT_INFO };
 	XrFrameState state{ XR_TYPE_FRAME_STATE };
 
-	{
-		auto lock = xr_session.lock_shared();
+	// Held to the end: a session restart on another thread replaces xr_gbl
+	auto lock = xr_session.lock_shared();
+
+	// Checked again under the lock: a restart this thread waited behind may have left no running session
+	if (!sessionActive) {
+		renderingFrame = false;
+		return;
+	}
+
+	// A waited frame not yet begun is begun now, with its predicted display time
+	if (!frameAwaitingBegin) {
 		auto waitCall = std::chrono::steady_clock::now();
-		OOVR_FAILED_XR_ABORT(xrWaitFrame(xr_session.get(), &waitInfo, &state));
+		if (XrResult res = xrWaitFrame(xr_session.get(), &waitInfo, &state); XR_FAILED(res)) {
+			// This frame is skipped: no xrBeginFrame, so no xrEndFrame; poses are the last ones
+			OOVR_LOG_ONCE("xrWaitFrame failed: skipping frames until it works again");
+			OnFrameCallFailed(res);
+			return;
+		}
 		RecordFrameTiming(waitCall, std::chrono::steady_clock::now(), state.predictedDisplayTime, state.predictedDisplayPeriod);
 		xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
-
-		// FIXME loop until this returns true?
-		// OOVR_FALSE_ABORT(state.shouldRender);
-
-		XrFrameBeginInfo beginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
-		OOVR_FAILED_XR_ABORT(xrBeginFrame(xr_session.get(), &beginInfo));
+		frameAwaitingBegin = true;
 	}
+
+	// FIXME loop until this returns true?
+	// OOVR_FALSE_ABORT(state.shouldRender);
+
+	XrFrameBeginInfo beginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
+	if (XrResult res = xrBeginFrame(xr_session.get(), &beginInfo); XR_FAILED(res)) {
+		// No xrEndFrame after a failed xrBeginFrame: this frame is dropped, and the next one begins it again
+		// (or, if the runtime says there's no waited frame, waits for a new one)
+		OOVR_LOG_ONCE("xrBeginFrame failed: dropping frames until it works again");
+		if (res == XR_ERROR_CALL_ORDER_INVALID)
+			frameAwaitingBegin = false;
+		OnFrameCallFailed(res);
+		return;
+	}
+	frameAwaitingBegin = false;
+	frameCallFailures = 0;
 
 	xr_gbl->ClearCachedViews();
 
@@ -509,25 +547,45 @@ void XrBackend::WaitForTrackingData()
 	}
 }
 
-void XrBackend::StoreEyeTexture(
+// EVRCompositorError values (the same in every SDK version) for what StoreEyeTexture answers Submit
+static constexpr IBackend::openvr_enum_t kCompositorNone = 0;
+static constexpr IBackend::openvr_enum_t kCompositorRequestFailed = 1;
+static constexpr IBackend::openvr_enum_t kCompositorInvalidTexture = 102;
+static constexpr IBackend::openvr_enum_t kCompositorUnsupportedFormat = 105;
+
+IBackend::openvr_enum_t XrBackend::StoreEyeTexture(
     vr::EVREye eye,
     const vr::Texture_t* texture,
     const vr::VRTextureBounds_t* bounds,
     vr::EVRSubmitFlags submitFlags,
     bool isFirstEye)
 {
+	if (eye != vr::Eye_Left && eye != vr::Eye_Right)
+		return kCompositorInvalidTexture;
+
 	CheckOrInitCompositors(texture);
 
 	XrCompositionLayerProjectionView& layer = projectionViews[eye];
 	layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
 
 	std::unique_ptr<Compositor>& compPtr = compositors[eye];
-	OOVR_FALSE_ABORT(compPtr.get() != nullptr);
+	if (!compPtr) {
+		// No compositor for this texture (its graphics API couldn't be set up): this eye is left out
+		layer.subImage.swapchain = XR_NULL_HANDLE;
+		return kCompositorRequestFailed;
+	}
 	Compositor& comp = *compPtr;
 
 	// If the session is inactive, we may be unable to write to the surface
-	if (sessionActive && renderingFrame)
+	IBackend::openvr_enum_t result = kCompositorNone;
+	if (sessionActive && renderingFrame) {
 		comp.Invoke(texture, bounds, layer.subImage, (XruEye)eye, submitFlags);
+		XrResult res = comp.LastResult();
+		if (res == XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED)
+			result = kCompositorUnsupportedFormat;
+		else if (XR_FAILED(res))
+			result = kCompositorRequestFailed;
+	}
 
 	submittedEyeTextures = true;
 
@@ -543,6 +601,7 @@ void XrBackend::StoreEyeTexture(
 		deferredRenderingStart = false;
 		WaitForTrackingData();
 	}
+	return result;
 }
 
 void XrBackend::SubmitFrames(bool showSkybox, bool postPresent)
@@ -638,8 +697,15 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 		XrFrameWaitInfo waitInfo{ XR_TYPE_FRAME_WAIT_INFO };
 		XrFrameState state{ XR_TYPE_FRAME_STATE };
 
-		OOVR_FAILED_XR_ABORT(xrWaitFrame(xr_session.get(), &waitInfo, &state));
-		xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
+		// A waited frame not yet begun (WaitForTrackingData's) is begun here instead
+		if (!frameAwaitingBegin) {
+			if (XR_FAILED(xrWaitFrame(xr_session.get(), &waitInfo, &state))) {
+				OOVR_LOG_ONCE("SetSkyboxOverride: xrWaitFrame failed");
+				return 1; // VRCompositorError_RequestFailed
+			}
+			xr_gbl->nextPredictedFrameTime = state.predictedDisplayTime;
+			frameAwaitingBegin = true;
+		}
 
 		// Not one of the app's frames, so its display slot isn't a dropped frame
 		RestartFrameTiming();
@@ -651,7 +717,13 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 		// not yet implemented since it's not currently worth the hassle, but if someone in the future wants to do it:
 		// TODO submit skybox frames in their own thread.
 		XrFrameBeginInfo beginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
-		OOVR_FAILED_XR_ABORT(xrBeginFrame(xr_session.get(), &beginInfo));
+		if (XrResult res = xrBeginFrame(xr_session.get(), &beginInfo); XR_FAILED(res)) {
+			OOVR_LOG_ONCE("SetSkyboxOverride: xrBeginFrame failed");
+			if (res == XR_ERROR_CALL_ORDER_INVALID)
+				frameAwaitingBegin = false;
+			return 1; // VRCompositorError_RequestFailed
+		}
+		frameAwaitingBegin = false;
 
 		if (skybox_compositor == nullptr)
 			skybox_compositor = BaseCompositor::CreateCompositorAPI(pTextures);
@@ -830,14 +902,14 @@ bool XrBackend::GetPlayAreaPoints(vr::HmdVector3_t* points, int* count)
 {
 	if (count)
 		*count = 0;
+	if (!xr_session.get())
+		return false; // the session is lost
 
 	XrExtent2Df bounds;
 	XrResult res = xrGetReferenceSpaceBoundsRect(xr_session.get(), XR_REFERENCE_SPACE_TYPE_STAGE, &bounds);
 
-	if (res == XR_SPACE_BOUNDS_UNAVAILABLE)
-		return false;
-
-	OOVR_FAILED_XR_ABORT(res);
+	if (res == XR_SPACE_BOUNDS_UNAVAILABLE || XR_FAILED(res))
+		return false; // no play area (set up, or at all)
 
 	if (count)
 		*count = 4;
@@ -877,8 +949,13 @@ void XrBackend::PumpEvents()
 	// TODO filter by session?
 	while (true) {
 		XrEventDataBuffer ev = { XR_TYPE_EVENT_DATA_BUFFER };
-		XrResult res;
-		OOVR_FAILED_XR_ABORT(res = xrPollEvent(xr_instance, &ev));
+		XrResult res = xr_instance ? xrPollEvent(xr_instance, &ev) : XR_ERROR_HANDLE_INVALID;
+		if (XR_FAILED(res)) {
+			OOVR_LOG_ONCE("xrPollEvent failed: no events this frame");
+			if (res == XR_ERROR_INSTANCE_LOST)
+				OnSessionLost();
+			break;
+		}
 
 		if (res == XR_EVENT_UNAVAILABLE) {
 			break;
@@ -886,7 +963,9 @@ void XrBackend::PumpEvents()
 
 		if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
 			auto* changed = (XrEventDataSessionStateChanged*)&ev;
-			OOVR_FALSE_ABORT(changed->session == xr_session.get());
+			// A state change for a session already destroyed (around a restart) is old news
+			if (changed->session != xr_session.get())
+				continue;
 			sessionState = changed->state;
 
 			// Monado bug: it returns 0 for this value (at least for the first two states)
@@ -902,31 +981,39 @@ void XrBackend::PumpEvents()
 				// Start the session running - this means we're supposed to start submitting frames
 				XrSessionBeginInfo beginInfo{ XR_TYPE_SESSION_BEGIN_INFO };
 				beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-				OOVR_FAILED_XR_ABORT(xrBeginSession(xr_session.get(), &beginInfo));
+				if (XrResult begin = xrBeginSession(xr_session.get(), &beginInfo); XR_FAILED(begin)) {
+					// READY doesn't come again: without a running session the game is told to quit
+					OOVR_LOGF("xrBeginSession failed: %d", (int)begin);
+					OnSessionLost();
+					break;
+				}
 				sessionActive = true;
+				frameAwaitingBegin = false;
+				frameCallFailures = 0;
 				break;
 			}
 			case XR_SESSION_STATE_STOPPING: {
 				// End the session. The session is still valid and we can still query some information
 				// from it, but we're not allowed to submit frames anymore. This is done when the engagement
 				// sensor detects the user has taken off the headset, for example.
-				if (sessionActive) // could be the case if we missed XR_SESSION_STATE_READY for some reason
-					OOVR_FAILED_XR_ABORT(xrEndSession(xr_session.get()));
+				if (sessionActive && XR_FAILED(xrEndSession(xr_session.get()))) // could be inactive if we missed XR_SESSION_STATE_READY
+					OOVR_LOG("xrEndSession failed");
 				sessionActive = false;
 				renderingFrame = false;
 				break;
 			}
 			case XR_SESSION_STATE_EXITING: {
 				OOVR_LOGF("Exiting");
+				// The runtime ending the session (the user quitting from its menu, say) is the game's cue to quit;
+				// OpenComposite ending it itself isn't
+				if (!exitExpected)
+					OnSessionLost();
 				break;
 			}
 			case XR_SESSION_STATE_LOSS_PENDING: {
 				// If the headset is unplugged or the user decides to exit the app
 				// TODO just kill the app after awhile, unless it sends a message to stop that - read the OpenVR wiki docs for more info
-				VREvent_t quit = { VREvent_Quit };
-				auto system = GetBaseSystem();
-				if (system)
-					system->_EnqueueEvent(quit);
+				OnSessionLost();
 				break;
 			}
 			default:
@@ -957,26 +1044,55 @@ void XrBackend::PumpEvents()
 	   session when we can't even receive input anyway, as well as before the session is restarted for
 	   the temporary session.
    */
+	// Not while a session is being ended (ShutdownSession pumps events while it waits, maybe under the input restart)
 	BaseInput* input = GetUnsafeBaseInput();
-	if (input && !input->AreActionsLoaded() && sessionState == XR_SESSION_STATE_FOCUSED && !hand_left && !hand_right) {
+	if (input && !exitExpected && !input->AreActionsLoaded() && sessionState == XR_SESSION_STATE_FOCUSED && !hand_left && !hand_right) {
 		QueryForInteractionProfile();
 	}
 }
 
+void XrBackend::OnFrameCallFailed(XrResult res)
+{
+	renderingFrame = false;
+	if (res == XR_ERROR_SESSION_LOST || res == XR_ERROR_INSTANCE_LOST || ++frameCallFailures >= 5)
+		OnSessionLost();
+	// No waited frame to pace the game: about one frame's wait instead of a busy loop
+	std::this_thread::sleep_for(std::chrono::milliseconds(11));
+}
+
+void XrBackend::OnSessionLost()
+{
+	sessionActive = false;
+	renderingFrame = false;
+	if (sessionLost)
+		return;
+	sessionLost = true;
+	OOVR_LOG("The OpenXR session is lost: telling the game to quit");
+	VREvent_t quit = { VREvent_Quit };
+	auto system = GetBaseSystem();
+	if (system)
+		system->_EnqueueEvent(quit);
+}
+
 void XrBackend::OnSessionCreated()
 {
+	sessionLost = false;
+	exitExpected = false;
 	// The gap from the old session's last frame isn't dropped frames
 	RestartFrameTiming();
 
 	sessionState = XR_SESSION_STATE_UNKNOWN;
 	sessionActive = false;
 	renderingFrame = false;
+	frameAwaitingBegin = false;
+	frameCallFailures = 0;
 
 	PumpEvents();
 
 	// Wait until we transition to the idle state.
 	// This sets the time, so OpenXR calls which use that will work correctly.
-	while (sessionState == XR_SESSION_STATE_UNKNOWN) {
+	int count = 0;
+	while (sessionState == XR_SESSION_STATE_UNKNOWN && !sessionLost && count++ < 10) {
 		const int durationMs = 250;
 
 		OOVR_LOGF("No session transition yet received, waiting %dms ...", durationMs);
@@ -990,6 +1106,12 @@ void XrBackend::OnSessionCreated()
 
 		PumpEvents();
 	}
+	if (sessionState == XR_SESSION_STATE_UNKNOWN && !sessionLost)
+		OOVR_LOG("No session transition received yet: carrying on, later PumpEvents calls take the session's states");
+	if (sessionLost) {
+		// OnSessionLost has told the game to quit
+		return;
+	}
 }
 
 void XrBackend::PrepareForSessionShutdown()
@@ -1000,7 +1122,7 @@ void XrBackend::PrepareForSessionShutdown()
 	skybox_compositor.reset();
 	overlay_compositors.clear();
 	if (infoSet != XR_NULL_HANDLE) {
-		OOVR_FAILED_XR_ABORT(xrDestroyActionSet(infoSet));
+		OC_XR_LOG(xrDestroyActionSet(infoSet));
 		infoSet = XR_NULL_HANDLE;
 		infoAction = XR_NULL_HANDLE;
 	}
@@ -1039,6 +1161,8 @@ void XrBackend::UnregisterOverlayCompositor(std::shared_ptr<Compositor> composit
 
 void XrBackend::UpdateInteractionProfile()
 {
+	if (sessionLost || !xr_session.get())
+		return; // the controllers stay as they were
 	struct hand_info {
 		const char* pathstr;
 		std::shared_ptr<XrController>& controller;
@@ -1052,15 +1176,16 @@ void XrBackend::UpdateInteractionProfile()
 
 	for (hand_info& info : hands) {
 		XrInteractionProfileState state{ XR_TYPE_INTERACTION_PROFILE_STATE };
-		XrPath path;
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, info.pathstr, &path));
-		OOVR_FAILED_XR_ABORT(xrGetCurrentInteractionProfile(xr_session.get(), path, &state));
+		XrPath path = XR_NULL_PATH;
+		OC_XR_LOG(xrStringToPath(xr_instance, info.pathstr, &path));
+		// On failure state.interactionProfile stays XR_NULL_PATH: no controller for this hand yet
+		OC_XR_LOG(xrGetCurrentInteractionProfile(xr_session.get(), path, &state));
 
 		// interaction profile detected
 		if (state.interactionProfile != XR_NULL_PATH) {
-			uint32_t tmp;
-			char path_name[XR_MAX_PATH_LENGTH];
-			OOVR_FAILED_XR_ABORT(xrPathToString(xr_instance, state.interactionProfile, XR_MAX_PATH_LENGTH, &tmp, path_name));
+			uint32_t tmp = 0;
+			char path_name[XR_MAX_PATH_LENGTH] = {};
+			OC_XR_LOG(xrPathToString(xr_instance, state.interactionProfile, XR_MAX_PATH_LENGTH, &tmp, path_name));
 
 			for (const std::unique_ptr<InteractionProfile>& profile : InteractionProfile::GetProfileList()) {
 				if (profile->GetPath() == path_name) {
@@ -1084,8 +1209,8 @@ void XrBackend::UpdateInteractionProfile()
 				}
 			}
 			if (!hand_left && !hand_right) {
-				// Runtime returned an unknown interaction profile!
-				OOVR_ABORTF("Runtime unexpectedly returned an unknown interaction profile: %s", path_name);
+				// Runtime returned an unknown interaction profile: no controller until it gives one we know
+				OOVR_LOGF("Runtime unexpectedly returned an unknown interaction profile: %s", path_name);
 			}
 		} else {
 			// interaction profile lost/not detected
@@ -1138,8 +1263,17 @@ void XrBackend::CreateGenericTrackers()
 		.type = XR_TYPE_GET_XDEV_INFO_MNDX,
 	};
 
-	OOVR_FAILED_XR_ABORT(xr_ext->xrCreateXDevListMNDX(xr_session.get(), &create_info, &generic_tracker_list));
-	OOVR_FAILED_XR_ABORT(xr_ext->xrEnumerateXDevsMNDX(generic_tracker_list, MAX_GENERIC_TRACKERS, &xdev_count, generic_tracker_ids.data()));
+	// No generic trackers if the runtime can't list them
+	if (XR_FAILED(xr_ext->xrCreateXDevListMNDX(xr_session.get(), &create_info, &generic_tracker_list))) {
+		OOVR_LOG("xrCreateXDevListMNDX failed: no generic trackers");
+		generic_tracker_list = XR_NULL_HANDLE;
+		return;
+	}
+	if (XR_FAILED(xr_ext->xrEnumerateXDevsMNDX(generic_tracker_list, MAX_GENERIC_TRACKERS, &xdev_count, generic_tracker_ids.data()))) {
+		OOVR_LOG("xrEnumerateXDevsMNDX failed: no generic trackers");
+		xr_ext->xrDestroyXDevListMNDX(generic_tracker_list);
+		return;
+	}
 
 	std::vector<std::string> forced_tracker_serials{};
 	{
@@ -1164,7 +1298,7 @@ void XrBackend::CreateGenericTrackers()
 		}
 		cur_info.id = id;
 
-		OOVR_FAILED_XR_ABORT(xr_ext->xrGetXDevPropertiesMNDX(generic_tracker_list, &cur_info, &cur_properties));
+		OC_XR_LOG(xr_ext->xrGetXDevPropertiesMNDX(generic_tracker_list, &cur_info, &cur_properties));
 
 		xdev_count--;
 
@@ -1195,7 +1329,7 @@ void XrBackend::CreateGenericTrackers()
 
 		cur_info.id = id;
 
-		OOVR_FAILED_XR_ABORT(xr_ext->xrGetXDevPropertiesMNDX(generic_tracker_list, &cur_info, &cur_properties));
+		OC_XR_LOG(xr_ext->xrGetXDevPropertiesMNDX(generic_tracker_list, &cur_info, &cur_properties));
 
 		std::string serial = cur_properties.serial;
 		std::string name = cur_properties.name;
@@ -1203,7 +1337,7 @@ void XrBackend::CreateGenericTrackers()
 		OOVR_LOGF("Generic Tracker: %s, Serial: %s, Index: %d, ID: %" PRIu64, cur_properties.name, cur_properties.serial, index, id);
 
 		// create space
-		XrSpace space;
+		XrSpace space = XR_NULL_HANDLE;
 		XrPosef pose = { .orientation = { 0, 0, 0, 1 }, .position = { 0, 0, 0 } };
 		XrCreateXDevSpaceInfoMNDX create_space_info = {
 			.type = XR_TYPE_CREATE_XDEV_SPACE_INFO_MNDX,
@@ -1213,7 +1347,10 @@ void XrBackend::CreateGenericTrackers()
 			.offset = pose,
 		};
 
-		OOVR_FAILED_XR_ABORT(xr_ext->xrCreateXDevSpaceMNDX(xr_session.get(), &create_space_info, &space));
+		if (XR_FAILED(xr_ext->xrCreateXDevSpaceMNDX(xr_session.get(), &create_space_info, &space))) {
+			OOVR_LOGF("xrCreateXDevSpaceMNDX failed: no tracker for serial %s", cur_properties.serial);
+			continue;
+		}
 
 		generic_trackers.push_back(std::make_unique<XrGenericTracker>(*profile, cur_properties, index, space));
 
@@ -1250,8 +1387,8 @@ void XrBackend::QueryForInteractionProfile()
 	// and then we'd have to recreate the session twice, once for the input state and once for when the game submits a frame
 	const std::lock_guard<std::mutex> lock(inputRestartMutex);
 	if (subactionPaths[0] == XR_NULL_PATH) {
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, "/user/hand/left", &subactionPaths[0]));
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, "/user/hand/right", &subactionPaths[1]));
+		OC_XR_LOG(xrStringToPath(xr_instance, "/user/hand/left", &subactionPaths[0]));
+		OC_XR_LOG(xrStringToPath(xr_instance, "/user/hand/right", &subactionPaths[1]));
 	}
 
 	if (infoSet == XR_NULL_HANDLE) {
@@ -1270,7 +1407,7 @@ void XrBackend::QueryForInteractionProfile()
 	info.countActiveActionSets = 2;
 	info.activeActionSets = active;
 
-	OOVR_FAILED_XR_ABORT(xrSyncActions(xr_session.get(), &info));
+	OC_XR_LOG(xrSyncActions(xr_session.get(), &info));
 }
 
 void XrBackend::CreateInfoSet()
@@ -1278,7 +1415,7 @@ void XrBackend::CreateInfoSet()
 	XrActionSetCreateInfo set_info{ XR_TYPE_ACTION_SET_CREATE_INFO };
 	strcpy_s(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "opencomposite-internal-info-set");
 	strcpy_s(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "OpenComposite internal info set");
-	OOVR_FAILED_XR_ABORT(xrCreateActionSet(xr_instance, &set_info, &infoSet));
+	OC_XR_LOG(xrCreateActionSet(xr_instance, &set_info, &infoSet));
 
 	XrActionCreateInfo act_info{ XR_TYPE_ACTION_CREATE_INFO };
 	strcpy_s(act_info.actionName, XR_MAX_ACTION_NAME_SIZE, "opencomposite-internal-info-act");
@@ -1286,14 +1423,14 @@ void XrBackend::CreateInfoSet()
 	act_info.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
 	act_info.countSubactionPaths = std::size(subactionPaths);
 	act_info.subactionPaths = subactionPaths;
-	OOVR_FAILED_XR_ABORT(xrCreateAction(infoSet, &act_info, &infoAction));
+	OC_XR_LOG(xrCreateAction(infoSet, &act_info, &infoAction));
 }
 
 void XrBackend::BindInfoSet()
 {
 	for (const std::unique_ptr<InteractionProfile>& profile : InteractionProfile::GetProfileList()) {
-		XrPath interactionProfilePath;
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, profile->GetPath().c_str(), &interactionProfilePath));
+		XrPath interactionProfilePath = XR_NULL_PATH;
+		OC_XR_LOG(xrStringToPath(xr_instance, profile->GetPath().c_str(), &interactionProfilePath));
 
 		if (!profile->CanHaveBindings())
 			continue;
@@ -1308,15 +1445,15 @@ void XrBackend::BindInfoSet()
 			    [&path_name](std::string s) -> bool {
 				    return s.find("/click") != s.npos && s.find(path_name) != s.npos;
 			    });
-			XrPath path;
-			OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, click_path->c_str(), &path));
+			XrPath path = XR_NULL_PATH;
+			OC_XR_LOG(xrStringToPath(xr_instance, click_path->c_str(), &path));
 			bindings.push_back({ .action = infoAction, .binding = path });
 
 			suggestedBindings.interactionProfile = interactionProfilePath;
 			suggestedBindings.suggestedBindings = bindings.data();
 			suggestedBindings.countSuggestedBindings = bindings.size();
 
-			OOVR_FAILED_XR_ABORT(xrSuggestInteractionProfileBindings(xr_instance, &suggestedBindings));
+			OC_XR_LOG(xrSuggestInteractionProfileBindings(xr_instance, &suggestedBindings));
 		}
 	}
 
@@ -1324,7 +1461,7 @@ void XrBackend::BindInfoSet()
 	XrSessionActionSetsAttachInfo info{ XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
 	info.countActionSets = 1;
 	info.actionSets = &infoSet;
-	OOVR_FAILED_XR_ABORT(xrAttachSessionActionSets(xr_session.get(), &info));
+	OC_XR_LOG(xrAttachSessionActionSets(xr_session.get(), &info));
 }
 
 const void* XrBackend::GetCurrentGraphicsBinding()
@@ -1332,7 +1469,9 @@ const void* XrBackend::GetCurrentGraphicsBinding()
 	if (graphicsBinding) {
 		return graphicsBinding->asVoid();
 	}
-	OOVR_FALSE_ABORT(temporaryGraphics);
+	// nullptr (xrCreateSession then fails, which its caller handles) if there's no graphics API at all
+	if (!temporaryGraphics)
+		return nullptr;
 	return temporaryGraphics->GetGraphicsBinding();
 }
 

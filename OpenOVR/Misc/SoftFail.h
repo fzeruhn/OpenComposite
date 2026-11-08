@@ -113,4 +113,15 @@ void oc_soft_set_stop_for_tests(int value);
 		}                                                                                                     \
 	} while (0)
 
+// An OpenXR call whose failure only leaves something out (an action, a path, a binding, one frame's input): logged
+// on the first failure here and counted, and the code goes on with what the call would have filled still empty
+#define OC_XR_LOG(expr)                                                                                       \
+	do {                                                                                                      \
+		XrResult oc_xr_soft_result_ = (expr);                                                                 \
+		if (XR_FAILED(oc_xr_soft_result_)) {                                                                  \
+			OC_SOFT_SITE_;                                                                                    \
+			oc_soft_fail(&oc_soft_site_, "OpenXR call failed (%d): %s", (int)oc_xr_soft_result_, #expr);   \
+		}                                                                                                     \
+	} while (0)
+
 #define OC_FATAL(msg) OOVR_ABORT(msg)

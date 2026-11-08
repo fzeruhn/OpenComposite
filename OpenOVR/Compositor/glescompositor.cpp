@@ -14,12 +14,14 @@ GLESCompositor::GLESCompositor() = default;
 void GLESCompositor::ReadSwapchainImages()
 {
 	// Enumerate all the swapchain images
-	uint32_t imageCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr));
-	auto handles = std::vector<XrSwapchainImageOpenGLESKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR });
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()));
-
+	uint32_t imageCount = 0;
 	images.clear();
+	if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr), "xrEnumerateSwapchainImages"))
+		return;
+	auto handles = std::vector<XrSwapchainImageOpenGLESKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR });
+	if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()), "xrEnumerateSwapchainImages"))
+		return;
+
 	for (const XrSwapchainImageOpenGLESKHR& img : handles) {
 		images.push_back(img.image);
 	}

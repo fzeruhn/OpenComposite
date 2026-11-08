@@ -35,14 +35,23 @@ static void parseExtensionsStr(std::string extensionsStr, std::vector<std::strin
 TemporaryVk::TemporaryVk()
 {
 	// Call because we have to, TODO check we have a supported Vulkan version
+	// Any failure leaves usable false (logged), and XrBackend falls back to D3D11
+#define TMPVK_XR(expr)                                                     \
+	do {                                                                   \
+		XrResult r_ = (expr);                                              \
+		if (XR_FAILED(r_)) {                                               \
+			OOVR_LOGF("Temporary Vulkan device: %s failed: %d", #expr, (int)r_); \
+			return;                                                        \
+		}                                                                  \
+	} while (0)
 	XrGraphicsRequirementsVulkanKHR req = { XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR };
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanGraphicsRequirementsKHR(xr_instance, xr_system, &req));
+	TMPVK_XR(xr_ext->xrGetVulkanGraphicsRequirementsKHR(xr_instance, xr_system, &req));
 
 	// Create a Vulkan instance that the runtime will find suitable
 	VkInstanceCreateInfo createInfo{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
 
-	uint32_t extCap;
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanInstanceExtensionsKHR(xr_instance, xr_system, 0, &extCap, nullptr));
+	uint32_t extCap = 0;
+	TMPVK_XR(xr_ext->xrGetVulkanInstanceExtensionsKHR(xr_instance, xr_system, 0, &extCap, nullptr));
 
 	std::vector<std::string> instanceExtensionsStore;
 	std::vector<const char*> instanceExtensionsCstr;
@@ -51,7 +60,7 @@ TemporaryVk::TemporaryVk()
 	if (extCap > 1) {
 		std::string xrInstanceExtensions;
 		xrInstanceExtensions.resize(extCap, 0);
-		OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanInstanceExtensionsKHR(xr_instance, xr_system, xrInstanceExtensions.size(), &extCap, (char*)xrInstanceExtensions.data()));
+		TMPVK_XR(xr_ext->xrGetVulkanInstanceExtensionsKHR(xr_instance, xr_system, xrInstanceExtensions.size(), &extCap, (char*)xrInstanceExtensions.data()));
 
 		parseExtensionsStr(xrInstanceExtensions, instanceExtensionsStore, instanceExtensionsCstr);
 
@@ -60,10 +69,14 @@ TemporaryVk::TemporaryVk()
 		// Don't use any layers here
 	}
 
-	OOVR_FAILED_VK_ABORT(vkCreateInstance(&createInfo, nullptr, &instance));
+	if (VkResult vr_ = vkCreateInstance(&createInfo, nullptr, &instance); vr_ != VK_SUCCESS) {
+		OOVR_LOGF("Temporary Vulkan device: vkCreateInstance failed: %d", (int)vr_);
+		instance = VK_NULL_HANDLE;
+		return;
+	}
 
 	// Find the physical device we're supposed to use
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanGraphicsDeviceKHR(xr_instance, xr_system, instance, &physicalDevice));
+	TMPVK_XR(xr_ext->xrGetVulkanGraphicsDeviceKHR(xr_instance, xr_system, instance, &physicalDevice));
 
 	// Find a suitable queue type on that device
 	uint32_t queueFamilyCount = 0;
@@ -71,7 +84,10 @@ TemporaryVk::TemporaryVk()
 	std::vector<VkQueueFamilyProperties> queueFamilyProps(queueFamilyCount);
 	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProps.data());
 
-	OOVR_FALSE_ABORT(queueFamilyCount > 0); // Just use the first queue type
+	if (queueFamilyCount == 0) { // Just use the first queue type
+		OOVR_LOG("Temporary Vulkan device: the physical device has no queue families");
+		return;
+	}
 	int queueFamilyIdx = 0;
 
 	// Prepare the queue creation info
@@ -87,11 +103,11 @@ TemporaryVk::TemporaryVk()
 	std::vector<std::string> deviceExtensionsStore;
 	std::vector<const char*> deviceExtensionsCstr;
 
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanDeviceExtensionsKHR(xr_instance, xr_system, 0, &extCap, nullptr));
+	TMPVK_XR(xr_ext->xrGetVulkanDeviceExtensionsKHR(xr_instance, xr_system, 0, &extCap, nullptr));
 	if (extCap > 1) {
 		std::string deviceExtensionsStr;
 		deviceExtensionsStr.resize(extCap, 0);
-		OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanDeviceExtensionsKHR(xr_instance, xr_system, deviceExtensionsStr.size(), &extCap, (char*)deviceExtensionsStr.data()));
+		TMPVK_XR(xr_ext->xrGetVulkanDeviceExtensionsKHR(xr_instance, xr_system, deviceExtensionsStr.size(), &extCap, (char*)deviceExtensionsStr.data()));
 		parseExtensionsStr(deviceExtensionsStr, deviceExtensionsStore, deviceExtensionsCstr);
 	}
 
@@ -128,7 +144,12 @@ TemporaryVk::TemporaryVk()
 	devCreateInfo.queueCreateInfoCount = 1;
 	devCreateInfo.pQueueCreateInfos = &queueInfo;
 
-	OOVR_FAILED_VK_ABORT(vkCreateDevice(physicalDevice, &devCreateInfo, nullptr, &device));
+	if (VkResult vr_ = vkCreateDevice(physicalDevice, &devCreateInfo, nullptr, &device); vr_ != VK_SUCCESS) {
+		OOVR_LOGF("Temporary Vulkan device: vkCreateDevice failed: %d", (int)vr_);
+		device = VK_NULL_HANDLE;
+		return;
+	}
+#undef TMPVK_XR
 
 	// Setup our graphics binding
 	binding = XrGraphicsBindingVulkanKHR{ XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR };
@@ -137,6 +158,7 @@ TemporaryVk::TemporaryVk()
 	binding.device = device;
 	binding.queueFamilyIndex = queueFamilyIdx;
 	binding.queueIndex = 0;
+	usable = true;
 
 	// Get the queue for later potential use by the VkCompositor
 	vkGetDeviceQueue(device, queueFamilyIdx, 0, &queue);
@@ -144,10 +166,12 @@ TemporaryVk::TemporaryVk()
 
 TemporaryVk::~TemporaryVk()
 {
-	vkDestroyDevice(device, nullptr);
+	if (device)
+		vkDestroyDevice(device, nullptr);
 	device = nullptr;
 
-	vkDestroyInstance(instance, nullptr);
+	if (instance)
+		vkDestroyInstance(instance, nullptr);
 	instance = nullptr;
 }
 

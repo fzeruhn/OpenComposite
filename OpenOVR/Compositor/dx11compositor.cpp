@@ -209,7 +209,7 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 
 		// First, delete the old chain if necessary
 		if (chain) {
-			OOVR_FAILED_XR_ABORT(xrDestroySwapchain(chain));
+			xrDestroySwapchain(chain);
 			chain = XR_NULL_HANDLE;
 		}
 
@@ -264,20 +264,29 @@ void DX11Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		desc.arraySize = 1;
 		desc.usageFlags = XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
 
-		XrResult result = xrCreateSwapchain(xr_session.get(), &desc, &chain);
-		if (!XR_SUCCEEDED(result))
-			OOVR_ABORTF("Cannot create DX texture swap chain: err %d", result);
+		if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &desc, &chain), "xrCreateSwapchain")) {
+			chain = XR_NULL_HANDLE; // tried again at the next Submit
+			return;
+		}
 
 		// Go through the images and retrieve them - this will be used later in Invoke, since OpenXR doesn't
 		// have a convenient way to request one specific image.
-		uint32_t imageCount;
-		OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr));
+		uint32_t imageCount = 0;
+		if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr), "xrEnumerateSwapchainImages")) {
+			xrDestroySwapchain(chain);
+			chain = XR_NULL_HANDLE;
+			return;
+		}
 
 		imagesHandles = std::vector<XrSwapchainImageD3D11KHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR });
-		OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain,
-		    imagesHandles.size(), &imageCount, (XrSwapchainImageBaseHeader*)imagesHandles.data()));
-
-		OOVR_FALSE_ABORT(imageCount == imagesHandles.size());
+		if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, imagesHandles.size(), &imageCount, (XrSwapchainImageBaseHeader*)imagesHandles.data()), "xrEnumerateSwapchainImages")
+		    || imageCount != imagesHandles.size()) {
+			lastResult = XR_FAILED(lastResult) ? lastResult : XR_ERROR_RUNTIME_FAILURE;
+			imagesHandles.clear();
+			xrDestroySwapchain(chain);
+			chain = XR_NULL_HANDLE;
+			return;
+		}
 
 		swapchain_rtvs.resize(imageCount, nullptr);
 
@@ -327,18 +336,21 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	src->GetDesc(&srcDesc);
 	if (srcDesc.Format == DXGI_FORMAT_BC1_TYPELESS) {
 		if (chain) {
-			OOVR_FAILED_XR_ABORT(xrDestroySwapchain(chain));
+			xrDestroySwapchain(chain);
 			chain = XR_NULL_HANDLE;
 		}
 		return;
 	}
 
 	CheckCreateSwapChain(texture, bounds, false);
+	if (!chain || XR_FAILED(lastResult))
+		return;
 
 	// First reserve an image from the swapchain
 	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
 	uint32_t currentIndex = 0;
-	OOVR_FAILED_XR_ABORT(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex));
+	if (SwapchainCallFailed(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex), "xrAcquireSwapchainImage"))
+		return;
 
 	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
 	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
@@ -346,11 +358,12 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	// XR_TIMEOUT_EXPIRED is considered successful but swapchain still can't be used so need to handle that
 	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
 	waitInfo.timeout = 500000000; // time out in nano seconds - 500ms
-	XrResult res;
-	OOVR_FAILED_XR_ABORT(res = xrWaitSwapchainImage(chain, &waitInfo));
-
-	if (res == XR_TIMEOUT_EXPIRED)
-		OOVR_ABORTF("xrWaitSwapchainImage timeout");
+	if (SwapchainCallFailed(xrWaitSwapchainImage(chain, &waitInfo), "xrWaitSwapchainImage"))
+		return;
+	if (currentIndex >= imagesHandles.size()) {
+		lastResult = XR_ERROR_RUNTIME_FAILURE;
+		return;
+	}
 
 	// Copy the source to the destination image
 	D3D11_BOX sourceRegion;
@@ -468,7 +481,7 @@ void DX11Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 
 	// Release the swapchain - OpenXR will use the last-released image in a swapchain
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-	OOVR_FAILED_XR_ABORT(xrReleaseSwapchainImage(chain, &releaseInfo));
+	SwapchainCallFailed(xrReleaseSwapchainImage(chain, &releaseInfo), "xrReleaseSwapchainImage");
 }
 
 void DX11Compositor::InvokeCubemap(const vr::Texture_t* textures)

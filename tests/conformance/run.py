@@ -101,12 +101,13 @@ class Runner:
             subprocess.run(["reg", "add", r"HKLM\SOFTWARE\Khronos\OpenXR\1", "/v", "ActiveRuntime", "/t", "REG_SZ",
                             "/d", self.manifest, "/f"], check=True, capture_output=True)
 
-    def child(self, extra, raw, timeout=TIMEOUT):
+    def child(self, extra, raw, timeout=TIMEOUT, env_extra=None):
         cmd = [self.conformance, "--runtime", self.runtime, "--out", str(raw)] + extra
         if self.args.real_runtime:
             cmd.append("--real-runtime")
         env = dict(os.environ)
         env.update(self.env)
+        env.update(env_extra or {})
         if unelevated.integrity_above_medium() and not self.args.ci:
             return unelevated.run_medium(cmd, env, None, timeout)
         try:
@@ -171,7 +172,10 @@ class Runner:
         extra = ["--case", name]
         if self.args.manifest:
             extra += ["--manifest", str(Path(self.args.manifest).resolve())]
-        code = self.child(extra, raw, CASE_TIMEOUT)
+        # The stand-in runtime's dump of what it was asked (frames ended and so on), for xr_failures.py
+        dump = self.out / "raw" / f"case-{name}.dump.json"
+        dump.unlink(missing_ok=True)
+        code = self.child(extra, raw, CASE_TIMEOUT, {"OC_TEST_RUNTIME_DUMP": str(dump)})
         records = read_jsonl(raw)
         for r in records:
             r["status"] = "ok"

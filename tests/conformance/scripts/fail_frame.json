@@ -1,0 +1,1 @@
+{ "#": "xrEndFrame fails once, at frame 30: that frame is dropped and the rest go on", "fail": [{ "function": "xrEndFrame", "result": "XR_ERROR_RUNTIME_FAILURE", "after": 29, "count": 1 }] }

@@ -1,0 +1,1 @@
+{ "#": "The session is being lost at frame 60: one VREvent_Quit, then everything fails softly", "events": [{ "frame": 60, "type": "session_state", "state": "LOSS_PENDING" }] }

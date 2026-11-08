@@ -69,12 +69,14 @@ GLCompositor::GLCompositor(GLuint initialTexture)
 void GLCompositor::ReadSwapchainImages()
 {
 	// Enumerate all the swapchain images
-	uint32_t imageCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr));
-	auto handles = std::vector<XrSwapchainImageOpenGLKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()));
-
+	uint32_t imageCount = 0;
 	images.clear();
+	if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr), "xrEnumerateSwapchainImages"))
+		return;
+	auto handles = std::vector<XrSwapchainImageOpenGLKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
+	if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()), "xrEnumerateSwapchainImages"))
+		return;
+
 	for (const XrSwapchainImageOpenGLKHR& img : handles) {
 		images.push_back(img.image);
 	}
@@ -110,12 +112,15 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 	bool useBlit = submitVerticallyFlipped;
 
 	CheckCreateSwapChain(viewport.extent.width, viewport.extent.height, texture->eColorSpace, rawFormat);
+	if (!chain || XR_FAILED(lastResult) || images.empty())
+		return;
 	useBlit = useBlit || createInfo.format != createInfoFormat;
 
 	// First reserve an image from the swapchain
 	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
 	uint32_t currentIndex = 0;
-	OOVR_FAILED_XR_ABORT(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex));
+	if (SwapchainCallFailed(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex), "xrAcquireSwapchainImage") || currentIndex >= images.size())
+		return;
 
 	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
 	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
@@ -127,8 +132,10 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 	// TODO make this stuff common across compositors, so this logic applies to all of them.
 	XrResult res;
 	do {
-		OOVR_FAILED_XR_ABORT(res = xrWaitSwapchainImage(chain, &waitInfo));
+		res = xrWaitSwapchainImage(chain, &waitInfo);
 	} while (res == XR_TIMEOUT_EXPIRED);
+	if (SwapchainCallFailed(res, "xrWaitSwapchainImage"))
+		return;
 
 	// Actually copy the image across
 	GLuint dst = images.at(currentIndex);
@@ -167,7 +174,7 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 
 	// Release the swapchain - OpenXR will use the last-released image in a swapchain
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-	OOVR_FAILED_XR_ABORT(xrReleaseSwapchainImage(chain, &releaseInfo));
+	SwapchainCallFailed(xrReleaseSwapchainImage(chain, &releaseInfo), "xrReleaseSwapchainImage");
 }
 
 void GLBaseCompositor::InvokeCubemap(const vr::Texture_t* textures)
@@ -206,10 +213,12 @@ void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpa
 	OOVR_LOGF("Creating new OpenGL swapchain: %dx%d with format %d", width, height, format);
 
 	// Make sure our format is supported
-	uint32_t formatCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainFormats(xr_session.get(), 0, &formatCount, nullptr));
+	uint32_t formatCount = 0;
+	if (SwapchainCallFailed(xrEnumerateSwapchainFormats(xr_session.get(), 0, &formatCount, nullptr), "xrEnumerateSwapchainFormats"))
+		return;
 	std::vector<int64_t> formats(formatCount);
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainFormats(xr_session.get(), formatCount, &formatCount, formats.data()));
+	if (SwapchainCallFailed(xrEnumerateSwapchainFormats(xr_session.get(), formatCount, &formatCount, formats.data()), "xrEnumerateSwapchainFormats"))
+		return;
 
 	if (std::count(formats.begin(), formats.end(), format) == 0) {
 		OOVR_LOG("Missing format for swapchain creation, using fallback. Valid formats:");
@@ -224,14 +233,18 @@ void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpa
 
 	// Delete the old swapchain, if applicable
 	if (chain) {
-		OOVR_FAILED_XR_ABORT(xrDestroySwapchain(chain));
+		xrDestroySwapchain(chain);
 		chain = XR_NULL_HANDLE;
 	}
 
 	// Create the new one
 	createInfo = desc;
 
-	OOVR_FAILED_XR_ABORT(xrCreateSwapchain(xr_session.get(), &desc, &chain));
+	if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &desc, &chain), "xrCreateSwapchain")) {
+		chain = XR_NULL_HANDLE; // tried again at the next Submit
+		createInfo = {};
+		return;
+	}
 
 	// Enumerate all the swapchain images
 	ReadSwapchainImages();

@@ -325,10 +325,11 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 	running = true;
 
 	// TODO seperate this from the rest of dllmain
-	IBackend* backend = DrvOpenXR::CreateOpenXRBackend(pStartupInfo);
+	EVRInitError backendError = VRInitError_None;
+	IBackend* backend = DrvOpenXR::CreateOpenXRBackend(pStartupInfo, &backendError);
 	if (!backend) {
 		if (peError)
-			*peError = VRInitError_Init_Internal;
+			*peError = backendError != VRInitError_None ? backendError : VRInitError_Init_Internal;
 		running = false;
 		running_ovr = false;
 		BaseClientCore::appType = utility_init ? VRApplication_Utility : VRApplication_Max;
@@ -349,7 +350,8 @@ VR_INTERFACE bool VR_CALLTYPE VR_IsHmdPresent()
 		return true;
 
 	// At this point, we should NOT be running OpenXR, so setup a new session just for this
-	OOVR_FALSE_ABORT(xr_instance == XR_NULL_HANDLE);
+	if (xr_instance != XR_NULL_HANDLE)
+		return true; // an instance from an earlier Init is still up: it found a headset then
 
 	// FIXME copied from DrvOpenXR
 	XrApplicationInfo appInfo{};
@@ -369,16 +371,15 @@ VR_INTERFACE bool VR_CALLTYPE VR_IsHmdPresent()
 	XrSystemId id;
 	XrResult res = xrGetSystem(tmp_instance, &systemInfo, &id);
 
-	OOVR_FAILED_XR_ABORT(xrDestroyInstance(tmp_instance));
+	xrDestroyInstance(tmp_instance);
 
 	if (res == XR_SUCCESS)
 		return true;
 
-	if (res == XR_ERROR_FORM_FACTOR_UNAVAILABLE || res == XR_ERROR_FORM_FACTOR_UNSUPPORTED)
-		return false;
-
-	// Something else went wrong
-	OOVR_ABORTF("Failed to probe for OpenXR systems: return status %d", res);
+	// FORM_FACTOR_UNAVAILABLE (no headset plugged in) and anything else: no headset to start (upstream #467)
+	if (res != XR_ERROR_FORM_FACTOR_UNAVAILABLE && res != XR_ERROR_FORM_FACTOR_UNSUPPORTED)
+		OOVR_LOGF("Failed to probe for OpenXR systems: return status %d", res);
+	return false;
 }
 
 // Necessary for Proton games on Linux: https://github.com/ValveSoftware/Proton/blob/22f40122788d5f65389f59144705309ce9d6d403/vrclient_x64/vrclient_x64/vrclient_main.c#L267

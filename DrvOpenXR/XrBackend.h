@@ -38,11 +38,26 @@ public:
 	 * we call xrEndSession.
 	 */
 	bool sessionActive = false;
+	bool sessionLost = false;
+	bool exitExpected = false;
 
 	/**
 	 * To be called after xrCreateSession. Should only be used by DrvOpenXR.
 	 */
 	void OnSessionCreated();
+
+	/**
+	 * The session is gone or going (LOSS_PENDING, an EXITING OpenComposite didn't ask for, or a session restart
+	 * that failed): VREvent_Quit is queued once, and no more frames are begun. There's no reconnecting.
+	 */
+	void OnSessionLost();
+	bool IsSessionLost() const { return sessionLost; }
+
+	/** Called before OpenComposite asks the runtime to end the session itself, so its EXITING isn't a loss */
+	void ExpectSessionExit() { exitExpected = true; }
+
+	/** False if neither D3D11 nor Vulkan could start the session (CreateOpenXRBackend then gives up) */
+	bool HasTemporaryGraphics() const { return temporaryGraphics != nullptr; }
 
 	void PrepareForSessionShutdown();
 
@@ -109,6 +124,14 @@ private:
 
 	// Have we started rendering a frame yet? If not, calling xrEndFrame would result in an error
 	bool renderingFrame = false;
+
+	// A frame xrWaitFrame gave whose xrBeginFrame failed: the next frame begins it again instead of waiting, as a
+	// second xrWaitFrame blocks until xrBeginFrame is called. Repeated failures lose the session.
+	bool frameAwaitingBegin = false;
+	// Consecutive frames whose xrWaitFrame or xrBeginFrame failed
+	std::atomic<int> frameCallFailures{ 0 };
+	// Drops the frame, waits about a frame and, if the session is lost or five frames failed in a row, loses the session
+	void OnFrameCallFailed(XrResult res);
 
 	// Were we supposed to start rendering a frame, but couldn't since we were on the
 	// early (pre switch to application graphics instance) OpenXR session?

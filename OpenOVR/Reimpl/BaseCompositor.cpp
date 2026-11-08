@@ -245,6 +245,7 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 	}
 
 	bool isFirstEye = !leftEyeSubmitted && !rightEyeSubmitted;
+	ovr_enum_t result = VRCompositorError_None;
 
 	bool eyeState = false;
 	if (eye == Eye_Left)
@@ -277,7 +278,7 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 		// while they're in the middle of submitting a frame.
 		auto lock = xr_session.lock_shared();
 		if (!textureNull)
-			BackendManager::Instance().StoreEyeTexture(eye, texture, bounds, submitFlags, isFirstEye);
+			result = (ovr_enum_t)BackendManager::Instance().StoreEyeTexture(eye, texture, bounds, submitFlags, isFirstEye);
 
 		if (leftEyeSubmitted && rightEyeSubmitted) {
 			if (!isNullRender)
@@ -288,7 +289,7 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 		}
 	}
 
-	return VRCompositorError_None;
+	return result;
 }
 
 ovr_enum_t BaseCompositor::SubmitWithArrayIndex(vr::EVREye eye, const vr::Texture_t* texture, uint32_t idx, const vr::VRTextureBounds_t* bounds, vr::EVRSubmitFlags submitFlags)
@@ -314,6 +315,8 @@ void BaseCompositor::PostPresentHandoff()
 	// calls PostPresentHandOff to signal that all data is submitted and compositor can start work. Mimick this by
 	// calling SubmitFrames with a flag to say it is called from this function.
 
+	// As in Submit: the session isn't restarted while the frame is ended
+	auto lock = xr_session.lock_shared();
 	BackendManager::Instance().SubmitFrames(isInSkybox, true);
 }
 

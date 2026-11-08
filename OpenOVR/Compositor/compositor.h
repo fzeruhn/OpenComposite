@@ -32,6 +32,12 @@ public:
 
 	virtual XrSwapchain GetSwapChain() { return chain; };
 
+	/**
+	 * What the last Invoke ran into: XR_SUCCESS, or the OpenXR swapchain call that failed (that eye's image is then
+	 * left out of the frame, and Submit answers an error). The next Invoke tries again.
+	 */
+	XrResult LastResult() const { return lastResult; }
+
 	virtual XrExtent2Di GetSrcSize() { return { static_cast<int32_t>(createInfo.width), static_cast<int32_t>(createInfo.height) }; }
 	/**
 	 * Loads and unloads some context required for submitting textures to LibOVR. LoadSubmitContext is
@@ -43,6 +49,10 @@ public:
 
 protected:
 	virtual void CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds, std::optional<XruEye> eye, vr::EVRSubmitFlags submitFlags) = 0;
+
+	// For the compositors' OpenXR swapchain calls: true (with lastResult set, and the call logged once) if it failed
+	bool SwapchainCallFailed(XrResult res, const char* what);
+	XrResult lastResult = XR_SUCCESS;
 
 	XrSwapchain chain = XR_NULL_HANDLE;
 

@@ -346,8 +346,8 @@ BaseInput::BaseInput()
 {
 	// Initialise the subaction path constants
 	for (const std::string& str : allSubactionPathNames) {
-		XrPath path;
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, str.c_str(), &path));
+		XrPath path = XR_NULL_PATH;
+		OC_XR_LOG(xrStringToPath(xr_instance, str.c_str(), &path));
 		allSubactionPaths.push_back(path);
 		handInteractionProfiles.push_back(nullptr);
 	}
@@ -388,9 +388,9 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 
 		OOVR_LOG("Received another manifest! Restarting session to reattach inputs...");
 		for (std::unique_ptr<ActionSet>& as : actionSets.GetItems()) {
-			OOVR_FAILED_XR_ABORT(xrDestroyActionSet(as->xr));
+			OC_XR_LOG(xrDestroyActionSet(as->xr));
 		}
-		OOVR_FAILED_XR_ABORT(xrDestroyActionSet(legacyInputsSet));
+		OC_XR_LOG(xrDestroyActionSet(legacyInputsSet));
 		legacyInputsSet = XR_NULL_HANDLE;
 		actions.Reset();
 		actionSets.Reset();
@@ -579,7 +579,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		strcpy_arr(createInfo.actionSetName, safeName.c_str());
 		strcpy_arr(createInfo.localizedActionSetName, as->name.c_str()); // TODO localisation
 
-		OOVR_FAILED_XR_ABORT(xrCreateActionSet(xr_instance, &createInfo, &as->xr));
+		OC_XR_LOG(xrCreateActionSet(xr_instance, &createInfo, &as->xr));
 	}
 
 	for (const std::unique_ptr<Action>& act : actions.GetItems()) {
@@ -618,7 +618,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		info.subactionPaths = allSubactionPaths.data();
 		info.countSubactionPaths = allSubactionPaths.size();
 
-		OOVR_FAILED_XR_ABORT(xrCreateAction(act->set->xr, &info, &act->xr));
+		OC_XR_LOG(xrCreateAction(act->set->xr, &info, &act->xr));
 	}
 
 	CreateLegacyActions();
@@ -722,14 +722,14 @@ void BaseInput::LoadEmptyManifestIfRequired()
 		}
 
 		// Load the bindings into the runtime
-		XrPath interactionProfilePath;
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, profile->GetPath().c_str(), &interactionProfilePath));
+		XrPath interactionProfilePath = XR_NULL_PATH;
+		OC_XR_LOG(xrStringToPath(xr_instance, profile->GetPath().c_str(), &interactionProfilePath));
 		XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
 
 		suggestedBindings.interactionProfile = interactionProfilePath;
 		suggestedBindings.suggestedBindings = bindings.data();
 		suggestedBindings.countSuggestedBindings = bindings.size();
-		OOVR_FAILED_XR_ABORT(xrSuggestInteractionProfileBindings(xr_instance, &suggestedBindings));
+		OC_XR_LOG(xrSuggestInteractionProfileBindings(xr_instance, &suggestedBindings));
 	}
 
 	// Attach everything to the current session
@@ -763,9 +763,9 @@ void BaseInput::BindInputsForSession()
 		XrActionSpaceCreateInfo info = { XR_TYPE_ACTION_SPACE_CREATE_INFO };
 		info.poseInActionSpace = S2O_om34_pose(G2S_m34(glm::identity<glm::mat4>()));
 		info.action = lca.gripPoseAction;
-		OOVR_FAILED_XR_ABORT(xrCreateActionSpace(xr_session.get(), &info, &lca.gripPoseSpace));
+		OC_XR_LOG(xrCreateActionSpace(xr_session.get(), &info, &lca.gripPoseSpace));
 		info.action = lca.aimPoseAction;
-		OOVR_FAILED_XR_ABORT(xrCreateActionSpace(xr_session.get(), &info, &lca.aimPoseSpace));
+		OC_XR_LOG(xrCreateActionSpace(xr_session.get(), &info, &lca.aimPoseSpace));
 	}
 
 	// Note: even if actionSets is empty, we always still want to load the legacy set.
@@ -778,10 +778,12 @@ void BaseInput::BindInputsForSession()
 
 	sets.push_back(legacyInputsSet);
 
+	// A set OpenXR refused to create is left out, or attaching would fail for all of them
+	sets.erase(std::remove(sets.begin(), sets.end(), (XrActionSet)XR_NULL_HANDLE), sets.end());
 	XrSessionActionSetsAttachInfo attachInfo = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
 	attachInfo.actionSets = sets.data();
 	attachInfo.countActionSets = sets.size();
-	OOVR_FAILED_XR_ABORT(xrAttachSessionActionSets(xr_session.get(), &attachInfo));
+	OC_XR_LOG(xrAttachSessionActionSets(xr_session.get(), &attachInfo));
 
 	// Setup hand tracking if supported
 	if (xr_gbl->handTrackingProperties.supportsHandTracking) {
@@ -789,7 +791,7 @@ void BaseInput::BindInputsForSession()
 		for (int i = 0; i < 2; i++) {
 			createInfo.hand = i == 0 ? XR_HAND_LEFT_EXT : XR_HAND_RIGHT_EXT;
 			createInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
-			OOVR_FAILED_XR_ABORT(xr_ext->xrCreateHandTrackerEXT(xr_session.get(), &createInfo, &handTrackers[i]));
+			OC_XR_LOG(xr_ext->xrCreateHandTrackerEXT(xr_session.get(), &createInfo, &handTrackers[i]));
 		}
 	}
 }
@@ -908,7 +910,7 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 						strcpy_arr(info.actionName, extends_name.c_str());
 						info.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
 						strcpy_arr(info.localizedActionName, extends_name.c_str());
-						OOVR_FAILED_XR_ABORT(xrCreateAction(action->set->xr, &info, &forceAction));
+						OC_XR_LOG(xrCreateAction(action->set->xr, &info, &forceAction));
 
 						indexGripExtensionActions[forceActionKey] = forceAction;
 						existingAction = indexGripExtensionActions.find(forceActionKey);
@@ -920,8 +922,8 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 						OOVR_LOGF("Trying to bind index extendo action to non-existent path %s? Ignoring...", pathStr.c_str());
 					} else {
 						OOVR_LOGF("Bound index extendo action to %s for original %s (%s)", pathStr.c_str(), importBasePath.c_str(), action->fullName.c_str());
-						XrPath path;
-						OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, pathStr.c_str(), &path));
+						XrPath path = XR_NULL_PATH;
+						OC_XR_LOG(xrStringToPath(xr_instance, pathStr.c_str(), &path));
 						bindings.push_back(XrActionSuggestedBinding{ forceAction, path });
 					}
 
@@ -968,8 +970,8 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 					continue;
 				}
 
-				XrPath path;
-				OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, pathStr.c_str(), &path));
+				XrPath path = XR_NULL_PATH;
+				OC_XR_LOG(xrStringToPath(xr_instance, pathStr.c_str(), &path));
 				bindings.push_back(XrActionSuggestedBinding{ action->xr, path });
 			}
 		}
@@ -1036,8 +1038,8 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 				OOVR_ABORTF("Built invalid input path %s from pose action %s", pathStr.c_str(), actionName.c_str());
 			}
 
-			XrPath path;
-			OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, pathStr.c_str(), &path));
+			XrPath path = XR_NULL_PATH;
+			OC_XR_LOG(xrStringToPath(xr_instance, pathStr.c_str(), &path));
 			bindings.push_back(XrActionSuggestedBinding{ action->xr, path });
 		}
 	}
@@ -1056,14 +1058,14 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 	}
 
 	// Load the bindings we just built into the runtime
-	XrPath interactionProfilePath;
-	OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, profile.GetPath().c_str(), &interactionProfilePath));
+	XrPath interactionProfilePath = XR_NULL_PATH;
+	OC_XR_LOG(xrStringToPath(xr_instance, profile.GetPath().c_str(), &interactionProfilePath));
 
 	XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
 	suggestedBindings.interactionProfile = interactionProfilePath;
 	suggestedBindings.suggestedBindings = bindings.data();
 	suggestedBindings.countSuggestedBindings = bindings.size();
-	OOVR_FAILED_XR_ABORT(xrSuggestInteractionProfileBindings(xr_instance, &suggestedBindings));
+	OC_XR_LOG(xrSuggestInteractionProfileBindings(xr_instance, &suggestedBindings));
 }
 
 void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::string& importBasePath, const std::string& inputName, const std::string& subMode, Action* action, std::vector<XrActionSuggestedBinding>& bindings, bool isKnuckles)
@@ -1120,11 +1122,11 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 		strcpy_arr(info.actionName, parentName.c_str());
 		info.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT;
 		strcpy_arr(info.localizedActionName, parentName.c_str()); // TODO localization
-		OOVR_FAILED_XR_ABORT(xrCreateAction(action->set->xr, &info, &parent_iter->second.vectorAction));
+		OC_XR_LOG(xrCreateAction(action->set->xr, &info, &parent_iter->second.vectorAction));
 
 		// add parent to bindings
-		XrPath suggested_path;
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath).c_str(), &suggested_path));
+		XrPath suggested_path = XR_NULL_PATH;
+		OC_XR_LOG(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath).c_str(), &suggested_path));
 		bindings.push_back(XrActionSuggestedBinding{ parent_iter->second.vectorAction, suggested_path });
 	}
 
@@ -1144,10 +1146,10 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 			strcpy_arr(info.actionName, click_name.c_str());
 			info.actionType = manualThreshold ? XR_ACTION_TYPE_FLOAT_INPUT : XR_ACTION_TYPE_BOOLEAN_INPUT;
 			strcpy_arr(info.localizedActionName, click_name.c_str());
-			OOVR_FAILED_XR_ABORT(xrCreateAction(action->set->xr, &info, &parent_iter->second.clickAction));
+			OC_XR_LOG(xrCreateAction(action->set->xr, &info, &parent_iter->second.clickAction));
 
-			XrPath suggested_path;
-			OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath + (manualThreshold ? "/force" : "/click")).c_str(), &suggested_path));
+			XrPath suggested_path = XR_NULL_PATH;
+			OC_XR_LOG(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath + (manualThreshold ? "/force" : "/click")).c_str(), &suggested_path));
 			bindings.push_back(XrActionSuggestedBinding{ parent_iter->second.clickAction, suggested_path });
 		}
 	} else {
@@ -1161,10 +1163,10 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 			strcpy_arr(info.actionName, touch_name.c_str());
 			info.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
 			strcpy_arr(info.localizedActionName, touch_name.c_str());
-			OOVR_FAILED_XR_ABORT(xrCreateAction(action->set->xr, &info, &parent_iter->second.touchAction));
+			OC_XR_LOG(xrCreateAction(action->set->xr, &info, &parent_iter->second.touchAction));
 
-			XrPath suggested_path;
-			OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, touchPath.c_str(), &suggested_path));
+			XrPath suggested_path = XR_NULL_PATH;
+			OC_XR_LOG(xrStringToPath(xr_instance, touchPath.c_str(), &suggested_path));
 			bindings.push_back(XrActionSuggestedBinding{ parent_iter->second.touchAction, suggested_path });
 		}
 	}
@@ -1203,10 +1205,10 @@ void BaseInput::LoadDClickAction(const InteractionProfile& profile, const std::s
 	info.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
 	strcpy_arr(info.actionName, clickName.c_str());
 	strcpy_arr(info.localizedActionName, clickName.c_str()); // TODO: localization
-	OOVR_FAILED_XR_ABORT(xrCreateAction(action->set->xr, &info, &dclickInfo.click_action)); // FIXME: share click actions
+	OC_XR_LOG(xrCreateAction(action->set->xr, &info, &dclickInfo.click_action)); // FIXME: share click actions
 
-	XrPath suggested_path;
-	OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, clickPath.c_str(), &suggested_path));
+	XrPath suggested_path = XR_NULL_PATH;
+	OC_XR_LOG(xrStringToPath(xr_instance, clickPath.c_str(), &suggested_path));
 	bindings.push_back(XrActionSuggestedBinding{ dclickInfo.click_action, suggested_path });
 
 	action->perProfileData[&profile].dclickBindings.push_back(dclickInfo);
@@ -1223,7 +1225,7 @@ void BaseInput::CreateLegacyActions()
 	strcpy_arr(setInfo.localizedActionSetName, "OpenComposite Actions");
 	setInfo.priority = 0;
 
-	OOVR_FAILED_XR_ABORT(xrCreateActionSet(xr_instance, &setInfo, &legacyInputsSet));
+	OC_XR_LOG(xrCreateActionSet(xr_instance, &setInfo, &legacyInputsSet));
 
 	for (int i = 0; i < 2; i++) {
 		LegacyControllerActions& ctrl = legacyControllers[i];
@@ -1232,7 +1234,7 @@ void BaseInput::CreateLegacyActions()
 		std::string side = i == 0 ? "left" : "right";
 		ctrl.handPath = "/user/hand/" + side;
 		ctrl.handType = i == 0 ? ITrackedDevice::HAND_LEFT : ITrackedDevice::HAND_RIGHT;
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, ctrl.handPath.c_str(), &ctrl.handPathXr));
+		OC_XR_LOG(xrStringToPath(xr_instance, ctrl.handPath.c_str(), &ctrl.handPathXr));
 
 		auto create = [&](XrAction* out, const std::string& name, const std::string& englishName, XrActionType type) {
 			XrActionCreateInfo info = { XR_TYPE_ACTION_CREATE_INFO };
@@ -1244,7 +1246,7 @@ void BaseInput::CreateLegacyActions()
 			std::string fullHumanName = "Legacy input: " + englishName + " - " + side; // TODO localisation
 			strcpy_arr(info.localizedActionName, fullHumanName.c_str());
 
-			OOVR_FAILED_XR_ABORT(xrCreateAction(legacyInputsSet, &info, out));
+			OC_XR_LOG(xrCreateAction(legacyInputsSet, &info, out));
 		};
 
 		create(&ctrl.system, "system", "System Button", XR_ACTION_TYPE_BOOLEAN_INPUT);
@@ -1352,9 +1354,10 @@ EVRInputError BaseInput::UpdateActionState(VR_ARRAY_COUNT(unSetCount) VRActiveAc
 		for (uint32_t i = 1; i < unSetCount; i++) {
 			if (pSets[i].nPriority != priority) {
 				ActionSet* as1 = cast_ASH(pSets[0].ulActionSet);
-				ActionSet* curAs = cast_ASH(pSets[1].ulActionSet);
-				OOVR_SOFT_ABORTF("Active action set %s (%d) and %s (%d) have different priorities, this is not yet supported",
-				    as1->fullName.c_str(), pSets[0].nPriority, curAs->fullName.c_str(), pSets[1].nPriority);
+				ActionSet* curAs = cast_ASH(pSets[i].ulActionSet);
+				if (as1 && curAs)
+					OOVR_SOFT_ABORTF("Active action set %s (%d) and %s (%d) have different priorities, this is not yet supported",
+					    as1->fullName.c_str(), pSets[0].nPriority, curAs->fullName.c_str(), pSets[i].nPriority);
 			}
 		}
 	}
@@ -1379,10 +1382,13 @@ EVRInputError BaseInput::UpdateActionState(VR_ARRAY_COUNT(unSetCount) VRActiveAc
 	// Ad the last set, the legacy input set
 	aas.at(unSetCount).actionSet = legacyInputsSet;
 
+	// A set OpenXR refused to create is left out, or the whole sync would fail
+	aas.erase(std::remove_if(aas.begin(), aas.end(), [](const XrActiveActionSet& a) { return a.actionSet == XR_NULL_HANDLE; }), aas.end());
+
 	XrActionsSyncInfo syncInfo = { XR_TYPE_ACTIONS_SYNC_INFO };
 	syncInfo.activeActionSets = aas.data();
 	syncInfo.countActiveActionSets = aas.size();
-	OOVR_FAILED_XR_ABORT(xrSyncActions(xr_session.get(), &syncInfo));
+	OC_XR_LOG(xrSyncActions(xr_session.get(), &syncInfo));
 	syncSerial++;
 
 	for (size_t i = 0; i < allSubactionPaths.size(); i++) {
@@ -1410,7 +1416,7 @@ void BaseInput::InternalUpdate()
 	XrActionsSyncInfo syncInfo = { XR_TYPE_ACTIONS_SYNC_INFO };
 	syncInfo.activeActionSets = &aas;
 	syncInfo.countActiveActionSets = 1;
-	OOVR_FAILED_XR_ABORT(xrSyncActions(xr_session.get(), &syncInfo));
+	OC_XR_LOG(xrSyncActions(xr_session.get(), &syncInfo));
 	syncSerial++;
 }
 
@@ -1433,7 +1439,7 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 	// If an action is bound to a dpad or dclick action in every profile, action.xr will be XR_NULL_HANDLE
 	if (action.xr != XR_NULL_HANDLE) {
 		// XrResult ret = xrGetActionStateBoolean(xr_session.get(), getInfo, state);
-		// OOVR_FAILED_XR_ABORT(ret);
+		// OC_XR_LOG(ret);
 
 		float value = 0;
 
@@ -1444,7 +1450,7 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 			auto getInfo2 = *getInfo;
 			getInfo2.action = action.stackedValueExtension;
 			ret = xrGetActionStateFloat(xr_session.get(), &getInfo2, &fstate);
-			OOVR_FAILED_XR_ABORT(ret);
+			OC_XR_LOG(ret);
 
 			if (fstate.currentState > 0) {
 				value = 1 + fstate.currentState;
@@ -1453,7 +1459,7 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 
 		if (value <= 0) { // only query base action if its value will be used to ensure that active/change time are sourced properly
 			ret = xrGetActionStateFloat(xr_session.get(), getInfo, &fstate);
-			OOVR_FAILED_XR_ABORT(ret);
+			OC_XR_LOG(ret);
 			value = fstate.currentState;
 		}
 
@@ -1487,7 +1493,7 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 			// read state of the source click binding
 			XrActionStateGetInfo info2 = *getInfo;
 			info2.action = dclick_info.click_action;
-			OOVR_FAILED_XR_ABORT(xrGetActionStateBoolean(xr_session.get(), &info2, &click_state));
+			OC_XR_LOG(xrGetActionStateBoolean(xr_session.get(), &info2, &click_state));
 
 			compoundLastState |= dclick_info.last_state;
 
@@ -1543,7 +1549,7 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 			OOVR_FALSE_ABORT(iter != DpadBindingInfo::parents.end());
 			XrActionStateGetInfo info2 = *getInfo;
 			info2.action = iter->second.vectorAction;
-			OOVR_FAILED_XR_ABORT(xrGetActionStateVector2f(xr_session.get(), &info2, &parent_state));
+			OC_XR_LOG(xrGetActionStateVector2f(xr_session.get(), &info2, &parent_state));
 
 			compoundLastState |= dpad_info.lastState;
 			if (!parent_state.isActive)
@@ -1585,7 +1591,7 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 				if (dpad_info.customClickThresholds) {
 					XrActionStateFloat click_state{ XR_TYPE_ACTION_STATE_FLOAT };
 					info2.action = iter->second.clickAction;
-					OOVR_FAILED_XR_ABORT(xrGetActionStateFloat(xr_session.get(), &info2, &click_state));
+					OC_XR_LOG(xrGetActionStateFloat(xr_session.get(), &info2, &click_state));
 					if (dpad_info.lastState) {
 						active = click_state.currentState > DpadBindingInfo::clickDeactivateThreshold;
 					} else {
@@ -1594,13 +1600,13 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 				} else {
 					XrActionStateBoolean click_state{ XR_TYPE_ACTION_STATE_BOOLEAN };
 					info2.action = iter->second.clickAction;
-					OOVR_FAILED_XR_ABORT(xrGetActionStateBoolean(xr_session.get(), &info2, &click_state));
+					OC_XR_LOG(xrGetActionStateBoolean(xr_session.get(), &info2, &click_state));
 					active = click_state.currentState;
 				}
 			} else if (iter->second.touchAction != XR_NULL_HANDLE) {
 				XrActionStateBoolean touch_state{ XR_TYPE_ACTION_STATE_BOOLEAN };
 				info2.action = iter->second.touchAction;
-				OOVR_FAILED_XR_ABORT(xrGetActionStateBoolean(xr_session.get(), &info2, &touch_state));
+				OC_XR_LOG(xrGetActionStateBoolean(xr_session.get(), &info2, &touch_state));
 				active = touch_state.currentState;
 			} else {
 				// touch dpad, but our dpad parent doesn't have a touch input
@@ -1659,7 +1665,7 @@ EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigi
 
 		getInfo.subactionPath = subactionPath;
 		XrActionStateBoolean state = { XR_TYPE_ACTION_STATE_BOOLEAN };
-		OOVR_FAILED_XR_ABORT(getBooleanOrDpadData(handInteractionProfiles[i], *act, &getInfo, &state));
+		OC_XR_LOG(getBooleanOrDpadData(handInteractionProfiles[i], *act, &getInfo, &state));
 
 		// If the subaction isn't set, or it was set but not active, or it was set
 		// but the state was false and it's not now, then override it.
@@ -1721,7 +1727,7 @@ EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalo
 		switch (act->type) {
 		case ActionType::Vector1: {
 			XrActionStateFloat state = { XR_TYPE_ACTION_STATE_FLOAT };
-			OOVR_FAILED_XR_ABORT(xrGetActionStateFloat(xr_session.get(), &getInfo, &state));
+			OC_XR_LOG(xrGetActionStateFloat(xr_session.get(), &getInfo, &state));
 
 			if (!state.isActive)
 				continue;
@@ -1763,7 +1769,7 @@ EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalo
 		}
 		case ActionType::Vector2: {
 			XrActionStateVector2f state = { XR_TYPE_ACTION_STATE_VECTOR2F };
-			OOVR_FAILED_XR_ABORT(xrGetActionStateVector2f(xr_session.get(), &getInfo, &state));
+			OC_XR_LOG(xrGetActionStateVector2f(xr_session.get(), &getInfo, &state));
 
 			if (!state.isActive)
 				continue;
@@ -2166,7 +2172,7 @@ EVRInputError BaseInput::GetSkeletalBoneData(VRActionHandle_t actionHandle, EVRS
 	std::vector<XrHandJointLocationEXT> jointLocations(locations.jointCount);
 	locations.jointLocations = jointLocations.data();
 
-	OOVR_FAILED_XR_ABORT(xr_ext->xrLocateHandJointsEXT(handTrackers[(int)action->skeletalHand], &locateInfo, &locations));
+	OC_XR_LOG(xr_ext->xrLocateHandJointsEXT(handTrackers[(int)action->skeletalHand], &locateInfo, &locations));
 
 	if (!locations.isActive) {
 		// Fallback to estimated bone data (e.g. for controllers)
@@ -2227,7 +2233,7 @@ EVRInputError BaseInput::getRealSkeletalSummary(ITrackedDevice::TrackedDeviceTyp
 	std::vector<XrHandJointLocationEXT> jointLocations(locations.jointCount);
 	locations.jointLocations = jointLocations.data();
 
-	OOVR_FAILED_XR_ABORT(xr_ext->xrLocateHandJointsEXT(handTrackers[hand], &locateInfo, &locations));
+	OC_XR_LOG(xr_ext->xrLocateHandJointsEXT(handTrackers[hand], &locateInfo, &locations));
 
 	if (!locations.isActive) {
 		// Fallback to estimated skeletal summary data (e.g. for controllers)
@@ -2364,7 +2370,7 @@ EVRInputError BaseInput::TriggerHapticVibrationAction(VRActionHandle_t action, f
 	vibration.duration = (int)(fDurationSeconds * 1000000000.0f);
 	vibration.amplitude = fAmplitude;
 
-	OOVR_FAILED_XR_ABORT(xrApplyHapticFeedback(xr_session.get(), &info, (XrHapticBaseHeader*)&vibration));
+	OC_XR_LOG(xrApplyHapticFeedback(xr_session.get(), &info, (XrHapticBaseHeader*)&vibration));
 
 	return VRInputError_None;
 }
@@ -2394,14 +2400,14 @@ EVRInputError BaseInput::GetActionOrigins(VRActionSetHandle_t actionSetHandle, V
 
 	// 20 will be more than enough, saves a second call
 	XrPath tmp[20];
-	uint32_t count;
-	OOVR_FAILED_XR_ABORT(xrEnumerateBoundSourcesForAction(xr_session.get(), &info, std::size(tmp), &count, tmp));
+	uint32_t count = 0;
+	OC_XR_LOG(xrEnumerateBoundSourcesForAction(xr_session.get(), &info, std::size(tmp), &count, tmp));
 
 	// Now for each source find the /user/hand/abc substring that it starts with
-	char buff[XR_MAX_PATH_LENGTH + 1];
+	char buff[XR_MAX_PATH_LENGTH + 1] = {};
 	for (uint32_t i = 0; i < count; i++) {
-		uint32_t len;
-		OOVR_FAILED_XR_ABORT(xrPathToString(xr_instance, tmp[i], XR_MAX_PATH_LENGTH, &len, buff));
+		uint32_t len = 0;
+		OC_XR_LOG(xrPathToString(xr_instance, tmp[i], XR_MAX_PATH_LENGTH, &len, buff));
 
 		std::string path(buff, len);
 		int endOfHandPos = path.find('/', strlen("/user/hand/") + 1);
@@ -2521,10 +2527,10 @@ EVRInputError BaseInput::GetActionBindingInfo(VRActionHandle_t actionHandle, OOV
 
 	XrBoundSourcesForActionEnumerateInfo enumInfo = { XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO };
 	enumInfo.action = action->xr;
-	uint32_t sourcesCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo, 0, &sourcesCount, nullptr));
+	uint32_t sourcesCount = 0;
+	OC_XR_LOG(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo, 0, &sourcesCount, nullptr));
 	std::vector<XrPath> boundActionPaths(sourcesCount);
-	OOVR_FAILED_XR_ABORT(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo, boundActionPaths.size(), &sourcesCount, boundActionPaths.data()));
+	OC_XR_LOG(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo, boundActionPaths.size(), &sourcesCount, boundActionPaths.data()));
 
 	// TODO should we return an error if there are no sources bound?
 
@@ -2538,14 +2544,18 @@ EVRInputError BaseInput::GetActionBindingInfo(VRActionHandle_t actionHandle, OOV
 		OOVR_InputBindingInfo_t& info = bindingInfo[i];
 		XrPath path = boundActionPaths.at(i);
 
-		uint32_t pathLen;
-		OOVR_FAILED_XR_ABORT(xrPathToString(xr_instance, path, 0, &pathLen, nullptr));
+		uint32_t pathLen = 0;
+		OC_XR_LOG(xrPathToString(xr_instance, path, 0, &pathLen, nullptr));
+		if (pathLen == 0)
+			continue; // the path couldn't be read: this binding is left out
 		std::vector<char> chars(pathLen);
-		OOVR_FAILED_XR_ABORT(xrPathToString(xr_instance, path, chars.size(), &pathLen, chars.data()));
+		OC_XR_LOG(xrPathToString(xr_instance, path, chars.size(), &pathLen, chars.data()));
 		std::string pathStr(chars.data(), chars.size());
 
 		std::vector<std::string> parts;
 		stringSplit(pathStr, parts);
+		if (parts.empty())
+			continue;
 
 		// The last part of the string - which is something like '/user/hand/right/input/a/click' - is the mode
 		strcpy_arr(info.rchModeName, parts.back().c_str());
@@ -2690,15 +2700,15 @@ VRInputValueHandle_t BaseInput::activeOriginFromSubaction(Action* action, const 
 		// Get the attached sources
 		XrBoundSourcesForActionEnumerateInfo enumInfo = { XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO };
 		enumInfo.action = action->xr;
-		OOVR_FAILED_XR_ABORT(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo,
+		OC_XR_LOG(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo,
 		    std::size(action->sources), &action->sourcesCount, action->sources));
 
 		// Convert the source paths to strings
-		char buff[256];
+		char buff[256] = {};
 		for (int i = 0; i < (int)action->sourcesCount; i++) {
 			ZeroMemory(buff, sizeof(buff));
-			uint32_t length;
-			OOVR_FAILED_XR_ABORT(xrPathToString(xr_instance, action->sources[i], sizeof(buff) - 1, &length, buff));
+			uint32_t length = 0;
+			OC_XR_LOG(xrPathToString(xr_instance, action->sources[i], sizeof(buff) - 1, &length, buff));
 			action->sourceNames[i] = buff;
 		}
 
@@ -2748,13 +2758,13 @@ bool BaseInput::GetLegacyControllerState(vr::TrackedDeviceIndex_t controllerDevi
 
 		if (action) {
 			getInfo.action = action;
-			OOVR_FAILED_XR_ABORT(xrGetActionStateBoolean(xr_session.get(), &getInfo, &xs));
+			OC_XR_LOG(xrGetActionStateBoolean(xr_session.get(), &getInfo, &xs));
 			state->ulButtonPressed |= (uint64_t)(xs.currentState != 0) << shift;
 		}
 
 		if (touch != XR_NULL_HANDLE) {
 			getInfo.action = touch;
-			OOVR_FAILED_XR_ABORT(xrGetActionStateBoolean(xr_session.get(), &getInfo, &xs));
+			OC_XR_LOG(xrGetActionStateBoolean(xr_session.get(), &getInfo, &xs));
 			state->ulButtonTouched |= (uint64_t)(xs.currentState != 0) << shift;
 		}
 	};
@@ -2779,7 +2789,7 @@ bool BaseInput::GetLegacyControllerState(vr::TrackedDeviceIndex_t controllerDevi
 		getInfo.action = action;
 
 		XrActionStateFloat as = { XR_TYPE_ACTION_STATE_FLOAT };
-		OOVR_FAILED_XR_ABORT(xrGetActionStateFloat(xr_session.get(), &getInfo, &as));
+		OC_XR_LOG(xrGetActionStateFloat(xr_session.get(), &getInfo, &as));
 		if (as.isActive) {
 			return as.currentState;
 		} else {
@@ -2838,7 +2848,7 @@ void BaseInput::TriggerLegacyHapticPulse(vr::TrackedDeviceIndex_t controllerDevi
 	vibration.duration = durationNanos;
 	vibration.amplitude = 1;
 
-	OOVR_FAILED_XR_ABORT(xrApplyHapticFeedback(xr_session.get(), &info, (XrHapticBaseHeader*)&vibration));
+	OC_XR_LOG(xrApplyHapticFeedback(xr_session.get(), &info, (XrHapticBaseHeader*)&vibration));
 }
 
 int BaseInput::DeviceIndexToHandId(vr::TrackedDeviceIndex_t idx)

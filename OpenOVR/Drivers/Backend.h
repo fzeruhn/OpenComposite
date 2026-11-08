@@ -186,7 +186,7 @@ public:
 	/* Submitting Frames */                                                                                                                        \
 	PREPEND void WaitForTrackingData() APPEND;                                                                                                     \
                                                                                                                                                    \
-	PREPEND void StoreEyeTexture(                                                                                                                  \
+	PREPEND IBackend::openvr_enum_t StoreEyeTexture(                                                                                               \
 	    vr::EVREye eye,                                                                                                                            \
 	    const vr::Texture_t* texture,                                                                                                              \
 	    const vr::VRTextureBounds_t* bounds,                                                                                                       \
@@ -272,6 +272,9 @@ public:
 	float GetTimeInSeconds();
 
 	// Get the current backend instance
+	// Whether the backend is being destroyed by VR_Shutdown (Reset), not by the process exiting without it
+	static bool IsResetting() { return resetting; }
+
 	inline IBackend* GetBackendInstance() { return backend.get(); }
 
 private:
@@ -282,6 +285,7 @@ private:
 	~BackendManager();
 
 	static std::unique_ptr<BackendManager> instance;
+	static bool resetting;
 
 	// For now, just use a single backend
 	// and add multiple in later

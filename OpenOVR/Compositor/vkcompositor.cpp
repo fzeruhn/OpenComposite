@@ -164,14 +164,25 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 		}
 		}
 
-		OOVR_FAILED_XR_ABORT(xrCreateSwapchain(xr_session.get(), &createInfo, &chain));
+		if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &createInfo, &chain), "xrCreateSwapchain")) {
+			chain = XR_NULL_HANDLE; // tried again at the next Submit
+			return;
+		}
 
 		uint32_t chainLength = 0;
-		OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, 0, &chainLength, nullptr));
-		swapchainImages.resize(chainLength);
-		for (XrSwapchainImageVulkanKHR& swapchainImage : swapchainImages)
-			swapchainImage.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
-		OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, swapchainImages.size(), &chainLength, (XrSwapchainImageBaseHeader*)swapchainImages.data()));
+		bool listed = !SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &chainLength, nullptr), "xrEnumerateSwapchainImages");
+		if (listed) {
+			swapchainImages.resize(chainLength);
+			for (XrSwapchainImageVulkanKHR& swapchainImage : swapchainImages)
+				swapchainImage.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+			listed = !SwapchainCallFailed(xrEnumerateSwapchainImages(chain, swapchainImages.size(), &chainLength, (XrSwapchainImageBaseHeader*)swapchainImages.data()), "xrEnumerateSwapchainImages");
+		}
+		if (!listed) {
+			swapchainImages.clear();
+			xrDestroySwapchain(chain);
+			chain = XR_NULL_HANDLE;
+			return;
+		}
 
 		appCommandBuffers.resize(chainLength);
 		VkCommandBufferAllocateInfo bufInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -183,14 +194,16 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 
 	// First find the relevant image to render to
 	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-	uint32_t currentIndex;
-	OOVR_FAILED_XR_ABORT(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex));
+	uint32_t currentIndex = 0;
+	if (!chain || SwapchainCallFailed(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex), "xrAcquireSwapchainImage") || currentIndex >= appCommandBuffers.size())
+		return;
 
 	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
 	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
 	// image, so we should be careful with concurrency here.
 	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-	OOVR_FAILED_XR_ABORT(xrWaitSwapchainImage(chain, &waitInfo));
+	if (SwapchainCallFailed(xrWaitSwapchainImage(chain, &waitInfo), "xrWaitSwapchainImage"))
+		return;
 
 	const VkCommandBuffer currentCommandBuffer = appCommandBuffers.at(currentIndex);
 	VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -322,7 +335,7 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 
 	// Release the swapchain - OpenXR will use the last-released image in a swapchain
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-	OOVR_FAILED_XR_ABORT(xrReleaseSwapchainImage(chain, &releaseInfo));
+	SwapchainCallFailed(xrReleaseSwapchainImage(chain, &releaseInfo), "xrReleaseSwapchainImage");
 }
 
 void VkCompositor::InvokeCubemap(const vr::Texture_t* textures)

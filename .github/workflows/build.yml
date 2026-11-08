@@ -66,6 +66,8 @@ jobs:
         run: |
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime none --ci --allow-failures --out conformance/none
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --allow-failures --out conformance/stand-in
+          # What OpenComposite does when OpenXR calls fail (expect/xr_failures.json): this one has to pass
+          python tests/conformance/xr_failures.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --ci --out conformance/xr-failures
 
       - uses: actions/upload-artifact@v7
         if: matrix.tests

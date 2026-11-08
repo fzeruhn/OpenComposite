@@ -15,4 +15,7 @@ public:
 	virtual const void* GetGraphicsBinding() const = 0;
 
 	virtual class TemporaryVk* GetAsVk() { return nullptr; }
+
+	// False if the constructor couldn't make the device (logged); XrBackend then tries another API
+	bool usable = false;
 };

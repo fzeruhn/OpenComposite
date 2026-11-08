@@ -1,0 +1,1 @@
+{ "#": "The runtime ends the session at frame 60 (EXITING): one VREvent_Quit", "events": [{ "frame": 60, "type": "session_state", "state": "EXITING" }] }

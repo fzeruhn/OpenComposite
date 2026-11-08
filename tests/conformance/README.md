@@ -42,6 +42,14 @@ geometry, timing and poses, device properties, handle numbers, the PC's own apps
 OpenComposite doesn't support yet), each with its reason. Every other difference is a bug to fix or to explain there.
 Records SteamVR answered while restarting between children (init errors 115, 117, 119) aren't compared.
 
+## Failed OpenXR calls
+
+`xr_failures.py --runtime <dll> --conformance <exe> --out <dir>` runs the stand-in runtime with each script in
+`scripts/` (a failing `xrCreateInstance`, no headset, a dropped frame, a lost or exiting session, a failed swapchain,
+refused binding suggestions) and checks what `expect/xr_failures.json` says OpenComposite does for each: the init
+error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that nothing ends or crashes. The script
+format is described at the top of `tests/runtime/script.h`.
+
 ## Elevated shells
 
 An elevated process's OpenXR loader ignores `XR_RUNTIME_JSON`. From an elevated shell `run.py` starts every child at

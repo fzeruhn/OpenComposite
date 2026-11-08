@@ -26,9 +26,13 @@ BackendManager* BackendManager::InstancePtr()
 	return instance.get();
 }
 
+bool BackendManager::resetting = false;
+
 void BackendManager::Reset()
 {
+	resetting = true;
 	instance.reset();
+	resetting = false;
 }
 
 vr::TrackedDevicePose_t BackendManager::InvalidPose()
@@ -107,7 +111,7 @@ void BackendManager::WaitForTrackingData()
 	return backend->WaitForTrackingData();
 }
 
-void BackendManager::StoreEyeTexture(
+IBackend::openvr_enum_t BackendManager::StoreEyeTexture(
     vr::EVREye eye,
     const vr::Texture_t* texture,
     const vr::VRTextureBounds_t* bounds,

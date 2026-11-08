@@ -16,11 +16,22 @@ void Compositor::Invoke(const vr::Texture_t* texture, const vr::VRTextureBounds_
 	bool invertInCompositor = oovr_global_configuration.InvertUsingShaders();
 	if (bounds && bounds->vMin == 0.0f && bounds->vMax == 1.0f && bounds->uMin == 0.0f && bounds->uMax == 1.0f)
 		bounds = nullptr;
+	lastResult = XR_SUCCESS;
 	CopyToSwapchain(texture, invertInCompositor ? bounds : nullptr, eye, submitFlags);
-	subImage.swapchain = GetSwapChain();
+	// A failed swapchain call leaves this eye out of the frame (XrBackend checks the swapchain)
+	subImage.swapchain = XR_FAILED(lastResult) ? XR_NULL_HANDLE : GetSwapChain();
 	subImage.imageArrayIndex = 0; // This is *not* the swapchain index
 	XrExtent2Di src = GetSrcSize();
 	CalculateViewport(invertInCompositor ? nullptr : bounds, src.width, src.height, true, subImage.imageRect);
+}
+
+bool Compositor::SwapchainCallFailed(XrResult res, const char* what)
+{
+	if (XR_SUCCEEDED(res) && res != XR_TIMEOUT_EXPIRED)
+		return false;
+	lastResult = res == XR_TIMEOUT_EXPIRED ? XR_ERROR_RUNTIME_FAILURE : res;
+	OOVR_LOGF("%s failed: %d (this eye is left out of the frame)", what, (int)res);
+	return true;
 }
 
 bool Compositor::CalculateViewport(const vr::VRTextureBounds_t* ptrBounds, int32_t width, int32_t height, bool supportsInvert, XrRect2Di& viewport)
