@@ -111,6 +111,7 @@ struct RtSession {
 	bool headless = false;
 	bool overlay = false;
 	bool running = false;
+	bool exitRequested = false; // xrRequestExitSession: xrEndSession then goes on to EXITING, as the spec says
 	XrSessionState state = XR_SESSION_STATE_UNKNOWN;
 	uint64_t framesWaited = 0;
 	uint64_t framesBegun = 0;

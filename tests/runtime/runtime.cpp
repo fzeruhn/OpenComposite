@@ -416,6 +416,8 @@ XrResult XRAPI_CALL EndSession(XrSession)
 		return XR_ERROR_SESSION_NOT_RUNNING;
 	s->running = false;
 	QueueState(s, XR_SESSION_STATE_IDLE);
+	if (s->exitRequested)
+		QueueState(s, XR_SESSION_STATE_EXITING);
 	return XR_SUCCESS;
 }
 
@@ -425,6 +427,7 @@ XrResult XRAPI_CALL RequestExitSession(XrSession)
 	RtSession* s = St().session.get();
 	if (!s || !s->running)
 		return XR_ERROR_SESSION_NOT_RUNNING;
+	s->exitRequested = true;
 	QueueState(s, XR_SESSION_STATE_STOPPING);
 	return XR_SUCCESS;
 }
