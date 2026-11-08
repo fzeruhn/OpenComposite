@@ -310,7 +310,9 @@ add_library(OCCore STATIC
 	OpenOVR/Misc/backtrace.cpp
 	OpenOVR/Misc/Config.cpp
 	OpenOVR/Misc/JsonFile.cpp
+	OpenOVR/Misc/SteamVRPaths.cpp
 	OpenOVR/Misc/JsonFile.h
+	OpenOVR/Misc/SteamVRPaths.h
 	OpenOVR/Misc/SoftFail.cpp
 	OpenOVR/Misc/SoftFail.h
 	OpenOVR/Misc/EnumNames.h
@@ -349,6 +351,12 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/BaseNotifications.cpp
 	OpenOVR/Reimpl/BaseControlPanel.cpp
 	OpenOVR/Reimpl/BaseHeadsetView.cpp
+	OpenOVR/Reimpl/BaseTrackedCamera.cpp
+	OpenOVR/Reimpl/BaseResources.cpp
+	OpenOVR/Reimpl/BaseSpatialAnchors.cpp
+	OpenOVR/Reimpl/BaseDebug.cpp
+	OpenOVR/Reimpl/BaseIOBuffer.cpp
+	OpenOVR/Reimpl/BaseDriverManager.cpp
 	OpenOVR/Reimpl/CVRApplications.cpp
 	OpenOVR/Reimpl/CVRChaperone.cpp
 	OpenOVR/Reimpl/CVRChaperoneSetup.cpp
@@ -367,6 +375,12 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/CVRNotifications.cpp
 	OpenOVR/Reimpl/CVRControlPanel.cpp
 	OpenOVR/Reimpl/CVRHeadsetView.cpp
+	OpenOVR/Reimpl/CVRTrackedCamera.cpp
+	OpenOVR/Reimpl/CVRResources.cpp
+	OpenOVR/Reimpl/CVRSpatialAnchors.cpp
+	OpenOVR/Reimpl/CVRDebug.cpp
+	OpenOVR/Reimpl/CVRIOBuffer.cpp
+	OpenOVR/Reimpl/CVRDriverManager.cpp
 	${GENERATED_DIR}/stubs.gen.cpp
 
 	# Exclude from the PCH requirement
@@ -408,6 +422,12 @@ add_library(OCCore STATIC
 	OpenOVR/Reimpl/BaseNotifications.h
 	OpenOVR/Reimpl/BaseControlPanel.h
 	OpenOVR/Reimpl/BaseHeadsetView.h
+	OpenOVR/Reimpl/BaseTrackedCamera.h
+	OpenOVR/Reimpl/BaseResources.h
+	OpenOVR/Reimpl/BaseSpatialAnchors.h
+	OpenOVR/Reimpl/BaseDebug.h
+	OpenOVR/Reimpl/BaseIOBuffer.h
+	OpenOVR/Reimpl/BaseDriverManager.h
 	OpenOVR/Reimpl/Interfaces.h
 	${GENERATED_DIR}/static_bases.gen.h
 	OpenOVR/resources.h
@@ -579,6 +599,8 @@ file(GLOB openvr-headers CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE
 file(GLOB stub-deps CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE_DIR}/scripts/stubs/*)
 # The generator skips the methods these implement by hand
 file(GLOB stub-impls CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE_DIR}/OpenOVR/Reimpl/CVR*.cpp)
+# The unmapped-method check reads the Base classes' declarations
+file(GLOB stub-bases CONFIGURE_DEPENDS LIST_DIRECTORIES false ${CMAKE_SOURCE_DIR}/OpenOVR/Reimpl/Base*.h)
 
 # Command for running header splitting script
 add_custom_command(
@@ -602,7 +624,8 @@ add_custom_command(
 add_custom_command(
 	OUTPUT ${GENERATED_DIR}/stubs.gen.cpp ${GENERATED_DIR}/static_bases.gen.h
 	COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/stubs.py ${CMAKE_SOURCE_DIR}/OpenOVR/Reimpl ${CMAKE_SOURCE_DIR}/OpenVRHeaders ${GENERATED_DIR}
-	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/stubs.py ${stub-deps} ${stub-impls} ${GENERATED_DIR}/interfaces/vrtypes.h
+	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/stubs.py ${CMAKE_SOURCE_DIR}/scripts/libparse.py ${stub-deps} ${stub-impls} ${stub-bases}
+	        ${GENERATED_DIR}/interfaces/vrtypes.h
 	COMMENT "Generating stubs..."
 	)
 

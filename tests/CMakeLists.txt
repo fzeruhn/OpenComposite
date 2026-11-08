@@ -68,6 +68,7 @@ add_executable(oc_unit_tests
 	unit/SoftFailTests.cpp
 	unit/SessionLockTests.cpp
 	unit/JsonFileTests.cpp
+	unit/SteamVRPathsTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE

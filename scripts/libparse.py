@@ -1,15 +1,17 @@
 import re, collections
 
-funcdef_t = collections.namedtuple("funcdef_t", ["return_type", "name", "args"])
+# const: the method is declared const (IVRDriverManager_001's GetDriverCount and IsEnabled)
+funcdef_t = collections.namedtuple("funcdef_t", ["return_type", "name", "args", "const"], defaults=[False])
 arg_t = collections.namedtuple("arg_t", ["type", "name", "default", "str"])
 
-regex_src = r"virtual (?P<type>[\w ]+ \**)(?P<funcname>\w+)\((?P<args>.*)\)(?: = 0)?;"
+regex_src = r"virtual (?P<type>[\w ]+ \**)(?P<funcname>\w+)\((?P<args>.*)\)(?P<const>\s*const)?(?: = 0)?;"
 regex = re.compile(regex_src)
 
 arg_src = r"(?P<type>[^=]+ \**)(?P<name>\w+)(?: = (?P<default>.*))?"
 argr = re.compile(arg_src)
 
-typedecl = re.compile(r"^(?:enum(?:\s+class)?|struct)\s+(?P<name>\w+)(?:\s*:\s*\w+)?$")
+# An alignment macro may come first (0.9.11's "VR_CAMERA_DECL_ALIGN( 8 ) struct CameraVideoStreamFrame_t")
+typedecl = re.compile(r"^(?:\w+\(\s*\d+\s*\)\s+)?(?:enum(?:\s+class)?|struct)\s+(?P<name>\w+)(?:\s*:\s*\w+)?$")
 
 typedef = re.compile(r"^typedef\s+(?P<def>[\w\s\d_\*&]+)\s+(?P<name>\w+);$")
 typedef_struct = re.compile(r"^typedef\s+(?:struct|union)$")
@@ -174,7 +176,8 @@ def parseline(line, context=None):
         for fullarg in args_str.split(","):
             fullarg = fullarg.strip()
 
-            if fullarg == "void":
+            # "()", "( )" (IVRTrackedCamera_006's GetCameraTrackingSpace) and "(void)" take nothing
+            if fullarg == "void" or not fullarg:
                 continue
 
             amatch = argr.match(fullarg.strip())
@@ -186,5 +189,5 @@ def parseline(line, context=None):
 
             args.append(arg_t(type=atype, name=aname, default=adefault, str=fullarg))
 
-    funcdef = funcdef_t(return_type=ret, name=name, args=args)
+    funcdef = funcdef_t(return_type=ret, name=name, args=args, const=bool(match.group("const")))
     return funcdef

@@ -38,7 +38,8 @@ public:
     fi.write("\n")
 
     for func in iface.functions:
-        fi.write(f"\t{func.return_type} {func.name}({func.args_str()}) override;\n")
+        const = " const" if func.const else ""
+        fi.write(f"\t{func.return_type} {func.name}({func.args_str()}){const} override;\n")
 
     fi.write("};\n")
 
@@ -103,7 +104,8 @@ std::shared_ptr<{cls}> GetCreate{getter_name}() {{
             if namespace in f.return_type:
                 return_str += f" ({f.return_type})"
 
-            fi.write(f"{f.return_type} {cname}::{f.name}({f.args_str()}) {{\n"
+            const = " const" if f.const else ""
+            fi.write(f"{f.return_type} {cname}::{f.name}({f.args_str()}){const} {{\n"
                      "\tif (oovr_global_configuration.LogAllOpenVRCalls())\n"
                      f"\t\tOOVR_LOG(\"Entered function (from interface {ver.namespace()})\");\n"
                      f"\t{return_str} base->{f.name}({nargs});\n}}\n")

@@ -8,6 +8,9 @@
 #include "IVRChaperone_004.h"
 #include "IVRCompositor_005.h"
 #include "IVRControlPanel_001.h"
+#include "IVRDriverManager_001.h"
+#include "IVRSpatialAnchors_001.h"
+#include "IVRTrackedCamera_006.h"
 #include "IVRInput_003.h"
 #include "IVRNotifications_001.h"
 #include "IVRRenderModels_001.h"
@@ -683,6 +686,62 @@ void OldMisc(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// The interfaces the fork never had (expect/new_interfaces.json): an anchor kept and given back through its descriptor,
+// the one driver (the OpenXR runtime), and no camera
+void NewInterfaces(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* anchors = (vr::IVRSpatialAnchors_001::IVRSpatialAnchors*)c.core->GetGenericInterface("IVRSpatialAnchors_001", &le);
+	auto* drivers = (vr::IVRDriverManager_001::IVRDriverManager*)c.core->GetGenericInterface("IVRDriverManager_001", &le);
+	auto* camera = (vr::IVRTrackedCamera_006::IVRTrackedCamera*)c.core->GetGenericInterface("IVRTrackedCamera_006", &le);
+	if (!anchors || !drivers || !camera) {
+		c.Record("a new interface is missing", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	vr::IVRSpatialAnchors_001::SpatialAnchorPose_t pose = { { { { 1, 0, 0, 0.5f }, { 0, 1, 0, 1.25f }, { 0, 0, 1, -2 } } } };
+	vr::SpatialAnchorHandle_t handle = 0;
+	Json::Value r;
+	r["create"] = (int)anchors->CreateSpatialAnchorFromPose(0, vr::TrackingUniverseStanding, &pose, &handle);
+	vr::IVRSpatialAnchors_001::SpatialAnchorPose_t back = {};
+	r["get"] = (int)anchors->GetSpatialAnchorPose(handle, vr::TrackingUniverseStanding, &back);
+	r["same pose"] = memcmp(&back, &pose, sizeof(pose)) == 0;
+	uint32_t length = 0;
+	r["descriptor size asked"] = (int)anchors->GetSpatialAnchorDescriptor(handle, nullptr, &length);
+	std::string descriptor(length, '\0');
+	r["descriptor"] = (int)anchors->GetSpatialAnchorDescriptor(handle, descriptor.data(), &length);
+	vr::SpatialAnchorHandle_t again = 0;
+	r["from descriptor"] = (int)anchors->CreateSpatialAnchorFromDescriptor(descriptor.c_str(), &again);
+	back = {};
+	anchors->GetSpatialAnchorPose(again, vr::TrackingUniverseStanding, &back);
+	r["descriptor pose same"] = memcmp(&back, &pose, sizeof(pose)) == 0;
+	r["new handle"] = again != handle && again != 0;
+	r["unknown handle"] = (int)anchors->GetSpatialAnchorPose(handle + 1000, vr::TrackingUniverseStanding, &back);
+	c.Record("IVRSpatialAnchors_001 round trip", r);
+
+	r = Json::Value();
+	char name[64] = {};
+	r["count"] = drivers->GetDriverCount();
+	r["name size"] = drivers->GetDriverName(0, name, sizeof(name));
+	r["name"] = name;
+	r["handle"] = (Json::UInt64)drivers->GetDriverHandle(name);
+	r["enabled"] = drivers->IsEnabled(0);
+	c.Record("IVRDriverManager_001", r);
+
+	r = Json::Value();
+	bool has = true;
+	r["ret"] = (int)camera->HasCamera(vr::k_unTrackedDeviceIndex_Hmd, &has);
+	r["has camera"] = has;
+	c.Record("IVRTrackedCamera_006 HasCamera", r);
+
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -759,6 +818,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "old-submit", OldSubmit },
 		{ "old-overlay", OldOverlay },
 		{ "old-misc", OldMisc },
+		{ "new-interfaces", NewInterfaces },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

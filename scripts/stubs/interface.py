@@ -141,6 +141,7 @@ class Function:
     return_type: str
     args: List[libparse.arg_t]
     user_implemented: bool = False
+    const: bool = False
 
     def args_str(self):
         """
@@ -172,7 +173,7 @@ def _read_headers(interface: InterfaceDef) -> List[Function]:
             user_funcs = interface.spec.manual_functions.get(interface.proxy_class_name(), None)
             user_defined = user_funcs is not None and (func.name in user_funcs)
 
-            func = Function(func.name, func.return_type, func.args, user_defined)
+            func = Function(func.name, func.return_type, func.args, user_defined, func.const)
             funcs.append(func)
 
     # A method the parser can't read would shift every later one in the vtable: count the declarations to be sure
@@ -199,6 +200,8 @@ def _get_global_context():
     headers_dir = InterfaceDef.INTERFACES_DIR
     libparse.read_context(_global_ctx, headers_dir / "interfaces/public_vrtypes.h", "vr")
     libparse.read_context(_global_ctx, headers_dir / "interfaces/vrtypes.h", "vr")
+    # IVRTrackedCamera_001's frame types (SDK 0.9.11's shared camera section)
+    libparse.read_context(_global_ctx, headers_dir / "interfaces/vrtrackedcameratypes.h", "vr")
     _global_ctx.update(deleted_types_context()[None])
     return _global_ctx
 

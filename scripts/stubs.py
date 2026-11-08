@@ -70,6 +70,12 @@ interfaces_list = [
     "Notifications",
     "ControlPanel",
     "HeadsetView",
+    "TrackedCamera",
+    "Resources",
+    "SpatialAnchors",
+    "Debug",
+    "IOBuffer",
+    "DriverManager",
 
     # Driver interfaces
     #"ServerDriverHost",
