@@ -15,8 +15,10 @@
 
 void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 {
-	*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * oovr_global_configuration.SupersampleRatio());
-	*height = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectHeight * oovr_global_configuration.SupersampleRatio());
+	if (width)
+		*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * oovr_global_configuration.SupersampleRatio());
+	if (height)
+		*height = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectHeight * oovr_global_configuration.SupersampleRatio());
 }
 
 // from BaseSystem
@@ -28,7 +30,11 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->seatedSpace);
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
-	OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
+	if (cachedViews.viewCount != XruEyeCount) {
+		// No views from the runtime (yet): an identity projection rather than an end
+		OOVR_LOG_ONCE("GetProjectionMatrix: the OpenXR runtime gave no views, answering identity");
+		return O2S_m4(glm::mat4(1.0f));
+	}
 
 	// Build the projection matrix
 	// It looks like there aren't any functions in glm that can take different l/r/t/b FOV values, so do it ourselves
@@ -36,7 +42,6 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 	// vector) and then transpose it back to being a column-major vector.
 	const XrFovf& fov = views[eEye].fov;
 
-	float twoNear = fNearZ * 2;
 	float tanL = tanf(fov.angleLeft);
 	float tanR = tanf(fov.angleRight);
 	float tanU = tanf(fov.angleUp);
@@ -60,15 +65,12 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 
 		// Don't transpose, since D3D uses row-major matricies anyway.
 	} else {
-		// FIXME this transform is almost certainly wrong
-		m[0] = glm::vec4(twoNear / horizontalFov, 0, (tanL + tanR) / horizontalFov, 0); // First row, determines X out multiplication with vector
-		m[1] = glm::vec4(0, twoNear / horizontalFov, (tanU + tanD) / verticalFov, 0); // Determines Y
+		// The same off-axis frustum as above (OpenVR's matrices are row-major for every API), with OpenGL's
+		// -1..1 depth range: glFrustum with l, r, t, b = near * tan(angle)
+		m[0] = glm::vec4(2 / horizontalFov, 0, (tanL + tanR) / horizontalFov, 0); // First row, determines X
+		m[1] = glm::vec4(0, 2 / verticalFov, (tanU + tanD) / verticalFov, 0); // Determines Y
 		m[2] = glm::vec4(0, 0, -(fNearZ + fFarZ) / (fFarZ - fNearZ), -(2 * fNearZ * fFarZ) / (fFarZ - fNearZ)); // Determines Z
 		m[3] = glm::vec4(0, 0, -1, 0); // Determines W
-
-		m = glm::transpose(m);
-
-		STUBBED(); // TODO make sure the OpenGL transform matrix is correct
 	}
 
 	return O2S_m4(m);
@@ -83,7 +85,19 @@ void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, flo
 	// TODO deduplicate with GetProjectionMatrix
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->seatedSpace);
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
-	OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
+	if (cachedViews.viewCount != XruEyeCount) {
+		// No views from the runtime (yet): a 90 degree view rather than an end
+		OOVR_LOG_ONCE("GetProjectionRaw: the OpenXR runtime gave no views, answering 90 degrees");
+		if (pfLeft)
+			*pfLeft = -1;
+		if (pfRight)
+			*pfRight = 1;
+		if (pfTop)
+			*pfTop = -1;
+		if (pfBottom)
+			*pfBottom = 1;
+		return;
+	}
 
 	const XrFovf& fov = views[eEye].fov;
 
@@ -112,10 +126,14 @@ void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, flo
 	if (fov.angleDown == 0.0f && fov.angleUp == 0.0f)
 		OOVR_LOG("Warning! FOV is 0");
 
-	*pfTop = tanf(fov.angleDown);
-	*pfBottom = tanf(fov.angleUp);
-	*pfLeft = tanf(fov.angleLeft);
-	*pfRight = tanf(fov.angleRight);
+	if (pfTop)
+		*pfTop = tanf(fov.angleDown);
+	if (pfBottom)
+		*pfBottom = tanf(fov.angleUp);
+	if (pfLeft)
+		*pfLeft = tanf(fov.angleLeft);
+	if (pfRight)
+		*pfRight = tanf(fov.angleRight);
 }
 
 bool XrHMD::ComputeDistortion(vr::EVREye eEye, float fU, float fV, vr::DistortionCoordinates_t* pDistortionCoordinates)

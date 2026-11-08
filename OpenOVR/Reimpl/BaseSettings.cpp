@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Misc/EnumNames.h"
 #define BASE_IMPL
 #include "BaseSettings.h"
 #include "BaseSystem.h"
@@ -12,54 +13,22 @@
 #include <codecvt>
 #endif
 
-#define STUBBED_BASIC()                                       \
-	{                                                         \
-		string str = "Hit stubbed file at " __FILE__ " func " \
-		             " line "                                 \
-		    + to_string(__LINE__);                            \
-		OOVR_ABORT_T(str.c_str(), "Stubbed func!");           \
-	}
-
-#undef STUBBED
-#define STUBBED()                                                          \
-	{                                                                      \
-		string str = "Hit stubbed file at " __FILE__ " func "              \
-		             " line "                                              \
-		    + to_string(__LINE__);                                         \
-		str += "via " + string(pchSection) + "." + string(pchSettingsKey); \
-		OOVR_ABORT_T(str.c_str(), "Stubbed func!");                        \
-	}
-
-#define UNSET_SETTING()                                                    \
-	{                                                                      \
-		string str = "Hit undefined setting at " __FILE__ " func "         \
-		             " line "                                              \
-		    + to_string(__LINE__);                                         \
-		str += "via " + string(pchSection) + "." + string(pchSettingsKey); \
-		OOVR_SOFT_ABORT(str.c_str());                                      \
-	}
+// A setting OpenComposite has no value for: counted in the compatibility summary (with the first one's name), and
+// the caller goes on to return its "not set" answer
+#define UNSET_SETTING()                                                                               \
+	do {                                                                                              \
+		OC_SOFT_SITE_;                                                                                \
+		oc_soft_fail(&oc_soft_site_, "Setting %s.%s isn't set", pchSection ? pchSection : "(null)", \
+		    pchSettingsKey ? pchSettingsKey : "(null)");                                              \
+	} while (0)
 
 namespace kk1 = vr::IVRSettings_001;
 namespace kk = vr::IVRSettings_002;
 
 const char* BaseSettings::GetSettingsErrorNameFromEnum(EVRSettingsError eError)
 {
-	switch (eError) {
-	case VRSettingsError_None:
-		return NULL;
-	case VRSettingsError_IPCFailed:
-		return "IPC Failed";
-	case VRSettingsError_WriteFailed:
-		return "Write Failed";
-	case VRSettingsError_ReadFailed:
-		return "Read Failed";
-	case VRSettingsError_JsonParseFailed:
-		return "JSON Parse Failed";
-	case VRSettingsError_UnsetSettingHasNoDefault:
-		return "IPC Failed";
-	}
-	OOVR_LOG(to_string(eError).c_str());
-	STUBBED_BASIC();
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRSettingsError", (int32_t)eError, "Unknown VRSettingsError (%d)");
 }
 bool BaseSettings::Sync(bool bForce, EVRSettingsError* peError)
 {
@@ -72,6 +41,12 @@ bool BaseSettings::Sync(bool bForce, EVRSettingsError* peError)
 }
 void BaseSettings::SetBool(const char* pchSection, const char* pchSettingsKey, bool bValue, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_WriteFailed;
+		return;
+	}
 	if (peError)
 		*peError = VRSettingsError_None;
 
@@ -114,6 +89,12 @@ void BaseSettings::SetBool(const char* pchSection, const char* pchSettingsKey, b
 }
 void BaseSettings::SetInt32(const char* pchSection, const char* pchSettingsKey, int32_t nValue, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_WriteFailed;
+		return;
+	}
 	if (peError)
 		*peError = VRSettingsError_None;
 
@@ -133,6 +114,12 @@ void BaseSettings::SetInt32(const char* pchSection, const char* pchSettingsKey, 
 }
 void BaseSettings::SetFloat(const char* pchSection, const char* pchSettingsKey, float flValue, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_WriteFailed;
+		return;
+	}
 	if (peError)
 		*peError = VRSettingsError_None;
 
@@ -158,6 +145,12 @@ void BaseSettings::SetFloat(const char* pchSection, const char* pchSettingsKey, 
 }
 void BaseSettings::SetString(const char* pchSection, const char* pchSettingsKey, const char* pchValue, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_WriteFailed;
+		return;
+	}
 	if (peError)
 		*peError = VRSettingsError_None;
 
@@ -170,6 +163,12 @@ void BaseSettings::SetString(const char* pchSection, const char* pchSettingsKey,
 }
 bool BaseSettings::GetBool(const char* pchSection, const char* pchSettingsKey, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_ReadFailed;
+		return false;
+	}
 	string section = pchSection;
 	string key = pchSettingsKey;
 
@@ -206,6 +205,12 @@ bool BaseSettings::GetBool(const char* pchSection, const char* pchSettingsKey, E
 }
 int32_t BaseSettings::GetInt32(const char* pchSection, const char* pchSettingsKey, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_ReadFailed;
+		return 0;
+	}
 	if (peError)
 		*peError = VRSettingsError_None;
 
@@ -217,6 +222,12 @@ int32_t BaseSettings::GetInt32(const char* pchSection, const char* pchSettingsKe
 }
 float BaseSettings::GetFloat(const char* pchSection, const char* pchSettingsKey, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_ReadFailed;
+		return 0.0f;
+	}
 	string section = pchSection;
 	string key = pchSettingsKey;
 
@@ -248,6 +259,14 @@ float BaseSettings::GetFloat(const char* pchSection, const char* pchSettingsKey,
 void BaseSettings::GetString(const char* pchSection, const char* pchSettingsKey, VR_OUT_STRING() char* pchValue,
     uint32_t unValueLen, EVRSettingsError* peError)
 {
+	// A null section or key reads as unset and doesn't write
+	if (!pchSection || !pchSettingsKey) {
+		if (peError)
+			*peError = VRSettingsError_ReadFailed;
+		if (pchValue && unValueLen)
+			pchValue[0] = 0;
+		return;
+	}
 
 	if (peError)
 		*peError = VRSettingsError_None;
@@ -305,24 +324,25 @@ void BaseSettings::GetString(const char* pchSection, const char* pchSettingsKey,
 
 found:
 
-	// +1 for the null
-	if (unValueLen < result.length() + 1) {
-		OOVR_ABORT("unValueLen too short!");
+	// Cut short and terminated if the app's buffer is too small (+1 for the null)
+	if (pchValue && unValueLen) {
+		size_t n = std::min<size_t>(result.size(), unValueLen - 1);
+		memcpy(pchValue, result.data(), n);
+		pchValue[n] = 0;
 	}
-
-	strcpy_s(pchValue, unValueLen, result.c_str());
+	if (unValueLen < result.length() + 1 && peError)
+		*peError = VRSettingsError_ReadFailed;
 }
 void BaseSettings::RemoveSection(const char* pchSection, EVRSettingsError* peError)
 {
+	// There are no stored settings yet, so there's nothing to remove
 	if (peError)
-		*peError = VRSettingsError_None;
-
-	STUBBED_BASIC();
+		*peError = VRSettingsError_WriteFailed;
+	OC_UNSUPPORTED_VOID("RemoveSection: settings aren't stored");
 }
 void BaseSettings::RemoveKeyInSection(const char* pchSection, const char* pchSettingsKey, EVRSettingsError* peError)
 {
 	if (peError)
-		*peError = VRSettingsError_None;
-
-	STUBBED();
+		*peError = VRSettingsError_WriteFailed;
+	OC_UNSUPPORTED_VOID("RemoveKeyInSection: settings aren't stored");
 }

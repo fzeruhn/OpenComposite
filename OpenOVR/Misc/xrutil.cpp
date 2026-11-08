@@ -172,20 +172,27 @@ void XrSessionGlobals::ClearCachedViews()
 
 XrSpace xr_space_from_tracking_origin(vr::ETrackingUniverseOrigin origin)
 {
+	if (!xr_gbl)
+		return XR_NULL_HANDLE;
 	switch (origin) {
 	case vr::TrackingUniverseSeated:
 		return xr_gbl->seatedSpace;
 	case vr::TrackingUniverseStanding:
 		return xr_gbl->floorSpace;
 	case vr::TrackingUniverseRawAndUncalibrated:
-		OOVR_ABORT("Tracking origin TrackingUniverseRawAndUncalibrated not supported");
+		// OpenXR has no raw tracking space; the stage is the nearest (it's what SteamVR's raw space is calibrated to)
+		OOVR_LOG_ONCE("Tracking origin TrackingUniverseRawAndUncalibrated: using the standing space");
+		return xr_gbl->floorSpace;
 	default:
-		OOVR_ABORTF("Unknown ETrackingUniverseOrigin type %d", origin);
+		OOVR_LOGF("Unknown ETrackingUniverseOrigin type %d: using the standing space", origin);
+		return xr_gbl->floorSpace;
 	}
 }
 
 XrSpace xr_space_from_ref_space_type(XrReferenceSpaceType spaceType)
 {
+	if (!xr_gbl)
+		return XR_NULL_HANDLE;
 	switch (spaceType) {
 	case XR_REFERENCE_SPACE_TYPE_VIEW:
 		return xr_gbl->viewSpace;
@@ -195,7 +202,8 @@ XrSpace xr_space_from_ref_space_type(XrReferenceSpaceType spaceType)
 	case XR_REFERENCE_SPACE_TYPE_STAGE:
 		return xr_gbl->floorSpace;
 	default:
-		OOVR_ABORTF("Unknown XrReferenceSpaceType type %d", spaceType);
+		OOVR_LOGF("Unknown XrReferenceSpaceType type %d: using the stage", spaceType);
+		return xr_gbl->floorSpace;
 	}
 }
 

@@ -468,40 +468,8 @@ EVROverlayError BaseOverlay::GetOverlayImageData(VROverlayHandle_t ulOverlayHand
 }
 const char* BaseOverlay::GetOverlayErrorNameFromEnum(EVROverlayError error)
 {
-#define ERR_CASE(name)          \
-	case VROverlayError_##name: \
-		return #name;
-	switch (error) {
-		ERR_CASE(None);
-		ERR_CASE(UnknownOverlay);
-		ERR_CASE(InvalidHandle);
-		ERR_CASE(PermissionDenied);
-		ERR_CASE(OverlayLimitExceeded);
-		ERR_CASE(WrongVisibilityType);
-		ERR_CASE(KeyTooLong);
-		ERR_CASE(NameTooLong);
-		ERR_CASE(KeyInUse);
-		ERR_CASE(WrongTransformType);
-		ERR_CASE(InvalidTrackedDevice);
-		ERR_CASE(InvalidParameter);
-		ERR_CASE(ThumbnailCantBeDestroyed);
-		ERR_CASE(ArrayTooSmall);
-		ERR_CASE(RequestFailed);
-		ERR_CASE(InvalidTexture);
-		ERR_CASE(UnableToLoadFile);
-		ERR_CASE(KeyboardAlreadyInUse);
-		ERR_CASE(NoNeighbor);
-		ERR_CASE(TooManyMaskPrimitives);
-		ERR_CASE(BadMaskPrimitive);
-		ERR_CASE(TextureAlreadyLocked);
-		ERR_CASE(TextureLockCapacityReached);
-		ERR_CASE(TextureNotLocked);
-		ERR_CASE(TimedOut);
-	}
-#undef ERR_CASE
-
-	const char* name = OC_EnumName("EVROverlayError", (int32_t)error);
-	return name ? name : "Unknown";
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVROverlayError", (int32_t)error, "Unknown EVROverlayError (%d)");
 }
 EVROverlayError BaseOverlay::SetOverlayRenderingPid(VROverlayHandle_t ulOverlayHandle, uint32_t unPID)
 {

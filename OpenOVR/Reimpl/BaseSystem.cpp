@@ -7,6 +7,7 @@
 #include "BaseSystem.h"
 #include "Drivers/Backend.h"
 #include "Misc/Config.h"
+#include "Misc/EnumNames.h"
 #include "convert.h"
 #include "generated/static_bases.gen.h"
 
@@ -138,36 +139,25 @@ bool BaseSystem::GetTimeSinceLastVsync(float* pfSecondsSinceLastVsync, uint64_t*
 
 int32_t BaseSystem::GetD3D9AdapterIndex()
 {
-	STUBBED();
+	// The first adapter, until the OpenXR runtime's adapter is looked up for D3D9 too
+	return 0;
 }
 
 void BaseSystem::GetDXGIOutputInfo(int32_t* adapterIndex)
 {
+	if (!adapterIndex)
+		return;
+	// The first adapter unless the OpenXR runtime names another
+	*adapterIndex = 0;
 #ifdef SUPPORT_DX
-
-// TODO Turtle1331 use OOVR_ABORT from logging.h
-#ifdef WIN32
-#define VALIDATE(x, msg)                                                \
-	if (!(x)) {                                                         \
-		MessageBoxA(nullptr, (msg), "CVRSystem", MB_ICONERROR | MB_OK); \
-		exit(-1);                                                       \
-	}
-#else
-#define VALIDATE(x, msg) \
-	if (!(x)) {          \
-		exit(-42);       \
-	}
-#endif
-
 	// See the comment on XrExt for why we have to use it
 	// FIXME dx12 support?
 	XrGraphicsRequirementsD3D11KHR graphicsRequirements = { XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR };
-	XrResult res = xr_ext->xrGetD3D11GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements);
-	OOVR_FAILED_XR_ABORT(res);
+	OC_XR_SOFT_VOID(xr_ext->xrGetD3D11GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements));
 
 	IDXGIFactory* DXGIFactory = nullptr;
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
-	VALIDATE((hr == ERROR_SUCCESS), "CreateDXGIFactory1 failed");
+	OC_SOFT_CHECK_VOID(SUCCEEDED(hr) && DXGIFactory, "GetDXGIOutputInfo: CreateDXGIFactory failed (0x%08lx), answering adapter 0", (unsigned long)hr);
 
 	bool match = false;
 	IDXGIAdapter* Adapter = nullptr;
@@ -189,17 +179,17 @@ void BaseSystem::GetDXGIOutputInfo(int32_t* adapterIndex)
 
 	DXGIFactory->Release();
 
-	if (!match)
-		OOVR_ABORT("Cannot find graphics card!");
-
-#undef VALIDATE
+	OC_SOFT_CHECK_VOID(match, "GetDXGIOutputInfo: no adapter has the OpenXR runtime's LUID, answering adapter 0");
 #else
-	OOVR_ABORT("DX not supported - build with SUPPORT_DX defined");
+	OC_UNSUPPORTED_VOID("GetDXGIOutputInfo: this build has no D3D support, answering adapter 0");
 #endif
 }
 
 void BaseSystem::GetOutputDevice(uint64_t* pnDevice, ETextureType textureType, VkInstance_T* pInstance)
 {
+	if (!pnDevice)
+		return;
+	*pnDevice = 0;
 
 	switch (textureType) {
 	case TextureType_Vulkan: {
@@ -208,7 +198,7 @@ void BaseSystem::GetOutputDevice(uint64_t* pnDevice, ETextureType textureType, V
 		XrBackend::VkGetPhysicalDevice(pInstance, &physDev);
 		*pnDevice = (uint64_t)physDev;
 #else
-		OOVR_ABORT("OpenComposite was compiled with Vulkan support disabled, and app attempted to use Vulkan!");
+		OC_UNSUPPORTED_VOID("GetOutputDevice: this build has no Vulkan support");
 #endif
 		break;
 	}
@@ -480,38 +470,8 @@ uint32_t BaseSystem::GetStringTrackedDeviceProperty(vr::TrackedDeviceIndex_t unD
 
 const char* BaseSystem::GetPropErrorNameFromEnum(ETrackedPropertyError error)
 {
-#define ERR_CASE(err) \
-	case err:         \
-		return #err
-
-	switch (error) {
-		ERR_CASE(TrackedProp_Success);
-		ERR_CASE(TrackedProp_WrongDataType);
-		ERR_CASE(TrackedProp_WrongDeviceClass);
-		ERR_CASE(TrackedProp_BufferTooSmall);
-		ERR_CASE(TrackedProp_UnknownProperty);
-		ERR_CASE(TrackedProp_InvalidDevice);
-		ERR_CASE(TrackedProp_CouldNotContactServer);
-		ERR_CASE(TrackedProp_ValueNotProvidedByDevice);
-		ERR_CASE(TrackedProp_StringExceedsMaximumLength);
-		ERR_CASE(TrackedProp_NotYetAvailable);
-		ERR_CASE(TrackedProp_PermissionDenied);
-		ERR_CASE(TrackedProp_InvalidOperation);
-		ERR_CASE(TrackedProp_CannotWriteToWildcards);
-		ERR_CASE(TrackedProp_IPCReadFailure);
-		ERR_CASE(TrackedProp_OutOfMemory);
-		ERR_CASE(TrackedProp_InvalidContainer);
-
-	default: {
-		// Doesn't work across threads, but in practice shouldn't be an issue.
-		static char uknBuf[32];
-		memset(uknBuf, 0, sizeof(uknBuf));
-		snprintf(uknBuf, sizeof(uknBuf) - 1, "Unknown property error (%d)", (int)error);
-		return uknBuf;
-	}
-	}
-
-#undef ERR_CASE
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("ETrackedPropertyError", (int32_t)error, "Unknown property error (%d)");
 }
 
 bool BaseSystem::IsInputAvailable()
@@ -645,6 +605,9 @@ bool BaseSystem::PollNextEvent(VREvent_t* pEvent, uint32_t uncbVREvent)
 
 bool BaseSystem::PollNextEventWithPose(ETrackingUniverseOrigin eOrigin, VREvent_t* pEvent, uint32_t uncbVREvent, vr::TrackedDevicePose_t* pTrackedDevicePose)
 {
+	// No event struct, or one too short to say what the event is: nothing is taken off the queue
+	if (!pEvent || uncbVREvent < offsetof(VREvent_t, data))
+		return false;
 	memset(pEvent, 0, uncbVREvent);
 
 	std::unique_lock lock(events_mutex);
@@ -668,7 +631,8 @@ bool BaseSystem::PollNextEventWithPose(ETrackingUniverseOrigin eOrigin, VREvent_
 
 const char* BaseSystem::GetEventTypeNameFromEnum(EVREventType eType)
 {
-	STUBBED();
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVREventType", (int32_t)eType, "Unknown EVREventType (%d)");
 }
 
 HiddenAreaMesh_t BaseSystem::GetHiddenAreaMesh(EVREye eEye, EHiddenAreaMeshType type)
@@ -678,8 +642,14 @@ HiddenAreaMesh_t BaseSystem::GetHiddenAreaMesh(EVREye eEye, EHiddenAreaMeshType 
 
 bool BaseSystem::GetControllerState(vr::TrackedDeviceIndex_t controllerDeviceIndex, vr::VRControllerState_t* controllerState, uint32_t controllerStateSize)
 {
-	if (sizeof(VRControllerState_t) != controllerStateSize)
-		OOVR_ABORT("Bad controller state size - was the host compiled with an older version of OpenVR?");
+	if (!controllerState)
+		return false;
+	if (sizeof(VRControllerState_t) != controllerStateSize) {
+		// Zeroed within the size the app gave, so it reads "no buttons" whatever its struct is
+		memset(controllerState, 0, std::min<size_t>(controllerStateSize, sizeof(VRControllerState_t)));
+		OC_UNSUPPORTED(false, "GetControllerState: a VRControllerState_t of %u bytes, not %u", controllerStateSize,
+		    (unsigned)sizeof(VRControllerState_t));
+	}
 
 	memset(controllerState, 0, controllerStateSize);
 
@@ -707,8 +677,8 @@ bool BaseSystem::GetControllerState(vr::TrackedDeviceIndex_t controllerDeviceInd
 bool BaseSystem::GetControllerStateWithPose(ETrackingUniverseOrigin eOrigin, vr::TrackedDeviceIndex_t unControllerDeviceIndex,
     vr::VRControllerState_t* pControllerState, uint32_t unControllerStateSize, TrackedDevicePose_t* pTrackedDevicePose)
 {
-
-	BackendManager::Instance().GetSinglePose(eOrigin, unControllerDeviceIndex, pTrackedDevicePose, ETrackingStateType::TrackingStateType_Now);
+	if (pTrackedDevicePose)
+		BackendManager::Instance().GetSinglePose(eOrigin, unControllerDeviceIndex, pTrackedDevicePose, ETrackingStateType::TrackingStateType_Now);
 
 	return GetControllerState(unControllerDeviceIndex, pControllerState, unControllerStateSize);
 }
@@ -733,69 +703,25 @@ void BaseSystem::TriggerHapticPulse(vr::TrackedDeviceIndex_t unControllerDeviceI
 
 const char* BaseSystem::GetButtonIdNameFromEnum(EVRButtonId eButtonId)
 {
-#define BTN_CASE(err) \
-	case err:         \
-		return #err
-
-	switch (eButtonId) {
-		BTN_CASE(k_EButton_System);
-		BTN_CASE(k_EButton_ApplicationMenu);
-		BTN_CASE(k_EButton_Grip);
-		BTN_CASE(k_EButton_DPad_Left);
-		BTN_CASE(k_EButton_DPad_Up);
-		BTN_CASE(k_EButton_DPad_Right);
-		BTN_CASE(k_EButton_DPad_Down);
-		BTN_CASE(k_EButton_A);
-		BTN_CASE(k_EButton_ProximitySensor);
-		BTN_CASE(k_EButton_Axis0);
-		BTN_CASE(k_EButton_Axis1);
-		BTN_CASE(k_EButton_Axis2);
-		BTN_CASE(k_EButton_Axis3);
-		BTN_CASE(k_EButton_Axis4);
-
-	default: {
-		// Doesn't work across threads, but in practice shouldn't be an issue.
-		static char uknBuf[32];
-		memset(uknBuf, 0, sizeof(uknBuf));
-		snprintf(uknBuf, sizeof(uknBuf) - 1, "Unknown EVRButtonId (%d)", (int)eButtonId);
-		return uknBuf;
-	}
-	}
-
-#undef BTN_CASE
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRButtonId", (int32_t)eButtonId, "Unknown EVRButtonId (%d)");
 }
 
 const char* BaseSystem::GetControllerAxisTypeNameFromEnum(EVRControllerAxisType eAxisType)
 {
-#define AXIS_CASE(err) \
-	case err:          \
-		return #err
-
-	switch (eAxisType) {
-		AXIS_CASE(k_eControllerAxis_None);
-		AXIS_CASE(k_eControllerAxis_TrackPad);
-		AXIS_CASE(k_eControllerAxis_Joystick);
-		AXIS_CASE(k_eControllerAxis_Trigger);
-	default: {
-		// Doesn't work across threads, but in practice shouldn't be an issue.
-		static char uknBuf[48];
-		memset(uknBuf, 0, sizeof(uknBuf));
-		snprintf(uknBuf, sizeof(uknBuf) - 1, "Unknown EVRControllerAxisType (%d)", (int)eAxisType);
-		return uknBuf;
-	}
-	}
-
-#undef AXIS_CASE
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRControllerAxisType", (int32_t)eAxisType, "Unknown EVRControllerAxisType (%d)");
 }
 
 bool BaseSystem::CaptureInputFocus()
 {
-	STUBBED();
+	// Retired in SteamVR: nothing takes the input focus from other programs
+	return false;
 }
 
 void BaseSystem::ReleaseInputFocus()
 {
-	STUBBED();
+	// CaptureInputFocus never takes it
 }
 
 bool BaseSystem::IsInputFocusCapturedByAnotherProcess()
@@ -805,12 +731,14 @@ bool BaseSystem::IsInputFocusCapturedByAnotherProcess()
 
 uint32_t BaseSystem::DriverDebugRequest(vr::TrackedDeviceIndex_t unDeviceIndex, const char* pchRequest, char* pchResponseBuffer, uint32_t unResponseBufferSize)
 {
-	STUBBED();
+	if (pchResponseBuffer && unResponseBufferSize)
+		pchResponseBuffer[0] = 0;
+	OC_UNSUPPORTED(0, "DriverDebugRequest: there are no OpenVR drivers to ask");
 }
 
 vr::EVRFirmwareError BaseSystem::PerformFirmwareUpdate(vr::TrackedDeviceIndex_t unDeviceIndex)
 {
-	STUBBED();
+	OC_UNSUPPORTED(vr::VRFirmwareError_Fail, "PerformFirmwareUpdate: firmware updates are the headset vendor's tools'");
 }
 
 void BaseSystem::AcknowledgeQuit_Exiting()
@@ -820,12 +748,15 @@ void BaseSystem::AcknowledgeQuit_Exiting()
 
 void BaseSystem::AcknowledgeQuit_UserPrompt()
 {
-	STUBBED();
+	// Retired in SteamVR: nothing waits for it
 }
 
 uint32_t BaseSystem::GetAppContainerFilePaths(VR_OUT_STRING() char* pchBuffer, uint32_t unBufferSize)
 {
-	STUBBED();
+	if (pchBuffer && unBufferSize)
+		pchBuffer[0] = 0;
+	// No app containers (Linux's pressure-vessel): no paths
+	return 0;
 }
 
 const char* BaseSystem::GetRuntimeVersion()
@@ -847,12 +778,12 @@ HmdMatrix44_t BaseSystem::GetProjectionMatrix(EVREye eye, float znear, float zfa
 
 void BaseSystem::PerformanceTestEnableCapture(bool bEnable)
 {
-	STUBBED();
+	// SteamVR's performance test isn't there
 }
 
 void BaseSystem::PerformanceTestReportFidelityLevelChange(int nFidelityLevel)
 {
-	STUBBED();
+	// SteamVR's performance test isn't there
 }
 
 // Tracking origin stuff
@@ -877,9 +808,11 @@ void BaseSystem::ResetSeatedZeroPose()
 			spaceInfo.poseInReferenceSpace.orientation.w = rot.w;
 
 			spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
-			auto oldSpace = xr_gbl->seatedSpace;
-			OOVR_FAILED_XR_ABORT(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &xr_gbl->seatedSpace));
-			xrDestroySpace(oldSpace);
+			// On failure the old seated space stays
+			XrSpace newSpace = XR_NULL_HANDLE;
+			OC_XR_SOFT_VOID(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &newSpace));
+			xrDestroySpace(xr_gbl->seatedSpace);
+			xr_gbl->seatedSpace = newSpace;
 		}
 	}
 }

@@ -78,6 +78,8 @@ void BackendManager::GetSinglePose(
     vr::TrackedDevicePose_t* pose,
     ETrackingStateType trackingState)
 {
+	if (!pose)
+		return;
 
 	std::shared_ptr<ITrackedDevice> dev = backend->GetDevice(index);
 
@@ -94,7 +96,8 @@ void BackendManager::GetDeviceToAbsoluteTrackingPose(
     vr::TrackedDevicePose_t* poseArray,
     uint32_t poseArrayCount)
 {
-
+	if (!poseArray)
+		return;
 	backend->GetDeviceToAbsoluteTrackingPose(toOrigin, predictedSecondsToPhotonsFromNow, poseArray, poseArrayCount);
 }
 

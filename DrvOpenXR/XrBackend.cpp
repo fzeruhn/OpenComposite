@@ -856,14 +856,14 @@ bool XrBackend::GetPlayAreaPoints(vr::HmdVector3_t* points, int* count)
 /** Determine whether the bounds are showing right now **/
 bool XrBackend::AreBoundsVisible()
 {
-	OOVR_SOFT_ABORT("No implementation");
+	// OpenXR doesn't say whether the runtime is showing its boundary
 	return false;
 }
 /** Set the boundaries to be visible or not (although setting this to false shouldn't affect
  * what happens if the player moves their hands too close and shows it that way) **/
 void XrBackend::ForceBoundsVisible(bool status)
 {
-	OOVR_SOFT_ABORT("No implementation");
+	// The runtime shows its boundary itself; OpenXR has no call to force it
 }
 
 bool XrBackend::IsInputAvailable()

@@ -470,14 +470,19 @@ VR_INTERFACE void* VRClientCoreFactory(const char* pInterfaceName, int* pReturnC
 	bool shouldUseOC = BaseClientCore::CheckAppEnabled();
 	if (!shouldUseOC) {
 		alternativeCoreFactory = PlatformGetAlternativeCoreFactory();
-
-		// TODO use a more descriptive error message
-		OOVR_FALSE_ABORT(alternativeCoreFactory);
-
-		goto use_alt;
+		if (alternativeCoreFactory)
+			goto use_alt;
+		// The app was set to SteamVR, which couldn't be loaded (logged): the game still starts, on OpenComposite
+		OOVR_LOG("SteamVR was chosen for this program but couldn't be loaded; using OpenComposite instead");
 	}
 
-	*pReturnCode = VRInitError_None;
+	if (pReturnCode)
+		*pReturnCode = VRInitError_None;
+	if (!pInterfaceName) {
+		if (pReturnCode)
+			*pReturnCode = VRInitError_Init_InterfaceNotFound;
+		return nullptr;
+	}
 
 	string name = pInterfaceName;
 
@@ -492,7 +497,9 @@ VR_INTERFACE void* VRClientCoreFactory(const char* pInterfaceName, int* pReturnC
 
 #undef CLIENT_VER
 
-	OOVR_LOG(pInterfaceName);
-	OOVR_MESSAGE(pInterfaceName, "Missing client interface");
-	ERR("unknown/unsupported interface " + name);
+	// As SteamVR answers a client core version it doesn't have
+	OOVR_LOGF("Client core interface %s isn't offered: answering InterfaceNotFound", pInterfaceName);
+	if (pReturnCode)
+		*pReturnCode = VRInitError_Init_InterfaceNotFound;
+	return nullptr;
 }

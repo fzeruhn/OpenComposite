@@ -13,10 +13,11 @@ OOVR_EVR_ControlPanel_Error BaseControlPanel::RegisterExternalWebRoot()
 }
 
 // Unknown functions
-#define UKN_FUNC(id)                     \
-	void BaseControlPanel::UknFunc##id() \
-	{                                    \
-		STUBBED();                       \
+// SteamVR's own (undocumented) control panel calls: nothing that a game relies on
+#define UKN_FUNC(id)                                                       \
+	void BaseControlPanel::UknFunc##id()                                   \
+	{                                                                      \
+		OC_UNSUPPORTED_VOID("IVRControlPanel: unknown function " #id); \
 	}
 
 UKN_FUNC(00);

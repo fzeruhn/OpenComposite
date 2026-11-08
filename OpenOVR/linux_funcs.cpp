@@ -16,18 +16,25 @@ void ZeroMemory(void* data, size_t len)
 	memset(data, 0, len);
 }
 
+// MSVC's would end the program on a string that doesn't fit; these cut it short and always terminate (if there's room)
 void strncpy_s(char* dest, size_t dest_size, char const* src, size_t max)
 {
-	// Probably not quite right - this is basically the same as strcpy_s - but it should do
-	OOVR_FALSE_ABORT(strlen(src) < max);
-	OOVR_FALSE_ABORT(strlen(src) < dest_size);
-	strncpy(dest, src, dest_size);
+	if (!dest || dest_size == 0)
+		return;
+	if (!src) {
+		dest[0] = 0;
+		return;
+	}
+	size_t n = strnlen(src, max);
+	if (n >= dest_size)
+		n = dest_size - 1;
+	memcpy(dest, src, n);
+	dest[n] = 0;
 }
 
 void strcpy_s(char* dest, size_t dest_size, char const* src)
 {
-	OOVR_FALSE_ABORT(strlen(src) < dest_size);
-	strcpy(dest, src);
+	strncpy_s(dest, dest_size, src, dest_size);
 }
 
 void DebugBreak()
@@ -59,7 +66,10 @@ void FindResourceLinux(int id, const char** start, const char** end)
 		RES_LIST_LINUX(RESOURCE_CASE);
 #undef RESOURCE_CASE
 	default:
-		OOVR_ABORTF("Invalid resource ID %d", id);
+		// The callers check for an empty resource
+		OOVR_LOGF("Invalid resource ID %d", id);
+		*start = nullptr;
+		*end = nullptr;
 	}
 }
 

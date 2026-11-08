@@ -6,14 +6,25 @@
 
 #include "../OpenOVR/convert.h"
 
+// A device type that doesn't track itself: not connected, no pose
+static void NoPose(vr::TrackedDevicePose_t* pose)
+{
+	if (!pose)
+		return;
+	*pose = {};
+	pose->eTrackingResult = vr::TrackingResult_Uninitialized;
+	pose->bPoseIsValid = false;
+	pose->bDeviceIsConnected = false;
+}
+
 void XrTrackedDevice::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t* pose, ETrackingStateType trackingState)
 {
-	STUBBED();
+	NoPose(pose);
 }
 
 void XrTrackedDevice::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t* pose, ETrackingStateType trackingState, double absTime)
 {
-	STUBBED();
+	NoPose(pose);
 }
 
 // Properties
