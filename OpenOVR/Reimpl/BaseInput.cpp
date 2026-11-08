@@ -23,6 +23,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <locale>
 #include <map>
+#include <mutex>
+#include <unordered_set>
 #include <math.h>
 #include <numbers>
 #include <optional>
@@ -202,8 +204,30 @@ static std::string pathFromParts(const std::initializer_list<std::string>& parts
 // Must be defined non-inline to avoid it ending up in stubs.gen.cpp
 BaseInput::Action::~Action() = default;
 BaseInput::ActionSource::~ActionSource() = default;
-BaseInput::InputValueHandle::InputValueHandle() = default;
-BaseInput::InputValueHandle::~InputValueHandle() = default;
+// The input value handles GetInputSourceHandle has handed out (they're pointers): cast_IVH answers null for any
+// other value instead of reading through it. Never freed: ~InputValueHandle can run during static destruction (the
+// interfaces map in openvr_api.cpp keeps BaseInput alive until then)
+static std::mutex& LiveHandlesLock()
+{
+	static std::mutex& lock = *new std::mutex;
+	return lock;
+}
+static std::unordered_set<const void*>& LiveHandles()
+{
+	static std::unordered_set<const void*>& handles = *new std::unordered_set<const void*>;
+	return handles;
+}
+
+BaseInput::InputValueHandle::InputValueHandle()
+{
+	std::lock_guard<std::mutex> guard(LiveHandlesLock());
+	LiveHandles().insert(this);
+}
+BaseInput::InputValueHandle::~InputValueHandle()
+{
+	std::lock_guard<std::mutex> guard(LiveHandlesLock());
+	LiveHandles().erase(this);
+}
 
 // Registry implementation
 
@@ -452,7 +476,8 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 			action.type = ActionType::Skeleton;
 		else if (type == "eyetracking") {
 			// OpenVR 2.15's eye tracking: there's no gaze to give (GetEyeTrackingData* report none), so leave the
-			// action out. Its handle still works, and bindings to it are skipped as for any action not in the manifest.
+			// action out. GetActionHandle still answers it; reading it answers InvalidHandle with the data zeroed (inactive),
+			// and bindings to it are skipped, as for any action not in the manifest.
 			OOVR_LOGF("Skipping eye tracking action '%s'", action.fullName.c_str());
 			skippedActionSets.insert(action.setName);
 			continue;
@@ -1269,6 +1294,9 @@ EVRInputError BaseInput::GetInputSourceHandle(const char* pchInputSourcePath, VR
 	// Get the existing InputValueHandle if it already exists, or make a new one otherwise. Applications can
 	// get whatever handles they want, regardless of whether the runtime associates any special meaning with it.
 
+	if (!pchInputSourcePath || !pHandle)
+		return VRInputError_InvalidParam;
+
 	const auto iter = inputHandleRegistry.find(pchInputSourcePath);
 	if (iter != inputHandleRegistry.end()) {
 		InputValueHandle* handle = iter->second.get();
@@ -1293,10 +1321,15 @@ EVRInputError BaseInput::GetInputSourceHandle(const char* pchInputSourcePath, VR
 	}
 
 	if (!handle->devicePathString.empty()) {
-		OOVR_FAILED_XR_ABORT(xrStringToPath(xr_instance, handle->devicePathString.c_str(), &handle->devicePath));
-
-		// Very much should always be true, but guard against any nasty surprises
-		OOVR_FALSE_ABORT(std::count(allSubactionPaths.begin(), allSubactionPaths.end(), handle->devicePath));
+		// Without an OpenXR instance (a Utility app) the handle still works; it just matches no subaction path
+		XrResult res = xr_instance ? xrStringToPath(xr_instance, handle->devicePathString.c_str(), &handle->devicePath) : XR_ERROR_HANDLE_INVALID;
+		if (XR_FAILED(res)) {
+			OOVR_LOGF("GetInputSourceHandle: no OpenXR path for %s (%d)", handle->devicePathString.c_str(), (int)res);
+			handle->devicePath = XR_NULL_PATH;
+		} else if (!std::count(allSubactionPaths.begin(), allSubactionPaths.end(), handle->devicePath)) {
+			// Very much should always be true
+			OOVR_LOGF("GetInputSourceHandle: %s isn't a hand's path", handle->devicePathString.c_str());
+		}
 	}
 
 	inputHandleRegistry[pchInputSourcePath] = std::move(handle);
@@ -1309,7 +1342,9 @@ EVRInputError BaseInput::UpdateActionState(VR_ARRAY_COUNT(unSetCount) VRActiveAc
 {
 	// TODO if the game is using legacy input, call this every frame
 
-	OOVR_FALSE_ABORT(sizeof(*pSets) == unSizeOfVRSelectedActionSet_t);
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (sizeof(*pSets) != unSizeOfVRSelectedActionSet_t || (unSetCount && !pSets))
+		return VRInputError_InvalidParam;
 
 	// Make sure all the ActionSets have the same priority, since we don't have any way around that right now
 	if (unSetCount > 1) {
@@ -1603,10 +1638,14 @@ XrResult BaseInput::getBooleanOrDpadData(const InteractionProfile* profile, Acti
 EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigitalActionData_t* pActionData, uint32_t unActionDataSize,
     VRInputValueHandle_t ulRestrictToDevice)
 {
+	// Zeroed before the handle is looked up: an action left out of the manifest answers InvalidHandle, and inactive
+	if (pActionData && unActionDataSize == sizeof(*pActionData))
+		ZeroMemory(pActionData, unActionDataSize);
 	GET_ACTION_FROM_HANDLE(act, action);
 
-	ZeroMemory(pActionData, unActionDataSize);
-	OOVR_FALSE_ABORT(unActionDataSize == sizeof(*pActionData));
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (!pActionData || unActionDataSize != sizeof(*pActionData))
+		return VRInputError_InvalidParam;
 
 	XrActionStateGetInfo getInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
 	getInfo.action = act->xr;
@@ -1655,10 +1694,13 @@ EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigi
 EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalogActionData_t* pActionData, uint32_t unActionDataSize,
     VRInputValueHandle_t ulRestrictToDevice)
 {
-
+	// Zeroed before the handle is looked up: an action left out of the manifest answers InvalidHandle, and inactive
+	if (pActionData && unActionDataSize == sizeof(*pActionData))
+		ZeroMemory(pActionData, unActionDataSize);
 	GET_ACTION_FROM_HANDLE(act, action);
-	ZeroMemory(pActionData, unActionDataSize);
-	OOVR_FALSE_ABORT(unActionDataSize == sizeof(*pActionData));
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (!pActionData || unActionDataSize != sizeof(*pActionData))
+		return VRInputError_InvalidParam;
 
 	XrActionStateGetInfo getInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
 	getInfo.action = act->xr;
@@ -1778,12 +1820,11 @@ EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalo
 			break;
 		}
 		case ActionType::Vector3:
-			OOVR_ABORTF("Input type vector3 unsupported: %s", act->fullName.c_str());
-			break;
+			// For now: a vector3 action reads as inactive
+			OC_UNSUPPORTED(VRInputError_None, "Input type vector3 unsupported: %s", act->fullName.c_str());
 		default:
-			OOVR_ABORTF("Invalid action type %d for action %s",
+			OC_UNSUPPORTED(VRInputError_WrongType, "Invalid action type %d for action %s",
 			    static_cast<int>(act->type), act->fullName.c_str());
-			break;
 		}
 	}
 
@@ -1797,10 +1838,14 @@ EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalo
 EVRInputError BaseInput::GetPoseActionData(VRActionHandle_t action, ETrackingUniverseOrigin eOrigin, float fPredictedSecondsFromNow,
     InputPoseActionData_t* pActionData, uint32_t unActionDataSize, VRInputValueHandle_t ulRestrictToDevice)
 {
+	// Zeroed before the handle is looked up: an action left out of the manifest answers InvalidHandle, and inactive
+	if (pActionData && unActionDataSize == sizeof(*pActionData))
+		ZeroMemory(pActionData, unActionDataSize);
 	GET_ACTION_FROM_HANDLE(act, action);
 
-	ZeroMemory(pActionData, unActionDataSize);
-	OOVR_FALSE_ABORT(unActionDataSize == sizeof(*pActionData));
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (!pActionData || unActionDataSize != sizeof(*pActionData))
+		return VRInputError_InvalidParam;
 
 	if (act->type == ActionType::Skeleton) {
 		std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDeviceByHand(act->skeletalHand);
@@ -1815,11 +1860,14 @@ EVRInputError BaseInput::GetPoseActionData(VRActionHandle_t action, ETrackingUni
 	}
 
 	if (act->type != ActionType::Pose)
-		OOVR_ABORTF("Invalid action type %d for action %s", static_cast<int>(act->type), act->fullName.c_str());
+		OC_UNSUPPORTED(VRInputError_WrongType, "Invalid action type %d for action %s", static_cast<int>(act->type), act->fullName.c_str());
 
 	const InputValueHandle* restrictToDevice = nullptr;
-	if (ulRestrictToDevice)
+	if (ulRestrictToDevice) {
 		restrictToDevice = cast_IVH(ulRestrictToDevice);
+		if (!restrictToDevice)
+			return VRInputError_InvalidHandle;
+	}
 
 	for (int handNum = 0; handNum < 2; handNum++) {
 		// Check this hand is permitted
@@ -1942,14 +1990,17 @@ EVRInputError BaseInput::GetSkeletalActionData(VRActionHandle_t actionHandle, In
 	// Make sure the target struct is the right size, in case it grows in the future
 	// Note: CVRInput_004 has a manual override for this in CVRInput.cpp to deal with an old struct version, it
 	// sets unActionDataSize to what we're expecting so we don't have to handle that here.
-	OOVR_FALSE_ABORT(unActionDataSize == sizeof(*out));
-
-	GET_ACTION_FROM_HANDLE(action, actionHandle);
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (!out || unActionDataSize != sizeof(*out))
+		return VRInputError_InvalidParam;
 
 	// Zero out the output data, leaving:
 	// bActive = false
 	// activeOrigin = vr::k_ulInvalidActionHandle
+	// (before the handle is looked up: an action left out of the manifest answers InvalidHandle, and inactive)
 	ZeroMemory(out, unActionDataSize);
+
+	GET_ACTION_FROM_HANDLE(action, actionHandle);
 
 	// Find the active origin for this hand
 	std::string originPath;
@@ -1988,11 +2039,16 @@ EVRInputError BaseInput::GetBoneCount(VRActionHandle_t action, uint32_t* pBoneCo
 }
 EVRInputError BaseInput::GetBoneHierarchy(VRActionHandle_t action, VR_ARRAY_COUNT(unIndexArayCount) BoneIndex_t* pParentIndices, uint32_t unIndexArayCount)
 {
-	STUBBED();
+	// For now: no skeleton hierarchy to give
+	if (pParentIndices && unIndexArayCount)
+		memset(pParentIndices, 0, sizeof(BoneIndex_t) * unIndexArayCount);
+	OC_UNSUPPORTED(VRInputError_InvalidSkeleton, "GetBoneHierarchy: not yet");
 }
 EVRInputError BaseInput::GetBoneName(VRActionHandle_t action, BoneIndex_t nBoneIndex, VR_OUT_STRING() char* pchBoneName, uint32_t unNameBufferSize)
 {
-	STUBBED();
+	if (pchBoneName && unNameBufferSize)
+		pchBoneName[0] = 0;
+	OC_UNSUPPORTED(VRInputError_InvalidSkeleton, "GetBoneName: not yet");
 }
 EVRInputError BaseInput::GetSkeletalReferenceTransforms(VRActionHandle_t actionHandle, EVRSkeletalTransformSpace eTransformSpace, EVRSkeletalReferencePose eReferencePose, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount)
 {
@@ -2254,24 +2310,28 @@ EVRInputError BaseInput::GetSkeletalBoneDataCompressed(VRActionHandle_t action, 
     EVRSkeletalMotionRange eMotionRange, VR_OUT_BUFFER_COUNT(unCompressedSize) void* pvCompressedData, uint32_t unCompressedSize,
     uint32_t* punRequiredCompressedSize, VRInputValueHandle_t ulRestrictToDevice)
 {
-	STUBBED();
+	if (punRequiredCompressedSize)
+		*punRequiredCompressedSize = 0;
+	OC_UNSUPPORTED(VRInputError_NoData, "GetSkeletalBoneDataCompressed: no compressed bone data yet");
 }
 EVRInputError BaseInput::GetSkeletalBoneDataCompressed(VRActionHandle_t action, EVRSkeletalMotionRange eMotionRange,
     VR_OUT_BUFFER_COUNT(unCompressedSize) void* pvCompressedData, uint32_t unCompressedSize, uint32_t* punRequiredCompressedSize)
 {
-	STUBBED();
+	if (punRequiredCompressedSize)
+		*punRequiredCompressedSize = 0;
+	OC_UNSUPPORTED(VRInputError_NoData, "GetSkeletalBoneDataCompressed: no compressed bone data yet");
 }
 EVRInputError BaseInput::DecompressSkeletalBoneData(void* pvCompressedBuffer, uint32_t unCompressedBufferSize,
     EVRSkeletalTransformSpace* peTransformSpace, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray,
     uint32_t unTransformArrayCount)
 {
-
-	STUBBED();
+	// GetSkeletalBoneDataCompressed hands out nothing to decompress
+	OC_UNSUPPORTED(VRInputError_NoData, "DecompressSkeletalBoneData: no compressed bone data yet");
 }
 EVRInputError BaseInput::DecompressSkeletalBoneData(const void* pvCompressedBuffer, uint32_t unCompressedBufferSize, EVRSkeletalTransformSpace eTransformSpace,
     VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount)
 {
-	STUBBED();
+	OC_UNSUPPORTED(VRInputError_NoData, "DecompressSkeletalBoneData: no compressed bone data yet");
 }
 
 EVRInputError BaseInput::TriggerHapticVibrationAction(VRActionHandle_t action, float fStartSecondsFromNow, float fDurationSeconds,
@@ -2423,8 +2483,10 @@ EVRInputError BaseInput::GetOriginLocalizedName(VRInputValueHandle_t origin, VR_
 
 EVRInputError BaseInput::GetOriginTrackedDeviceInfo(VRInputValueHandle_t origin, InputOriginInfo_t* info, uint32_t unOriginInfoSize)
 {
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (!info || unOriginInfoSize != sizeof(InputOriginInfo_t))
+		return VRInputError_InvalidParam;
 	memset(info, 0, unOriginInfoSize);
-	OOVR_FALSE_ABORT(unOriginInfoSize == sizeof(InputOriginInfo_t));
 
 	if (origin == vr::k_ulInvalidInputValueHandle)
 		return vr::VRInputError_InvalidHandle;
@@ -2445,11 +2507,13 @@ EVRInputError BaseInput::GetOriginTrackedDeviceInfo(VRInputValueHandle_t origin,
 EVRInputError BaseInput::GetActionBindingInfo(VRActionHandle_t actionHandle, OOVR_InputBindingInfo_t* bindingInfo,
     uint32_t unBindingInfoSize, uint32_t unBindingInfoCount, uint32_t* punReturnedBindingInfoCount)
 {
-	memset(bindingInfo, 0, unBindingInfoSize * unBindingInfoCount);
 	if (punReturnedBindingInfoCount)
 		*punReturnedBindingInfoCount = 0;
-
-	OOVR_FALSE_ABORT(unBindingInfoSize == sizeof(OOVR_InputBindingInfo_t));
+	// A null or wrong-sized struct is an argument error, as SteamVR answers (VRInputError_InvalidParam)
+	if (unBindingInfoSize != sizeof(OOVR_InputBindingInfo_t) || (unBindingInfoCount && !bindingInfo))
+		return VRInputError_InvalidParam;
+	if (bindingInfo)
+		memset(bindingInfo, 0, (size_t)unBindingInfoSize * unBindingInfoCount);
 
 	// FIXME support any number of sources
 	// TODO does this support passing in unBindingInfoSize=0 and reading the required size? Check with SteamVR.
@@ -2517,20 +2581,24 @@ EVRInputError BaseInput::GetActionBindingInfo(VRActionHandle_t actionHandle, OOV
 
 EVRInputError BaseInput::ShowActionOrigins(VRActionSetHandle_t actionSetHandle, VRActionHandle_t ulActionHandle)
 {
-	STUBBED();
+	// Nothing is shown, and the game goes on as if it were
+	OC_UNSUPPORTED(VRInputError_None, "ShowActionOrigins: nothing is shown");
 }
 EVRInputError BaseInput::ShowBindingsForActionSet(VR_ARRAY_COUNT(unSetCount) VRActiveActionSet_t* pSets, uint32_t unSizeOfVRSelectedActionSet_t,
     uint32_t unSetCount, VRInputValueHandle_t originToHighlight)
 {
-
-	STUBBED();
+	// Nothing is shown, and the game goes on as if it were
+	OC_UNSUPPORTED(VRInputError_None, "ShowBindingsForActionSet: nothing is shown");
 }
 
 EVRInputError BaseInput::GetComponentStateForBinding(const char* pchRenderModelName, const char* pchComponentName,
     const OOVR_InputBindingInfo_t* pOriginInfo, uint32_t unBindingInfoSize, uint32_t unBindingInfoCount,
     vr::RenderModel_ComponentState_t* pComponentState)
 {
-	STUBBED();
+	// No render model component follows a binding yet
+	if (pComponentState)
+		*pComponentState = {};
+	return VRInputError_NoData;
 }
 
 bool BaseInput::IsUsingLegacyInput()
@@ -2543,7 +2611,8 @@ bool BaseInput::IsUsingLegacyInput()
 EVRInputError BaseInput::OpenBindingUI(const char* pchAppKey, VRActionSetHandle_t ulActionSetHandle,
     VRInputValueHandle_t ulDeviceHandle, bool bShowOnDesktop)
 {
-	STUBBED();
+	// There's no binding editor yet; SteamVR answers this without Steam
+	OC_UNSUPPORTED(VRInputError_NoSteam, "OpenBindingUI: no binding editor");
 }
 
 EVRInputError BaseInput::GetBindingVariant(vr::VRInputValueHandle_t ulDevicePath, char* pchVariantArray, uint32_t unVariantArraySize)
@@ -2570,15 +2639,20 @@ BaseInput::ActionSet* BaseInput::cast_ASH(VRActionSetHandle_t handle)
 
 BaseInput::InputValueHandle* BaseInput::cast_IVH(VRInputValueHandle_t handle)
 {
+	// nullptr for k_ulInvalidInputValueHandle and for anything GetInputSourceHandle didn't hand out
 	if (handle == vr::k_ulInvalidInputValueHandle)
-		OOVR_ABORT("Called ivhToDev for invalid input value handle");
-
+		return nullptr;
+	std::lock_guard<std::mutex> guard(LiveHandlesLock());
+	if (!LiveHandles().count((const void*)handle))
+		return nullptr;
 	return (InputValueHandle*)handle;
 }
 
 std::shared_ptr<ITrackedDevice> BaseInput::ivhToDev(VRInputValueHandle_t handle)
 {
 	const InputValueHandle* ivh = cast_IVH(handle);
+	if (!ivh)
+		return nullptr;
 
 	ITrackedDevice::TrackedDeviceType hand = ITrackedDevice::HAND_NONE;
 	switch (ivh->type) {
@@ -2602,7 +2676,7 @@ bool BaseInput::checkRestrictToDevice(vr::VRInputValueHandle_t restrictToDevice,
 		return true;
 
 	const InputValueHandle* ivh = cast_IVH(restrictToDevice);
-	return subactionPath == ivh->devicePath;
+	return ivh && subactionPath == ivh->devicePath;
 }
 
 VRInputValueHandle_t BaseInput::activeOriginFromSubaction(Action* action, const char* subactionPath)
