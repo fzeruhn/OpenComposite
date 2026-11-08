@@ -30,11 +30,11 @@ bool oc_read_json_file(const fs::path& path, Json::Value& result)
 	std::string errors;
 	if (!Json::parseFromStream(builder, in, &parsed, &errors)) {
 		OOVR_LOGF("%s isn't valid JSON (another program may be writing it), treating it as empty: %s",
-		    path.u8string().c_str(), errors.c_str());
+		    path.string().c_str(), errors.c_str());
 		return false;
 	}
 	if (!parsed.isObject()) {
-		OOVR_LOGF("%s isn't a JSON object, treating it as empty", path.u8string().c_str());
+		OOVR_LOGF("%s isn't a JSON object, treating it as empty", path.string().c_str());
 		return false;
 	}
 	result = std::move(parsed);
@@ -55,7 +55,7 @@ bool oc_write_json_file(const fs::path& path, const Json::Value& value)
 	{
 		std::ofstream out(temp, std::ios::binary | std::ios::trunc);
 		if (!out) {
-			OOVR_LOGF("Couldn't write %s: %s", temp.u8string().c_str(), strerror(errno));
+			OOVR_LOGF("Couldn't write %s: %s", temp.string().c_str(), strerror(errno));
 			return false;
 		}
 		Json::StreamWriterBuilder builder;
@@ -64,7 +64,7 @@ bool oc_write_json_file(const fs::path& path, const Json::Value& value)
 		writer->write(value, &out);
 		out.flush();
 		if (!out) {
-			OOVR_LOGF("Couldn't write %s", temp.u8string().c_str());
+			OOVR_LOGF("Couldn't write %s", temp.string().c_str());
 			out.close();
 			std::error_code ignored;
 			fs::remove(temp, ignored);
@@ -80,7 +80,7 @@ bool oc_write_json_file(const fs::path& path, const Json::Value& value)
 			return true;
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
-	OOVR_LOGF("Couldn't replace %s: %s", path.u8string().c_str(), ec.message().c_str());
+	OOVR_LOGF("Couldn't replace %s: %s", path.string().c_str(), ec.message().c_str());
 	std::error_code ignored;
 	fs::remove(temp, ignored);
 	return false;
