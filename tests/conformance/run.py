@@ -29,6 +29,10 @@ APPTYPES_VALID_ONLY = [2, 3, 4, 0]  # Overlay, Background, Utility, Other
 CASES = ["init-matrix", "init-repeat", "init-other-thread", "lookup-before-init", "unknown-interface",
          "overlay-lifecycle", "input-manifest", "frame-loop", "submit-edges"]
 TIMEOUT = 60
+CASE_TIMEOUT = 600  # init-repeat starts OpenComposite 200 times
+# SteamVR's answers while vrserver was starting or stopping between children (Retry, AnotherAppLaunching,
+# ShuttingDown): a recording keeps them, a comparison skips them
+STEAMVR_TRANSIENT = {115, 117, 119}
 
 
 def load_versions():
@@ -97,16 +101,16 @@ class Runner:
             subprocess.run(["reg", "add", r"HKLM\SOFTWARE\Khronos\OpenXR\1", "/v", "ActiveRuntime", "/t", "REG_SZ",
                             "/d", self.manifest, "/f"], check=True, capture_output=True)
 
-    def child(self, extra, raw):
+    def child(self, extra, raw, timeout=TIMEOUT):
         cmd = [self.conformance, "--runtime", self.runtime, "--out", str(raw)] + extra
         if self.args.real_runtime:
             cmd.append("--real-runtime")
         env = dict(os.environ)
         env.update(self.env)
         if unelevated.integrity_above_medium() and not self.args.ci:
-            return unelevated.run_medium(cmd, env, None, TIMEOUT)
+            return unelevated.run_medium(cmd, env, None, timeout)
         try:
-            return subprocess.run(cmd, env=env, timeout=TIMEOUT, capture_output=True).returncode
+            return subprocess.run(cmd, env=env, timeout=timeout, capture_output=True).returncode
         except subprocess.TimeoutExpired:
             return 124
 
@@ -156,7 +160,7 @@ class Runner:
         extra = ["--case", name]
         if self.args.manifest:
             extra += ["--manifest", str(Path(self.args.manifest).resolve())]
-        code = self.child(extra, raw)
+        code = self.child(extra, raw, CASE_TIMEOUT)
         records = read_jsonl(raw)
         for r in records:
             r["status"] = "ok"
@@ -196,6 +200,8 @@ def compare(results, expected_path, differences_path):
         e = expected.get(key_of(r))
         if not e or e.get("status") != "ok" or r.get("status") != "ok" or e.get("skipped") or r.get("skipped"):
             continue
+        if e.get("init_error") in STEAMVR_TRANSIENT:
+            continue  # SteamVR was restarting between children: no reference for this record
         for field in ("ret", "out", "init_error", "lookup_error"):
             if r.get(field) == e.get(field):
                 continue

@@ -27,6 +27,18 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
 every record that wasn't ok; `out/results.json` has every record. When a child ends early the runner starts it again
 after the call that ended it, so one bad call doesn't hide the rest.
 
+## The SteamVR reference
+
+`record-steamvr.ps1 -Conformance <oc_conformance.exe> -Out <dir>` runs everything against SteamVR with its null
+driver (no headset needed) and writes `expected/steamvr-<version>.json`. It backs up the OpenVR paths file and
+SteamVR's settings, room setup and app config first, puts every one back afterwards and fails unless their SHA-256s
+match; `-WhatIf` only lists them. Close SteamVR, Monado and anything VR first.
+
+`differences.json` lists the differences that are expected between SteamVR's null HMD and OpenComposite (display
+geometry, timing and poses, device properties, handle numbers, the PC's own apps and settings, and the app types
+OpenComposite doesn't support yet), each with its reason. Every other difference is a bug to fix or to explain there.
+Records SteamVR answered while restarting between children (init errors 115, 117, 119) aren't compared.
+
 ## Elevated shells
 
 An elevated process's OpenXR loader ignores `XR_RUNTIME_JSON`. From an elevated shell `run.py` starts every child at

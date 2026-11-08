@@ -7,3 +7,4 @@ IVRApplications_.* (AddApplicationManifest|RemoveApplicationManifest) changes St
 IVRChaperoneSetup_.* (CommitWorkingCopy|ImportFromBufferToWorking) changes the room setup
 IVROverlay_.* ShowDashboard opens SteamVR's dashboard
 IVRCompositor_.* CompositorQuit quits SteamVR's compositor
+IVRSettings_.* (RemoveSection|RemoveKeyInSection) would remove the null-driver settings mid-run
