@@ -20,8 +20,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIRS = ["OpenOVR", "OCOVR", "DrvOpenXR"]
 MACROS = ["STUBBED", "OOVR_ABORT_T", "OOVR_ABORTF", "OOVR_ABORT", "OOVR_FAILED_XR_ABORT", "OOVR_FALSE_ABORT",
-          "OOVR_FAILED_DX_ABORT", "OOVR_FAILED_VK_ABORT", "ERR", "LINUX_STUBBED", "XR_STUBBED", "OC_FATAL"]
-USE = re.compile(r"(?<![\w#])(" + "|".join(MACROS) + r")\s*\(")
+          "OOVR_FAILED_DX_ABORT", "OOVR_FAILED_VK_ABORT", "ERR", "LINUX_STUBBED", "XR_STUBBED", "OC_FATAL",
+          # Config.cpp's ABORT (exit()), and DX11Compositor::ThrowIfFailed and `throw` (an uncaught exception ends it)
+          "ABORT", "ThrowIfFailed", "exit"]
+USE = re.compile(r"(?<![\w#.:>])(" + "|".join(MACROS) + r")\s*\(|(?<![\w#])(throw)\b")
 FUNC = re.compile(r"^(?!\s)(?!(?:if|for|while|switch|return|else|do|case|#|//|typedef|namespace|class|struct|enum)\b)"
                   r".*?\b((?:\w+::)*~?\w+)\s*\([^;]*$")
 SKIP_FILES = {"OpenOVR/logging.h", "OpenOVR/Misc/SoftFail.h", "OpenOVR/BaseCommon.h", "OpenOVR/Misc/xrutil.h"}
@@ -56,8 +58,11 @@ def scan(root):
                     ret = " ".join(line[:m.start(1)].split())
                 code = line.split("//", 1)[0]
                 for use in USE.finditer(code):
+                    macro = use.group(1) or use.group(2)
+                    if macro == "ThrowIfFailed" and "::ThrowIfFailed" in code:
+                        continue  # its definition, not a use
                     message = code[use.end():].strip().rstrip(";").rstrip(")")[:100]
-                    sites.append((rel, n, func, use.group(1), message, ret))
+                    sites.append((rel, n, func, macro, message, ret))
     return sites
 
 

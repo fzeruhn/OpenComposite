@@ -18,9 +18,13 @@ OpenOVR/Compositor/dx11compositor.cpp|DX11Compositor::CopyToSwapchain|OOVR_FAILE
 OpenOVR/Compositor/dx11compositor.cpp|DX11Compositor::DX11Compositor|OOVR_FAILED_DX_ABORT|4|to convert
 OpenOVR/Compositor/dx11compositor.cpp|DX11Compositor::InvokeCubemap|ERR|1|to convert
 OpenOVR/Compositor/dx11compositor.cpp|DX11Compositor::ThrowIfFailed|OOVR_FAILED_DX_ABORT|1|to convert
+OpenOVR/Compositor/dx11compositor.cpp|DX11Compositor::ThrowIfFailed|throw|1|to convert
+OpenOVR/Compositor/dx11compositor.cpp|XTrace|throw|1|to convert
 OpenOVR/Compositor/dx11compositor.cpp|d3d_compile_shader|OOVR_ABORTF|1|to convert
 OpenOVR/Compositor/dx11compositor.cpp|d3d_make_rtv|OOVR_FAILED_DX_ABORT|1|to convert
+OpenOVR/Compositor/dx11compositor.h|<file>|ThrowIfFailed|1|to convert
 OpenOVR/Compositor/dx12compositor.cpp|DX12Compositor::CheckCreateSwapChain|OOVR_ABORTF|2|to convert
+OpenOVR/Compositor/dx12compositor.h|<file>|ThrowIfFailed|1|to convert
 OpenOVR/Compositor/glcompositor.cpp|GLBaseCompositor::InvokeCubemap|OOVR_ABORT|1|to convert
 OpenOVR/Compositor/glcompositor.cpp|GLCompositor::GLCompositor|OOVR_ABORT|1|to convert
 OpenOVR/Compositor/vkcompositor.cpp|<file>|OOVR_ABORT|1|to convert
@@ -38,6 +42,12 @@ OpenOVR/Drivers/Backend.cpp|ITrackedDevice::InitialiseDevice|OOVR_ABORT|1|to con
 OpenOVR/Drivers/Backend.cpp|ITrackedDevice::InitialiseDevice|OOVR_ABORTF|1|to convert
 OpenOVR/Drivers/DriverManager.cpp|DriverManager::CheckInstance|OOVR_ABORT|1|to convert
 OpenOVR/Drivers/DriverManager.cpp|OCDriverContext::GetDriverHandle|OOVR_ABORT|1|to convert
+OpenOVR/Misc/Config.cpp|<file>|exit|2|to convert
+OpenOVR/Misc/Config.cpp|Config::Config|ABORT|1|to convert
+OpenOVR/Misc/Config.cpp|Config::ini_handler|ABORT|1|to convert
+OpenOVR/Misc/Config.cpp|parse_HmdColor_t|ABORT|1|to convert
+OpenOVR/Misc/Config.cpp|parse_bool|ABORT|1|to convert
+OpenOVR/Misc/Config.cpp|parse_float|ABORT|1|to convert
 OpenOVR/Misc/Input/InteractionProfile.cpp|InteractionProfile::AddLegacyBindings|OOVR_ABORTF|1|to convert
 OpenOVR/Misc/Input/InteractionProfile.cpp|InteractionProfile::AddLegacyBindings|OOVR_FAILED_XR_ABORT|1|to convert
 OpenOVR/Misc/Input/InteractionProfile.cpp|InteractionProfile::AddLegacyBindings|OOVR_FALSE_ABORT|1|to convert
