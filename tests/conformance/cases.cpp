@@ -3,7 +3,14 @@
 
 #include "conformance.h"
 
+#include "IVRApplications_001.h"
+#include "IVRChaperone_002.h"
+#include "IVRChaperone_004.h"
 #include "IVRCompositor_005.h"
+#include "IVRControlPanel_001.h"
+#include "IVRInput_003.h"
+#include "IVRNotifications_001.h"
+#include "IVRRenderModels_001.h"
 #include "IVRCompositor_006.h"
 #include "IVRCompositor_008.h"
 #include "IVRCompositor_029.h"
@@ -598,6 +605,84 @@ void OldOverlay(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// The remaining old versions (expect/old_misc.json): IVRApplications_001, IVRChaperone_002, IVRRenderModels_001,
+// IVRNotifications_001, IVRControlPanel_001 and IVRInput_003
+void OldMisc(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* apps = (vr::IVRApplications_001::IVRApplications*)c.core->GetGenericInterface("IVRApplications_001", &le);
+	auto* chap = (vr::IVRChaperone_002::IVRChaperone*)c.core->GetGenericInterface("IVRChaperone_002", &le);
+	auto* chap4 = (vr::IVRChaperone_004::IVRChaperone*)c.core->GetGenericInterface("IVRChaperone_004", &le);
+	auto* models = (vr::IVRRenderModels_001::IVRRenderModels*)c.core->GetGenericInterface("IVRRenderModels_001", &le);
+	auto* notes = (vr::IVRNotifications_001::IVRNotifications*)c.core->GetGenericInterface("IVRNotifications_001", &le);
+	auto* panel = (vr::IVRControlPanel_001::IVRControlPanel*)c.core->GetGenericInterface("IVRControlPanel_001", &le);
+	auto* input = (vr::IVRInput_003::IVRInput*)c.core->GetGenericInterface("IVRInput_003", &le);
+	void* sys = c.core->GetGenericInterface("IVRSystem_022", &le);
+	if (!apps || !chap || !chap4 || !models || !notes || !panel || !input || !sys) {
+		c.Record("an old interface is missing", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	Json::Value r;
+	char key[64] = "x";
+	r["ret"] = (int)apps->GetHomeApplication(key, sizeof(key));
+	r["key"] = key;
+	c.Record("IVRApplications_001 GetHomeApplication", r);
+
+	r = Json::Value();
+	vr::IVRChaperone_002::ChaperoneSoftBoundsInfo_t soft = {};
+	vr::HmdQuad_t rect = {};
+	r["ret"] = chap->GetSoftBoundsInfo(&soft);
+	r["play area ret"] = chap4->GetPlayAreaRect(&rect);
+	r["same as play area"] = memcmp(&soft.quadCorners, &rect, sizeof(rect)) == 0;
+	vr::IVRChaperone_002::ChaperoneSeatedBoundsInfo_t seated;
+	memset(&seated, 0xCD, sizeof(seated));
+	r["seated ret"] = chap->GetSeatedBoundsInfo(&seated);
+	r["seated zeroed"] = seated.vSeatedHeadPosition.v[0] == 0.0f;
+	c.Record("IVRChaperone_002 bounds", r);
+
+	r = Json::Value();
+	vr::IVRRenderModels_001::RenderModel_t model;
+	memset(&model, 0xCD, sizeof(model));
+	r["ret"] = models->LoadRenderModel("renderLeftHand", &model);
+	r["has_vertices"] = model.unVertexCount > 0 && model.rVertexData != nullptr;
+	r["texture"] = std::to_string(model.diffuseTexture.unWidth) + "x" + std::to_string(model.diffuseTexture.unHeight);
+	models->FreeRenderModel(&model);
+	r["freed handle"] = (Json::UInt64)model.ulInternalHandle;
+	c.Record("IVRRenderModels_001 LoadRenderModel", r);
+
+	r = Json::Value();
+	char name[64] = {};
+	r["size"] = notes->GetErrorString(vr::IVRNotifications_001::k_ENotificationError_Fail, name, sizeof(name));
+	r["name"] = name;
+	vr::IVRNotifications_001::VRNotificationId id = 0;
+	r["create"] = (int)notes->CreateNotification(vr::k_ulOverlayHandleInvalid, 0, "type", "text", "category", nullptr, &id);
+	r["id set"] = id != 0;
+	r["dismiss"] = (int)notes->DismissNotification(id);
+	c.Record("IVRNotifications_001", r);
+
+	r = Json::Value();
+	r["drivers"] = panel->GetDriverCount();
+	r["display interface"] = (void*)panel->GetCurrentDisplayInterface("IVRSystem_022") == sys;
+	r["unknown interface null"] = panel->GetCurrentDisplayInterface("IVRNoSuchThing_001") == nullptr;
+	r["ipd positive"] = panel->GetIPD() > 0.0f;
+	c.Record("IVRControlPanel_001", r);
+
+	// IVRInput_003's action sets are 24 bytes (today's 32)
+	r = Json::Value();
+	vr::IVRInput_003::VRActiveActionSet_t set = {};
+	r["24 bytes"] = (int)input->UpdateActionState(&set, 24, 0);
+	r["32 bytes"] = (int)input->UpdateActionState(&set, 32, 0);
+	c.Record("IVRInput_003 UpdateActionState", r);
+
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -673,6 +758,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "old-calls", OldCalls },
 		{ "old-submit", OldSubmit },
 		{ "old-overlay", OldOverlay },
+		{ "old-misc", OldMisc },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

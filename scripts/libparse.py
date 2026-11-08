@@ -101,6 +101,10 @@ def read_context(context, filename, namespace):
             if match:
                 name = match.group("name")
                 context[name] = namespace + "::" + name  # TODO
+
+            # "class IVRSystem *Get...()" (IVRControlPanel_001) declares IVRSystem in the header's own namespace
+            for elaborated in re.findall(r"\bclass\s+(\w+)\s*\*", line):
+                context.setdefault(elaborated, namespace + "::" + elaborated)
             else:
                 match = typedef_struct.match(line)
                 if match:
@@ -138,6 +142,10 @@ def convert_type(t, context):
     if const:
         t = t[5:]
         t = t.lstrip()
+
+    # An elaborated "class X" names X, which the context qualifies
+    if t.startswith("class "):
+        t = t[6:].lstrip()
 
     # Transform the type, assuming we have a context
     if context and t in context:

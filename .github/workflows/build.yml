@@ -81,6 +81,8 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-overlay --expect tests/conformance/expect/old_overlay.json --out conformance/old-overlay
           if ($LASTEXITCODE) { $failed++ }
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-misc --expect tests/conformance/expect/old_misc.json --out conformance/old-misc
+          if ($LASTEXITCODE) { $failed++ }
           exit $failed
 
       - uses: actions/upload-artifact@v7

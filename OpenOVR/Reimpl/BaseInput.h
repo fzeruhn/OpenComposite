@@ -106,6 +106,13 @@ enum HandSkeletonBone {
 	eBone_Count
 };
 
+// IVRInput_003 (SDK 1.0.15) declares its own handles and skeleton data, the same as today's
+typedef vr::VRActionHandle_t OOVR_VRActionHandle_t;
+typedef vr::VRActionSetHandle_t OOVR_VRActionSetHandle_t;
+typedef vr::VRInputValueHandle_t OOVR_VRInputValueHandle_t;
+struct OOVR_InputSkeletalActionData_t;
+typedef OOVR_InputSkeletalActionData_t OOVR_InputSkeletonActionData_t;
+
 struct OOVR_InputSkeletalActionData_t {
 	/** Whether or not this action is currently available to be bound in the active action set */
 	bool bActive;
@@ -259,6 +266,20 @@ public:
 	/** Reads the state of a skeletal action given its handle. */
 	EVRInputError GetSkeletalActionData(VRActionHandle_t action, InputSkeletalActionData_t* pActionData, uint32_t unActionDataSize);
 
+	/** IVRInput_003 (SDK 1.0.15): before ulRestrictToDevice, so any device */
+	EVRInputError GetDigitalActionData(VRActionHandle_t action, InputDigitalActionData_t* pActionData, uint32_t unActionDataSize);
+	EVRInputError GetAnalogActionData(VRActionHandle_t action, InputAnalogActionData_t* pActionData, uint32_t unActionDataSize);
+	EVRInputError GetPoseActionData(VRActionHandle_t action, ETrackingUniverseOrigin eOrigin, float fPredictedSecondsFromNow,
+	    InputPoseActionData_t* pActionData, uint32_t unActionDataSize);
+	EVRInputError TriggerHapticVibrationAction(VRActionHandle_t action, float fStartSecondsFromNow, float fDurationSeconds,
+	    float fFrequency, float fAmplitude);
+
+	/** IVRInput_003: the action data and its bones in one call (as GetSkeletalActionData and GetSkeletalBoneData,
+	 * with the controller's range of motion) */
+	EVRInputError GetSkeletalActionData(VRActionHandle_t action, EVRSkeletalTransformSpace eBoneParent, float fPredictedSecondsFromNow,
+	    InputSkeletalActionData_t* pActionData, uint32_t unActionDataSize, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray,
+	    uint32_t unTransformArrayCount);
+
 	/** Returns the current dominant hand for the user for this application. This function will only return success for applications
 	 * which include "supports_dominant_hand_setting": true in their action manifests. The dominant hand will only change after
 	 * a call to UpdateActionState, and the action data returned after that point will use the new dominant hand. */
@@ -313,6 +334,12 @@ public:
 	 * sending over the network. The required buffer size will never exceed ( sizeof(VR_BoneTransform_t)*boneCount + 2).
 	 * Usually the size will be much smaller. */
 	EVRInputError GetSkeletalBoneDataCompressed(VRActionHandle_t action, EVRSkeletalMotionRange eMotionRange, VR_OUT_BUFFER_COUNT(unCompressedSize) void* pvCompressedData, uint32_t unCompressedSize, uint32_t* punRequiredCompressedSize);
+
+	/** IVRInput_003 (SDK 1.0.15): the compressed bone data calls before they were renamed; as today's */
+	EVRInputError GetSkeletalActionDataCompressed(VRActionHandle_t action, EVRSkeletalTransformSpace eBoneParent, float fPredictedSecondsFromNow,
+	    VR_OUT_BUFFER_COUNT(unCompressedSize) void* pvCompressedData, uint32_t unCompressedSize, uint32_t* punRequiredCompressedSize);
+	EVRInputError UncompressSkeletalActionData(void* pvCompressedBuffer, uint32_t unCompressedBufferSize, EVRSkeletalTransformSpace* peBoneParent,
+	    VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount);
 
 	/** Turns a compressed buffer from GetSkeletalBoneDataCompressed and turns it back into a bone transform array. */
 	EVRInputError DecompressSkeletalBoneData(void* pvCompressedBuffer, uint32_t unCompressedBufferSize, EVRSkeletalTransformSpace* peTransformSpace, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount);
