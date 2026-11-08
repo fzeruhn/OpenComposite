@@ -18,6 +18,13 @@
 
 namespace fs = std::filesystem;
 
+// For log lines: string() can throw on Windows for characters outside the ANSI code page
+static std::string Utf8(const fs::path& p)
+{
+	std::u8string u = p.u8string();
+	return std::string(u.begin(), u.end());
+}
+
 bool oc_read_json_file(const fs::path& path, Json::Value& result)
 {
 	result = Json::Value(Json::objectValue);
@@ -30,11 +37,11 @@ bool oc_read_json_file(const fs::path& path, Json::Value& result)
 	std::string errors;
 	if (!Json::parseFromStream(builder, in, &parsed, &errors)) {
 		OOVR_LOGF("%s isn't valid JSON (another program may be writing it), treating it as empty: %s",
-		    path.string().c_str(), errors.c_str());
+		    Utf8(path).c_str(), errors.c_str());
 		return false;
 	}
 	if (!parsed.isObject()) {
-		OOVR_LOGF("%s isn't a JSON object, treating it as empty", path.string().c_str());
+		OOVR_LOGF("%s isn't a JSON object, treating it as empty", Utf8(path).c_str());
 		return false;
 	}
 	result = std::move(parsed);
@@ -55,7 +62,7 @@ bool oc_write_json_file(const fs::path& path, const Json::Value& value)
 	{
 		std::ofstream out(temp, std::ios::binary | std::ios::trunc);
 		if (!out) {
-			OOVR_LOGF("Couldn't write %s: %s", temp.string().c_str(), strerror(errno));
+			OOVR_LOGF("Couldn't write %s: %s", Utf8(temp).c_str(), strerror(errno));
 			return false;
 		}
 		Json::StreamWriterBuilder builder;
@@ -64,7 +71,7 @@ bool oc_write_json_file(const fs::path& path, const Json::Value& value)
 		writer->write(value, &out);
 		out.flush();
 		if (!out) {
-			OOVR_LOGF("Couldn't write %s", temp.string().c_str());
+			OOVR_LOGF("Couldn't write %s", Utf8(temp).c_str());
 			out.close();
 			std::error_code ignored;
 			fs::remove(temp, ignored);
@@ -80,7 +87,7 @@ bool oc_write_json_file(const fs::path& path, const Json::Value& value)
 			return true;
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
-	OOVR_LOGF("Couldn't replace %s: %s", path.string().c_str(), ec.message().c_str());
+	OOVR_LOGF("Couldn't replace %s: %s", Utf8(path).c_str(), ec.message().c_str());
 	std::error_code ignored;
 	fs::remove(temp, ignored);
 	return false;
