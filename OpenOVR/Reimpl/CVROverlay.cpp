@@ -34,16 +34,24 @@ vr::EVROverlayError CVROverlay_011::GetOverlayTexture(vr::VROverlayHandle_t ulOv
     void* pNativeTextureRef, uint32_t* pWidth, uint32_t* pHeight, uint32_t* pNativeFormat, EGraphicsAPIConvention* pAPI,
     vr::EColorSpace* pColorSpace)
 {
-
-	// It should be fairly simple, but it's unlikely to be used so I can't be bothered implementing it now
-	STUBBED();
+	// The old versions name the graphics API with EGraphicsAPIConvention (DirectX 0, OpenGL 1), as ETextureType does
+	vr::ETextureType type = vr::TextureType_DirectX;
+	vr::EVROverlayError err = base->GetOverlayTexture(ulOverlayHandle, pNativeTextureHandle, pNativeTextureRef, pWidth, pHeight,
+	    pNativeFormat, &type, pColorSpace, nullptr);
+	if (pAPI)
+		*pAPI = (EGraphicsAPIConvention)type;
+	return err;
 }
 
 vr::EVROverlayError CVROverlay_013::GetOverlayTexture(vr::VROverlayHandle_t ulOverlayHandle, void** pNativeTextureHandle,
     void* pNativeTextureRef, uint32_t* pWidth, uint32_t* pHeight, uint32_t* pNativeFormat, EGraphicsAPIConvention* pAPI,
     vr::EColorSpace* pColorSpace)
 {
-
-	// It should be fairly simple, but it's unlikely to be used so I can't be bothered implementing it now
-	STUBBED();
+	// The old versions name the graphics API with EGraphicsAPIConvention (DirectX 0, OpenGL 1), as ETextureType does
+	vr::ETextureType type = vr::TextureType_DirectX;
+	vr::EVROverlayError err = base->GetOverlayTexture(ulOverlayHandle, pNativeTextureHandle, pNativeTextureRef, pWidth, pHeight,
+	    pNativeFormat, &type, pColorSpace, nullptr);
+	if (pAPI)
+		*pAPI = (EGraphicsAPIConvention)type;
+	return err;
 }

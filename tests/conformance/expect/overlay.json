@@ -1,0 +1,68 @@
+{
+ "#": "Every overlay getter returns what its setter set; nothing ends (run.py --expect)",
+ "overlay-lifecycle/Alpha/-/-": {
+  "value": 0.5,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/WidthInMeters/-/-": {
+  "value": 1.5,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/Curvature/-/-": {
+  "value": 0.25,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/PreCurvePitch/-/-": {
+  "value": 0.125,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/TexelAspect/-/-": {
+  "value": 2.0,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/SortOrder/-/-": {
+  "value": 3,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/RenderingPid/-/-": {
+  "value": 1234,
+  "status": "ok",
+  "set": 0
+ },
+ "overlay-lifecycle/Color/-/-": {
+  "value": 80.25,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/Flag/-/-": {
+  "value": true,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/TransformAbsolute/-/-": {
+  "value": 1.25,
+  "status": "ok",
+  "get": 0,
+  "set": 0
+ },
+ "overlay-lifecycle/CreateOverlay/-/-": {
+  "ret": 0
+ },
+ "overlay-lifecycle/DestroyOverlay/-/-": {
+  "ret": 0
+ }
+}

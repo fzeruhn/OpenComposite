@@ -23,7 +23,7 @@
 vr::EVROverlayError BaseOverlayView::AcquireOverlayView(vr::VROverlayHandle_t ulOverlayHandle,
     OOVR_VRNativeDevice_t* pNativeDevice, OOVR_VROverlayView_t* pOverlayView, uint32_t unOverlayViewSize)
 {
-	STUBBED();
+	OC_UNSUPPORTED(vr::VROverlayError_RequestFailed, "AcquireOverlayView: other programs' overlays can't be viewed");
 }
 
 /** Release an acquired OverlayView_t
@@ -42,11 +42,11 @@ vr::EVROverlayError BaseOverlayView::ReleaseOverlayView(OOVR_VROverlayView_t* pO
 /** Posts an overlay event */
 void BaseOverlayView::PostOverlayEvent(vr::VROverlayHandle_t ulOverlayHandle, const vr::VREvent_t* pvrEvent)
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("PostOverlayEvent: other programs' overlays can't be reached");
 }
 
 /** Determines whether this process is permitted to view an overlay's content. */
 bool BaseOverlayView::IsViewingPermitted(vr::VROverlayHandle_t ulOverlayHandle)
 {
-	STUBBED();
+	OC_UNSUPPORTED(false, "IsViewingPermitted: other programs' overlays can't be viewed");
 }

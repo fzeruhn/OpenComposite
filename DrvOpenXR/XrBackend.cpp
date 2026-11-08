@@ -477,7 +477,7 @@ void XrBackend::WaitForTrackingData()
 
 	xr_gbl->ClearCachedViews();
 
-	XrSpace projectionSpace = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+	XrSpace projectionSpace = xr_space_from_ref_space_type(BaseSystem::currentSpace);
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(projectionSpace);
 	const XrViewState& viewState = cachedViews.viewState;
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
@@ -582,7 +582,7 @@ void XrBackend::SubmitFrames(bool showSkybox, bool postPresent)
 	XrCompositionLayerProjection mainLayer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
 	if (submittedEyeTextures) {
 		// We have eye textures so setup a projection layer
-		mainLayer.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+		mainLayer.space = xr_space_from_ref_space_type(BaseSystem::currentSpace);
 		mainLayer.views = projectionViews;
 		mainLayer.viewCount = 2;
 
@@ -667,7 +667,7 @@ IBackend::openvr_enum_t XrBackend::SetSkyboxOverride(const vr::Texture_t* pTextu
 		layerQuad.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
 		layerQuad.next = NULL;
 		layerQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-		layerQuad.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+		layerQuad.space = xr_space_from_ref_space_type(BaseSystem::currentSpace);
 		layerQuad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
 		layerQuad.pose = { { 0.f, 0.f, 0.f, 1.f },
 			{ 0.0f, 0.0f, -0.65f } };
