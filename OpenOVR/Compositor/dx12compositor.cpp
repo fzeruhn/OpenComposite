@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include <algorithm>
+
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX12)
 
 #include "dx12compositor.h"
@@ -134,6 +136,7 @@ void DX12Compositor::CheckCreateSwapChain(const vr::Texture_t* texture, const vr
 		desc.arraySize = 1;
 		desc.usageFlags = XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
 
+		ForgetAcquiredImage(); // a new swapchain: no image of the old one is pending
 		if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &desc, &chain), "xrCreateSwapchain")) {
 		chain = XR_NULL_HANDLE; // tried again at the next Submit
 		return;
@@ -202,10 +205,9 @@ void DX12Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	if (!chain || XR_FAILED(lastResult))
 		return;
 
-	// First reserve an image from the swapchain
-	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	// Reserve an image from the swapchain and wait until the compositor is done with it
 	uint32_t currentIndex = 0;
-	if (SwapchainCallFailed(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex), "xrAcquireSwapchainImage") || currentIndex >= imagesHandles.size())
+	if (!AcquireAndWait((uint32_t)std::min(imagesHandles.size(), frameFences.size()), currentIndex))
 		return;
 
 	WaitForFence(frameFences[currentIndex].Get(),
@@ -215,14 +217,6 @@ void DX12Compositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRT
 	auto commandList = commandLists[currentIndex].Get();
 	commandList->Reset(commandAllocators[currentIndex].Get(), nullptr);
 
-	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
-	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
-	// image, so we should be careful with concurrency here.
-	// XR_TIMEOUT_EXPIRED is considered successful but swapchain still can't be used so need to handle that
-	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-	waitInfo.timeout = 500000000; // time out in nano seconds - 500ms
-	if (SwapchainCallFailed(xrWaitSwapchainImage(chain, &waitInfo), "xrWaitSwapchainImage"))
-		return;
 
 	// Copy the source to the destination image
 	D3D12_BOX sourceRegion;

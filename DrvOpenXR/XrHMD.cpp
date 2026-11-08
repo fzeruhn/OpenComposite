@@ -3,6 +3,7 @@
 //
 
 #include "XrHMD.h"
+#include "XrBackend.h"
 
 #include "../OpenOVR/Misc/Config.h"
 #include "../OpenOVR/Misc/xrmoreutils.h"
@@ -12,6 +13,23 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+
+// The session globals are briefly null while another thread restarts the session: wait up to 2 s for them. False if
+// there's still no session (it was lost, or a restart failed), so the caller answers without one.
+static bool WaitForSessionGlobals()
+{
+	// A lost session doesn't come back: no waiting for it
+	auto IsLost = []() {
+		BackendManager* manager = BackendManager::InstancePtr();
+		auto* backend = manager ? (XrBackend*)manager->GetBackendInstance() : nullptr;
+		return backend && backend->IsSessionLost();
+	};
+	for (int i = 0; !xr_gbl && !IsLost() && i < 100; i++) {
+		using namespace std::chrono_literals;
+		std::this_thread::sleep_for(20ms);
+	}
+	return xr_gbl != nullptr;
+}
 
 void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 {
@@ -28,6 +46,8 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 	if (eEye < 0 || (int)eEye >= 2)
 		eEye = vr::Eye_Left;
 
+	if (!xr_gbl)
+		return O2S_m4(glm::mat4(1.0f));
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->seatedSpace);
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
 	if (cachedViews.viewCount != XruEyeCount) {
@@ -83,7 +103,8 @@ void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, flo
 		eEye = vr::Eye_Left;
 
 	// TODO deduplicate with GetProjectionMatrix
-	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->seatedSpace);
+	static const XruCachedViews noViews{};
+	const XruCachedViews& cachedViews = xr_gbl ? xr_gbl->GetCachedViews(xr_gbl->seatedSpace) : noViews;
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
 	if (cachedViews.viewCount != XruEyeCount) {
 		// No views from the runtime (yet): a 90 degree view rather than an end
@@ -147,10 +168,8 @@ vr::HmdMatrix34_t XrHMD::GetEyeToHeadTransform(vr::EVREye eEye)
 	static XrTime time = ~0; // Don't set to zero by default, otherwise we'll return an identity matrix before the first frame
 	static XrView views[XruEyeCount] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
 
-	while (!xr_gbl) {
-		using namespace std::chrono_literals;
-		std::this_thread::sleep_for(20ms);
-	}
+	if (!WaitForSessionGlobals())
+		return G2S_m34(glm::identity<glm::mat4>()); // no session: the eyes at the head
 
 	// This won't exactly work for HMDs designed for spiders, but it's how SteamVR handles invalid eye numbers.
 	if (eEye < 0 || (int)eEye >= 2)
@@ -272,31 +291,23 @@ void XrHMD::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t*
 {
 	// TODO use ETrackingStateType
 
-	/* HACK: it would be cleaner to have the xr_gbl access behind a lock_shared, however in Sairento,
-	   the game may submit its first frame while simulataneously calling GetControllerStateWithPose,
-	   resulting in the following sequence of events:
-	   1. Game calls BaseCompositor::Submit, which gets a lock_shared on the session (see the function for why)
-	   2. Submit calls XrBackend::StoreEyeTexture, which calls XrBackend::CheckOrInitCompositors, which calls
-	      DrvOpenXR::SetupSession, which attempts to get an exclusive lock on the session. However, it doesn't actually
-	      get an exclusive lock, but instead just reuses shared lock that we acquired back in BaseCompositor::Submit,
-	      because our session lock implemention only checks if the thread already has a lock on the session,
-	      not whether it is exclusive or shared.
-	   3. SetupSession deletes the session and xr_gbl, and GetPose simultaneously tries to access xr_gbl since at this point
-	      these both have shared locks on the session: segfault because xr_gbl is null right now!
-	   A solution around this would be to implement lock upgrading, but initial testing showed that that seems to be
-	   a lot of work for little gain in this small edge case, especially when we can just sleep for a little bit and
-	   still avoid the problem of xr_gbl being null, which should only happen on session restart anyway.
-	   Perhaps redesigning the locking mechanism would be a more fruitful venture in the future.
-	*/
-	while (!xr_gbl) {
-		using namespace std::chrono_literals;
-		std::this_thread::sleep_for(20ms);
+	// Held to the end: a session restart on another thread replaces xr_gbl and its spaces, and waits for this to end
+	auto lock = xr_session.lock_shared();
+	if (!xr_gbl) {
+		// No session (it was lost, or a restart failed): no pose
+		if (pose) {
+			*pose = {};
+			pose->eTrackingResult = vr::TrackingResult_Uninitialized;
+		}
+		return;
 	}
 	xr_utils::PoseFromSpace(pose, xr_gbl->viewSpace, origin);
 }
 
 float XrHMD::GetIPD()
 {
+	if (!xr_gbl)
+		return 0.0064f;
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->viewSpace);
 	const XrViewState& state = cachedViews.viewState;
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;

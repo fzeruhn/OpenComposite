@@ -5,6 +5,7 @@
 #include "logging.h"
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -317,6 +318,25 @@ void oovr_log_raw_format(const char* file, long line, const char* func, const ch
 	oovr_log_raw(file, line, func, buff);
 
 	va_end(args);
+}
+
+void oc_strcpy_cut(char* dest, size_t dest_size, const char* src, std::atomic<bool>* logged, const char* file, long line)
+{
+	if (!dest || dest_size == 0)
+		return;
+	if (!src)
+		src = "";
+	size_t n = strnlen(src, dest_size);
+	if (n == dest_size) {
+		n = dest_size - 1;
+		// Not in the middle of a UTF-8 character: src[n], the first byte left out, isn't a continuation byte
+		while (n > 0 && ((unsigned char)src[n] & 0xC0) == 0x80)
+			n--;
+		if (logged && !logged->exchange(true))
+			oovr_log_raw_format(file, line, "strcpy_arr", "Cut to %d bytes, as it doesn't fit: %s (logged once here)", (int)n, src);
+	}
+	memcpy(dest, src, n);
+	dest[n] = 0;
 }
 
 OC_NORETURN void oovr_abort_raw(const char* file, long line, const char* func, const char* msg, const char* title, ...)

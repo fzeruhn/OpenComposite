@@ -15,7 +15,7 @@
 #endif
 
 namespace DrvOpenXR {
-// XR_SUCCESS, or what xrCreateSession answered (the backend is then marked lost)
+// XR_SUCCESS, or what xrCreateSession answered (no session then: the caller decides what next)
 XrResult SetupSession();
 void ShutdownSession();
 void FullShutdown();

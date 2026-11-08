@@ -78,11 +78,17 @@ void GLCompositor::ReadSwapchainImages()
 	// Enumerate all the swapchain images
 	uint32_t imageCount = 0;
 	images.clear();
-	if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr), "xrEnumerateSwapchainImages"))
-		return;
+	bool listed = !SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr), "xrEnumerateSwapchainImages");
 	auto handles = std::vector<XrSwapchainImageOpenGLKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
-	if (SwapchainCallFailed(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()), "xrEnumerateSwapchainImages"))
+	listed = listed && !SwapchainCallFailed(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()), "xrEnumerateSwapchainImages");
+	if (!listed || imageCount == 0) {
+		// A swapchain without images can't be used: it goes, and is made again at a later Submit
+		lastResult = XR_FAILED(lastResult) ? lastResult : XR_ERROR_RUNTIME_FAILURE;
+		xrDestroySwapchain(chain);
+		chain = XR_NULL_HANDLE;
+		createInfo = {};
 		return;
+	}
 
 	for (const XrSwapchainImageOpenGLKHR& img : handles) {
 		images.push_back(img.image);
@@ -123,29 +129,17 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 	bool useBlit = submitVerticallyFlipped;
 
 	CheckCreateSwapChain(viewport.extent.width, viewport.extent.height, texture->eColorSpace, rawFormat);
-	if (!chain || XR_FAILED(lastResult) || images.empty())
+	if (!chain || XR_FAILED(lastResult) || images.empty()) {
+		if (!XR_FAILED(lastResult))
+			lastResult = XR_ERROR_RUNTIME_FAILURE;
 		return;
+	}
 	useBlit = useBlit || createInfo.format != createInfoFormat;
 
-	// First reserve an image from the swapchain
-	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	// Reserve an image from the swapchain and wait until the compositor is done with it (a timed-out wait is
+	// picked up again at the next Submit)
 	uint32_t currentIndex = 0;
-	if (SwapchainCallFailed(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex), "xrAcquireSwapchainImage") || currentIndex >= images.size())
-		return;
-
-	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
-	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
-	// image, so we should be careful with concurrency here.
-	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-
-	// If the compositor is being slow, keep trying until we get through. We're not allowed to just
-	// fail since the image has been acquired.
-	// TODO make this stuff common across compositors, so this logic applies to all of them.
-	XrResult res;
-	do {
-		res = xrWaitSwapchainImage(chain, &waitInfo);
-	} while (res == XR_TIMEOUT_EXPIRED);
-	if (SwapchainCallFailed(res, "xrWaitSwapchainImage"))
+	if (!AcquireAndWait((uint32_t)images.size(), currentIndex))
 		return;
 
 	// Actually copy the image across
@@ -253,6 +247,7 @@ void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpa
 	// Create the new one
 	createInfo = desc;
 
+	ForgetAcquiredImage(); // a new swapchain: no image of the old one is pending
 	if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &desc, &chain), "xrCreateSwapchain")) {
 		chain = XR_NULL_HANDLE; // tried again at the next Submit
 		createInfo = {};

@@ -5,6 +5,8 @@
 #include "generated/interfaces/vrtypes.h"
 #include "stdafx.h"
 
+#include <algorithm>
+
 #include <vulkan/vulkan.h>
 
 #include "../DrvOpenXR/XrBackend.h"
@@ -189,6 +191,7 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 			return;
 		}
 
+		ForgetAcquiredImage(); // a new swapchain: no image of the old one is pending
 		if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &createInfo, &chain), "xrCreateSwapchain")) {
 			chain = XR_NULL_HANDLE; // tried again at the next Submit
 			return;
@@ -225,17 +228,9 @@ void VkCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTex
 		}
 	}
 
-	// First find the relevant image to render to
-	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	// Reserve an image from the swapchain and wait until the compositor is done with it (at most 500 ms)
 	uint32_t currentIndex = 0;
-	if (!chain || SwapchainCallFailed(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex), "xrAcquireSwapchainImage") || currentIndex >= appCommandBuffers.size())
-		return;
-
-	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
-	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
-	// image, so we should be careful with concurrency here.
-	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-	if (SwapchainCallFailed(xrWaitSwapchainImage(chain, &waitInfo), "xrWaitSwapchainImage"))
+	if (!AcquireAndWait((uint32_t)std::min(appCommandBuffers.size(), swapchainImages.size()), currentIndex))
 		return;
 
 	const VkCommandBuffer currentCommandBuffer = appCommandBuffers.at(currentIndex);

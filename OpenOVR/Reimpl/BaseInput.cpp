@@ -72,28 +72,38 @@ using namespace vr;
 // This is a duplicate from BaseClientCore.cpp
 // Manifests and binding files as SteamVR reads them (BOM, comments, trailing commas: Misc/JsonFile.h); false with
 // the reason in error if the file can't be read or isn't JSON
-static bool ReadJson(const std::wstring& path, Json::Value& result, std::string& error)
+// path is UTF-8, as OpenVR passes it; one that isn't (an older game's ANSI path) is tried as the system code page on
+// Windows, and is an error otherwise, never an exception
+static bool ReadJson(const std::string& path, Json::Value& result, std::string& error)
 {
 #ifndef ANDROID
-	return ReadJsonFileLenient(std::filesystem::path(path), result, error);
+	try {
+		std::u8string utf8(path.begin(), path.end());
+		return ReadJsonFileLenient(std::filesystem::path(utf8), result, error);
+	} catch (const std::exception& e) {
+#ifdef _WIN32
+		try {
+			return ReadJsonFileLenient(std::filesystem::path(path), result, error);
+		} catch (const std::exception&) {
+		}
+#endif
+		error = std::string("can't use the path ") + path + ": " + e.what();
+		result = Json::Value();
+		return false;
+	}
 #else
-	typedef std::codecvt_utf8<wchar_t> convert_type;
-	std::wstring_convert<convert_type, wchar_t> converter;
-	const std::string real_path = converter.to_bytes(path);
-	std::string contents = OpenComposite_Android_Load_Input_File(real_path.c_str());
+	std::string contents = OpenComposite_Android_Load_Input_File(path.c_str());
 	return ParseJsonLenient(contents, result, error);
 #endif
 }
 
-// Convert a UTF-8 string to a UTF-16 (wide) string
-static std::wstring utf8to16(const std::string& t_str)
+// A binding with no action or no path (OpenXR couldn't make one, logged) is left out: one bad entry would make
+// xrSuggestInteractionProfileBindings refuse the whole controller's bindings
+static void AddSuggestedBinding(std::vector<XrActionSuggestedBinding>& bindings, XrAction action, XrPath path)
 {
-	// setup converter
-	typedef std::codecvt_utf8<wchar_t> convert_type;
-	std::wstring_convert<convert_type, wchar_t> converter;
-
-	// use converter (.to_bytes: wstr->str, .from_bytes: str->wstr)
-	return converter.from_bytes(t_str);
+	if (action == XR_NULL_HANDLE || path == XR_NULL_PATH)
+		return;
+	bindings.push_back(XrActionSuggestedBinding{ action, path });
 }
 
 static std::string dirnameOf(const std::string& fname)
@@ -380,7 +390,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 	// answers InvalidParam as SteamVR does for a path it can't use
 	Json::Value root;
 	std::string manifestError;
-	if (!ReadJson(utf8to16(pchActionManifestPath), root, manifestError) || !root.isObject()) {
+	if (!ReadJson(pchActionManifestPath, root, manifestError) || !root.isObject()) {
 		OOVR_LOGF("Failed to open or parse input manifest: %s", manifestError.empty() ? "not a JSON object" : manifestError.c_str());
 		return VRInputError_InvalidParam;
 	}
@@ -848,8 +858,9 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 	// A binding file that can't be used leaves this controller type without bindings; the others still load
 	Json::Value bindingsRoot;
 	std::string bindingsError;
-	if (!ReadJson(utf8to16(bindingsPath), bindingsRoot, bindingsError)) {
-		OOVR_LOGF("Warning: can't read the binding file, no bindings for %s: %s", profile.GetPath().c_str(), bindingsError.c_str());
+	if (!ReadJson(bindingsPath, bindingsRoot, bindingsError) || !bindingsRoot.isObject()) {
+		OOVR_LOGF("Warning: can't read the binding file, no bindings for %s: %s", profile.GetPath().c_str(),
+		    bindingsError.empty() ? "not a JSON object" : bindingsError.c_str());
 		return;
 	}
 
@@ -870,7 +881,7 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 
 	std::vector<XrActionSuggestedBinding> bindings;
 
-	for (std::string setFullName : bindingsJson.getMemberNames()) {
+	for (std::string setFullName : bindingsJson.getMemberNames()) try {
 		const Json::Value setJson = bindingsJson[setFullName];
 
 		setFullName = lowerStr(setFullName);
@@ -892,11 +903,15 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 
 		// TODO combine these loops for sources, poses and haptics
 
-		for (const auto& srcJson : setJson["sources"]) {
+		for (const auto& srcJson : setJson["sources"]) try {
+			if (!srcJson.isObject()) {
+				OOVR_LOGF("Warning: skipping a source that isn't a JSON object in bindings file '%s'", bindingsPath.c_str());
+				continue;
+			}
 			std::string importBasePath = lowerStr(srcJson["path"].asString());
 
 			const Json::Value& inputsJson = srcJson["inputs"];
-			for (const std::string& inputName : inputsJson.getMemberNames()) {
+			for (const std::string& inputName : inputsJson.getMemberNames()) try {
 				const Json::Value item = inputsJson[inputName];
 
 				std::string actionName = actions.ShortenOrLookupName(item["output"].asString());
@@ -972,7 +987,7 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 						OOVR_LOGF("Bound index extendo action to %s for original %s (%s)", pathStr.c_str(), importBasePath.c_str(), action->fullName.c_str());
 						XrPath path = XR_NULL_PATH;
 						OC_XR_LOG(xrStringToPath(xr_instance, pathStr.c_str(), &path));
-						bindings.push_back(XrActionSuggestedBinding{ forceAction, path });
+						AddSuggestedBinding(bindings, forceAction, path);
 					}
 
 					action->stackedValueExtension = forceAction;
@@ -1020,11 +1035,20 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 
 				XrPath path = XR_NULL_PATH;
 				OC_XR_LOG(xrStringToPath(xr_instance, pathStr.c_str(), &path));
-				bindings.push_back(XrActionSuggestedBinding{ action->xr, path });
+				AddSuggestedBinding(bindings, action->xr, path);
+			} catch (const std::exception& e) {
+				// A wrong-typed value in this entry (Json::LogicError) or a bad number: only the entry is left out
+				OOVR_SOFT_ABORTF("Skipping an input of bindings file '%s': %s", bindingsPath.c_str(), e.what());
 			}
+		} catch (const std::exception& e) {
+			OOVR_SOFT_ABORTF("Skipping a source of bindings file '%s': %s", bindingsPath.c_str(), e.what());
 		}
 
-		for (const auto& item : setJson["poses"]) {
+		for (const auto& item : setJson["poses"]) try {
+			if (!item.isObject()) {
+				OOVR_LOGF("Warning: skipping a pose binding that isn't a JSON object in bindings file '%s'", bindingsPath.c_str());
+				continue;
+			}
 			std::string specPath = lowerStr(item["path"].asString());
 
 			std::string actionName = lowerStr(item["output"].asString());
@@ -1072,9 +1096,15 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 			} else {
 				action->poseBindingsRight[&profile] = info;
 			}
+		} catch (const std::exception& e) {
+			OOVR_SOFT_ABORTF("Skipping a pose binding of bindings file '%s': %s", bindingsPath.c_str(), e.what());
 		}
 
-		for (const auto& item : setJson["haptics"]) {
+		for (const auto& item : setJson["haptics"]) try {
+			if (!item.isObject()) {
+				OOVR_LOGF("Warning: skipping a haptic binding that isn't a JSON object in bindings file '%s'", bindingsPath.c_str());
+				continue;
+			}
 			std::string pathStr = lowerStr(item["path"].asString());
 
 			std::string actionName = lowerStr(item["output"].asString());
@@ -1092,8 +1122,12 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 
 			XrPath path = XR_NULL_PATH;
 			OC_XR_LOG(xrStringToPath(xr_instance, pathStr.c_str(), &path));
-			bindings.push_back(XrActionSuggestedBinding{ action->xr, path });
+			AddSuggestedBinding(bindings, action->xr, path);
+		} catch (const std::exception& e) {
+			OOVR_SOFT_ABORTF("Skipping a haptic binding of bindings file '%s': %s", bindingsPath.c_str(), e.what());
 		}
+	} catch (const std::exception& e) {
+		OOVR_SOFT_ABORTF("Skipping an action set of bindings file '%s': %s", bindingsPath.c_str(), e.what());
 	}
 
 	// If there aren't any bindings, that makes it simple
@@ -1179,7 +1213,7 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 		// add parent to bindings
 		XrPath suggested_path = XR_NULL_PATH;
 		OC_XR_LOG(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath).c_str(), &suggested_path));
-		bindings.push_back(XrActionSuggestedBinding{ parent_iter->second.vectorAction, suggested_path });
+		AddSuggestedBinding(bindings, parent_iter->second.vectorAction, suggested_path);
 	}
 
 	if (subMode == "click") {
@@ -1202,7 +1236,7 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 
 			XrPath suggested_path = XR_NULL_PATH;
 			OC_XR_LOG(xrStringToPath(xr_instance, profile.TranslateAction(importBasePath + (manualThreshold ? "/force" : "/click")).c_str(), &suggested_path));
-			bindings.push_back(XrActionSuggestedBinding{ parent_iter->second.clickAction, suggested_path });
+			AddSuggestedBinding(bindings, parent_iter->second.clickAction, suggested_path);
 		}
 	} else {
 		// touch dpad
@@ -1219,7 +1253,7 @@ void BaseInput::LoadDpadAction(const InteractionProfile& profile, const std::str
 
 			XrPath suggested_path = XR_NULL_PATH;
 			OC_XR_LOG(xrStringToPath(xr_instance, touchPath.c_str(), &suggested_path));
-			bindings.push_back(XrActionSuggestedBinding{ parent_iter->second.touchAction, suggested_path });
+			AddSuggestedBinding(bindings, parent_iter->second.touchAction, suggested_path);
 		}
 	}
 
@@ -1261,7 +1295,7 @@ void BaseInput::LoadDClickAction(const InteractionProfile& profile, const std::s
 
 	XrPath suggested_path = XR_NULL_PATH;
 	OC_XR_LOG(xrStringToPath(xr_instance, clickPath.c_str(), &suggested_path));
-	bindings.push_back(XrActionSuggestedBinding{ dclickInfo.click_action, suggested_path });
+	AddSuggestedBinding(bindings, dclickInfo.click_action, suggested_path);
 
 	action->perProfileData[&profile].dclickBindings.push_back(dclickInfo);
 }
@@ -2219,7 +2253,7 @@ EVRInputError BaseInput::GetSkeletalBoneData(VRActionHandle_t actionHandle, EVRS
 	if (!dev)
 		return vr::VRInputError_InvalidDevice;
 
-	if (!xr_gbl->handTrackingProperties.supportsHandTracking) {
+	if (!xr_gbl || !xr_gbl->handTrackingProperties.supportsHandTracking) {
 		dev->SetHandTrackingValid(false);
 		return getEstimatedBoneData(hand, eTransformSpace, eMotionRange, std::span<VRBoneTransform_t, eBone_Count>(pTransformArray, eBone_Count));
 	}
@@ -2277,9 +2311,11 @@ EVRInputError BaseInput::GetSkeletalSummaryData(VRActionHandle_t actionHandle, E
 {
 	GET_ACTION_FROM_HANDLE(action, actionHandle);
 
+	if (!pSkeletalSummaryData)
+		return VRInputError_InvalidParam;
 	ZeroMemory(pSkeletalSummaryData, sizeof(VRSkeletalSummaryData_t));
 
-	if (xr_gbl->handTrackingProperties.supportsHandTracking) {
+	if (xr_gbl && xr_gbl->handTrackingProperties.supportsHandTracking) {
 		return getRealSkeletalSummary(action->skeletalHand, pSkeletalSummaryData);
 	}
 
@@ -2288,6 +2324,8 @@ EVRInputError BaseInput::GetSkeletalSummaryData(VRActionHandle_t actionHandle, E
 
 EVRInputError BaseInput::getRealSkeletalSummary(ITrackedDevice::TrackedDeviceType hand, VRSkeletalSummaryData_t* pSkeletalSummaryData)
 {
+	if (!xr_gbl)
+		return getEstimatedSkeletalSummary(hand, pSkeletalSummaryData);
 	XrHandJointsLocateInfoEXT locateInfo = { XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT };
 	locateInfo.baseSpace = xr_gbl->floorSpace;
 	locateInfo.time = xr_gbl->GetBestTime();
@@ -2459,7 +2497,10 @@ EVRInputError BaseInput::GetActionOrigins(VRActionSetHandle_t actionSetHandle, V
 		return VRInputError_InvalidHandle;
 	}
 
-	ZeroMemory(originsOut, originOutCount * sizeof(*originsOut));
+	if (!originsOut && originOutCount)
+		return VRInputError_InvalidParam;
+	if (originsOut)
+		ZeroMemory(originsOut, originOutCount * sizeof(*originsOut));
 
 	std::set<std::string> sources;
 	XrBoundSourcesForActionEnumerateInfo info = { XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO };
@@ -2468,17 +2509,26 @@ EVRInputError BaseInput::GetActionOrigins(VRActionSetHandle_t actionSetHandle, V
 	// 20 will be more than enough, saves a second call
 	XrPath tmp[20];
 	uint32_t count = 0;
-	OC_XR_LOG(xrEnumerateBoundSourcesForAction(xr_session.get(), &info, std::size(tmp), &count, tmp));
+	// On failure (or a count beyond tmp, from SIZE_INSUFFICIENT) the sources are none, or tmp's worth
+	XrResult enumResult = xrEnumerateBoundSourcesForAction(xr_session.get(), &info, std::size(tmp), &count, tmp);
+	if (XR_FAILED(enumResult)) {
+		OOVR_LOG_ONCE("GetActionOrigins: xrEnumerateBoundSourcesForAction failed");
+		count = 0;
+	}
+	count = std::min<uint32_t>(count, (uint32_t)std::size(tmp));
 
 	// Now for each source find the /user/hand/abc substring that it starts with
 	char buff[XR_MAX_PATH_LENGTH + 1] = {};
 	for (uint32_t i = 0; i < count; i++) {
 		uint32_t len = 0;
-		OC_XR_LOG(xrPathToString(xr_instance, tmp[i], XR_MAX_PATH_LENGTH, &len, buff));
+		if (XR_FAILED(xrPathToString(xr_instance, tmp[i], XR_MAX_PATH_LENGTH, &len, buff)) || len == 0)
+			continue;
 
-		std::string path(buff, len);
-		int endOfHandPos = path.find('/', strlen("/user/hand/") + 1);
-		path.erase(endOfHandPos);
+		// len counts the terminator
+		std::string path(buff, strnlen(buff, std::min<size_t>(len, XR_MAX_PATH_LENGTH)));
+		size_t endOfHandPos = path.find('/', strlen("/user/hand/") + 1);
+		if (endOfHandPos != std::string::npos)
+			path.erase(endOfHandPos);
 		sources.insert(std::move(path));
 	}
 
@@ -2769,8 +2819,12 @@ VRInputValueHandle_t BaseInput::activeOriginFromSubaction(Action* action, const 
 		// Get the attached sources
 		XrBoundSourcesForActionEnumerateInfo enumInfo = { XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO };
 		enumInfo.action = action->xr;
-		OC_XR_LOG(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo,
-		    std::size(action->sources), &action->sourcesCount, action->sources));
+		// On failure (or a count beyond sources, from SIZE_INSUFFICIENT) the sources are none, or the array's worth
+		if (XR_FAILED(xrEnumerateBoundSourcesForAction(xr_session.get(), &enumInfo,
+		        std::size(action->sources), &action->sourcesCount, action->sources)))
+			action->sourcesCount = 0;
+		action->sourcesCount = std::min<uint32_t>(action->sourcesCount,
+		    (uint32_t)std::min(std::size(action->sources), std::size(action->sourceNames)));
 
 		// Convert the source paths to strings
 		char buff[256] = {};
@@ -2880,7 +2934,7 @@ bool BaseInput::GetLegacyControllerState(vr::TrackedDeviceIndex_t controllerDevi
 
 	// SteamVR seemingly writes to these two axis to represent finger curl on legacy input.
 	VRSkeletalSummaryData_t skeletonData{};
-	if (xr_gbl->handTrackingProperties.supportsHandTracking) {
+	if (xr_gbl && xr_gbl->handTrackingProperties.supportsHandTracking) {
 		getRealSkeletalSummary((ITrackedDevice::TrackedDeviceType)hand, &skeletonData);
 	} else {
 		return true;

@@ -243,6 +243,15 @@ static bool is_same_gpu(VkInstance instance, VkPhysicalDevice runtimeDevice, VkP
 }
 #endif
 
+// VREvent_Quit for the game, as SteamVR sends when its compositor can't go on
+static void EnqueueQuit()
+{
+	VREvent_t quit = { VREvent_Quit };
+	auto system = GetBaseSystem();
+	if (system)
+		system->_EnqueueEvent(quit);
+}
+
 /* Submitting Frames */
 bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 {
@@ -346,16 +355,19 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 		// after querying for graphics requirements.
 		DrvOpenXR::ShutdownSession();
 
-		// If the game's device can't be bound after all: back to a session on the temporary device, and no more tries
+		// If the game's device can't be bound after all: back to a session on the temporary device, and no more tries.
+		// The game can't be seen, so it's told to quit, and its calls keep working on that session while it exits.
 		auto giveUp = [&](const char* why) {
 			OOVR_LOGF("Can't use the application's graphics device: %s", why);
 			graphicsBinding = nullptr;
 			usingApplicationGraphicsAPI = false;
 			appGraphicsUnusable = true;
-			if (temporaryGraphics)
-				DrvOpenXR::SetupSession();
-			else
-				OnSessionLost();
+			if (!temporaryGraphics || XR_FAILED(DrvOpenXR::SetupSession())) {
+				OnSessionLost(); // not even the temporary device gets a session: OnSessionLost tells the game to quit
+			} else {
+				OOVR_LOG("The game's frames can't be shown: telling the game to quit");
+				EnqueueQuit();
+			}
 			return false;
 		};
 
@@ -377,9 +389,11 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			d3dInfo.type = XR_TYPE_GRAPHICS_BINDING_D3D11_KHR;
 			d3dInfo.device = dev;
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingD3D11KHR>>(d3dInfo);
-			DrvOpenXR::SetupSession();
+			XrResult made = DrvOpenXR::SetupSession();
 
 			dev->Release();
+			if (XR_FAILED(made))
+				return giveUp("the OpenXR runtime refused a session on the game's D3D11 device");
 			break;
 		}
 #endif
@@ -401,7 +415,8 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			d3dInfo.device = device.Get();
 			d3dInfo.queue = d3dTexData->m_pCommandQueue;
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingD3D12KHR>>(d3dInfo);
-			DrvOpenXR::SetupSession();
+			if (XR_FAILED(DrvOpenXR::SetupSession()))
+				return giveUp("the OpenXR runtime refused a session on the game's D3D12 device");
 
 #ifdef _DEBUG
 			ComPtr<ID3D12Debug> debugController;
@@ -457,7 +472,8 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 				return giveUp("the app's VkQueue isn't one of its device's queues");
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingVulkanKHR>>(binding);
-			DrvOpenXR::SetupSession();
+			if (XR_FAILED(DrvOpenXR::SetupSession()))
+				return giveUp("the OpenXR runtime refused a session on the game's Vulkan device");
 			break;
 		}
 #endif
@@ -475,7 +491,8 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			binding.hDC = wglGetCurrentDC();
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLWin32KHR>>(binding);
-			DrvOpenXR::SetupSession();
+			if (XR_FAILED(DrvOpenXR::SetupSession()))
+				return giveUp("the OpenXR runtime refused a session on the game's OpenGL context");
 #else
 			// Only support xlib for now (same as Monado)
 			// TODO wayland
@@ -518,7 +535,8 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 				return giveUp("glXCreateContextAttribsARB failed");
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLXlibKHR>>(binding);
-			DrvOpenXR::SetupSession();
+			if (XR_FAILED(DrvOpenXR::SetupSession()))
+				return giveUp("the OpenXR runtime refused a session on the game's OpenGL context");
 #endif
 			// End of platform-specific code
 
@@ -532,7 +550,8 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 			binding.next = nullptr;
 
 			graphicsBinding = std::make_unique<BindingWrapper<XrGraphicsBindingOpenGLESAndroidKHR>>(binding);
-			DrvOpenXR::SetupSession();
+			if (XR_FAILED(DrvOpenXR::SetupSession()))
+				return giveUp("the OpenXR runtime refused a session on the game's OpenGL ES context");
 #endif
 			break;
 		}
@@ -1199,10 +1218,7 @@ void XrBackend::OnSessionLost()
 		return;
 	sessionLost = true;
 	OOVR_LOG("The OpenXR session is lost: telling the game to quit");
-	VREvent_t quit = { VREvent_Quit };
-	auto system = GetBaseSystem();
-	if (system)
-		system->_EnqueueEvent(quit);
+	EnqueueQuit();
 }
 
 void XrBackend::OnSessionCreated()
@@ -1504,13 +1520,21 @@ void XrBackend::CreateGenericTrackers()
 void XrBackend::MaybeRestartForInputs()
 {
 	// if we haven't attached any actions to the session (infoSet or game actions), no need to restart
+	// The session lock before inputRestartMutex, the order QueryForInteractionProfile has them in under Submit
+	auto sessionLock = xr_session.lock();
 	const std::lock_guard<std::mutex> lock(inputRestartMutex);
 	BaseInput* input = GetUnsafeBaseInput();
 	if (infoSet == XR_NULL_HANDLE && (!input || !input->AreActionsLoaded()))
 		return;
 
 	OOVR_LOG("Restarting session for inputs...");
-	DrvOpenXR::SetupSession();
+	if (XR_FAILED(DrvOpenXR::SetupSession())) {
+		// No session to put the actions on: the game is told to quit
+		auto* backend = (XrBackend*)BackendManager::Instance().GetBackendInstance();
+		if (backend)
+			backend->OnSessionLost();
+		return;
+	}
 	OOVR_LOG("Session restart successful!");
 }
 
@@ -1580,7 +1604,8 @@ void XrBackend::BindInfoSet()
 			    });
 			XrPath path = XR_NULL_PATH;
 			OC_XR_LOG(xrStringToPath(xr_instance, click_path->c_str(), &path));
-			bindings.push_back({ .action = infoAction, .binding = path });
+			if (infoAction != XR_NULL_HANDLE && path != XR_NULL_PATH) // one bad entry would lose the profile's suggestion
+				bindings.push_back({ .action = infoAction, .binding = path });
 
 			suggestedBindings.interactionProfile = interactionProfilePath;
 			suggestedBindings.suggestedBindings = bindings.data();

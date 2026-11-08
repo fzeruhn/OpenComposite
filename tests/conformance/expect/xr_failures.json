@@ -74,6 +74,7 @@
    "frame-loop"
   ],
   "frames": 120,
+  "quit_events": 1,
   "failed_submits": {
    "answer": 102,
    "count": 240

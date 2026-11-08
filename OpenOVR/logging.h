@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include "Misc/SoftFail.h"
@@ -141,9 +142,12 @@ void oovr_message_raw(const char* message, const char* title);
 		}                                                                           \
 	} while (0)
 
-// Again unrelated and just putting it here because everything can use it. This makes using
-// strcpy_s more convenient on arrays in a cross-platform way.
-#define strcpy_arr(dest, src) strcpy_s(dest, sizeof(dest), src)
+// Again unrelated and just putting it here because everything can use it: copies src into the array dest, cutting it
+// short (at a UTF-8 character boundary, and logging that once per call site) when it doesn't fit, where MSVC's
+// strcpy_s would end the program. logged is the call site's flag.
+void oc_strcpy_cut(char* dest, size_t dest_size, const char* src, std::atomic<bool>* logged, const char* file, long line);
+#define strcpy_arr(dest, src) \
+	oc_strcpy_cut(dest, sizeof(dest), src, [] { static std::atomic<bool> logged{ false }; return &logged; }(), __FILE__, __LINE__)
 
 #define STUBBED()                                                                                                            \
 	do {                                                                                                                     \

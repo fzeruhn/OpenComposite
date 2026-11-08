@@ -138,3 +138,29 @@ TEST_CASE("Soft_abort_macro_counts")
 	REQUIRE(s != nullptr);
 	CHECK(s->hits.load() == 2);
 }
+
+TEST_CASE("Strcpy_arr_cuts_a_name_that_does_not_fit")
+{
+	Capture c;
+	char small[8];
+	strcpy_arr(small, "fits");
+	CHECK(std::string(small) == "fits");
+	strcpy_arr(small, "1234567");
+	CHECK(std::string(small) == "1234567");
+	CHECK(count_lines("Cut to") == 0);
+	for (int i = 0; i < 2; i++)
+		strcpy_arr(small, "/actions/main/in/far_too_long");
+	CHECK(std::string(small) == "/action");
+	CHECK(count_lines("Cut to 7 bytes") == 1);
+	strcpy_arr(small, "/actions/main/in/also_too_long");
+	CHECK(count_lines("Cut to 7 bytes") == 2);
+}
+
+TEST_CASE("Strcpy_arr_cuts_at_a_character_boundary")
+{
+	char small[8];
+	strcpy_arr(small, "ab\xC3\xA9\xC3\xA9\xC3\xA9"); // "abééé": the third é would end at byte 8
+	CHECK(std::string(small) == "ab\xC3\xA9\xC3\xA9");
+	strcpy_arr(small, "abcdef\xE2\x82\xAC"); // "abcdef€": the € starts at byte 6 and doesn't fit
+	CHECK(std::string(small) == "abcdef");
+}

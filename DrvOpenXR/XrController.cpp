@@ -207,7 +207,7 @@ void XrController::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevice
 
 void XrController::GetPoseFromHandTracking(BaseInput* input, vr::TrackedDevicePose_t* pose)
 {
-	if (!xr_gbl->handTrackingProperties.supportsHandTracking)
+	if (!xr_gbl || !xr_gbl->handTrackingProperties.supportsHandTracking)
 		return;
 
 	if (!input->handTrackers[(int)GetHand()])

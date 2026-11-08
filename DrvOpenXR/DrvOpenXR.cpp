@@ -391,10 +391,9 @@ XrResult DrvOpenXR::SetupSession()
 	sessionInfo.systemId = xr_system;
 	sessionInfo.next = currentBackend->GetCurrentGraphicsBinding();
 	if (XrResult res = xrCreateSession(xr_instance, &sessionInfo, &xr_session.get()); XR_FAILED(res)) {
-		// No session: the backend marks itself lost (a restart that fails) and the caller decides the rest
+		// No session: the caller decides (falls back to the temporary device, or marks the session lost)
 		OOVR_LOGF("xrCreateSession failed: %d", (int)res);
 		xr_session.reset();
-		currentBackend->OnSessionLost();
 		return res;
 	}
 

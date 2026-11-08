@@ -678,6 +678,8 @@ bool BaseRenderModels::TryGetComponentState(ITrackedDevice::TrackedDeviceType ha
 	}
 
 	XrSpaceLocation location = { XR_TYPE_SPACE_LOCATION };
+	if (!xr_gbl)
+		return false;
 	OC_XR_SOFT(xrLocateSpace(componentSpace, gripSpace, xr_gbl->GetBestTime(), &location), false);
 
 	if ((location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0) {

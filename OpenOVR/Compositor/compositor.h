@@ -54,6 +54,26 @@ protected:
 	bool SwapchainCallFailed(XrResult res, const char* what);
 	XrResult lastResult = XR_SUCCESS;
 
+	/**
+	 * Acquires an image of chain and waits for it: true with its index, else false with lastResult set. After a
+	 * timed-out wait the same image is waited on at the next call, so an image is never left acquired. An index
+	 * beyond imageCount is released unwritten. The default timeout is 500 ms.
+	 */
+	bool AcquireAndWait(uint32_t imageCount, uint32_t& index, int64_t timeout = 500000000);
+	// For a new swapchain (the old one's pending image went with it)
+	void ForgetAcquiredImage() { waitPending = false; }
+
+private:
+	bool waitPending = false;
+	uint32_t pendingIndex = 0;
+	XrSwapchain pendingChain = XR_NULL_HANDLE;
+	// Invoke's back-off after failures
+	int failuresInARow = 0;
+	int retryDelay = 0;
+	XrResult lastFailure = XR_SUCCESS;
+
+protected:
+
 	XrSwapchain chain = XR_NULL_HANDLE;
 
 	// The request used to create the current swapchain. This can be used to check if the swapchain needs recreating.
