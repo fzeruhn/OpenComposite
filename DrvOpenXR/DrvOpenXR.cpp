@@ -92,14 +92,11 @@ static XrResult CreateSystemID()
 // The init error an OpenVR game gets for a start-up call that failed
 static vr::EVRInitError InitErrorFor(XrResult res)
 {
-	switch (res) {
-	case (XrResult)-51: // XR_ERROR_RUNTIME_UNAVAILABLE (OpenXR 1.0.29), newer than the bundled headers
-	case XR_ERROR_FORM_FACTOR_UNAVAILABLE:
-	case XR_ERROR_FORM_FACTOR_UNSUPPORTED:
+	// -51 is XR_ERROR_RUNTIME_UNAVAILABLE (OpenXR 1.0.29), newer than the bundled headers (so not a case: gcc's
+	// -Wswitch rejects a value outside the enum)
+	if ((int)res == -51 || res == XR_ERROR_FORM_FACTOR_UNAVAILABLE || res == XR_ERROR_FORM_FACTOR_UNSUPPORTED)
 		return vr::VRInitError_Init_HmdNotFound;
-	default:
-		return vr::VRInitError_Init_Internal;
-	}
+	return vr::VRInitError_Init_Internal;
 }
 
 // Destroys what a failed CreateOpenXRBackend had created, and answers nullptr with the error
