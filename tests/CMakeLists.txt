@@ -73,6 +73,7 @@ add_executable(oc_unit_tests
 	unit/JsonFileTests.cpp
 	unit/SteamVRPathsTests.cpp
 	unit/SharedStoreTests.cpp
+	unit/DeviceIdentityTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE

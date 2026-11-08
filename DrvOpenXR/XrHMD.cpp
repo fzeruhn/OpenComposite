@@ -403,30 +403,24 @@ uint32_t XrHMD::GetStringTrackedDeviceProperty(vr::ETrackedDeviceProperty prop,
 
 	if (profile) {
 		std::optional<std::string> ret = profile->GetProperty<std::string>(prop, HAND_NONE);
-		if (ret.has_value()) {
-			if (value != NULL && bufferSize > 0) {
-				strcpy_s(value, bufferSize, ret->c_str());
-			}
-			return ret->size() + 1;
-		}
+		if (ret.has_value())
+			return AnswerString(*ret, value, bufferSize, pErrorL);
 	}
 
-#define PROP(in, out)                                                                                      \
-	do {                                                                                                   \
-		if (prop == in) {                                                                                  \
-			if (value != NULL && bufferSize > 0) {                                                         \
-				strcpy_s(value, bufferSize, out); /* FFS msvc - strncpy IS the secure version of strcpy */ \
-			}                                                                                              \
-			return (uint32_t)strlen(out) + 1;                                                              \
-		}                                                                                                  \
-	} while (0)
-
-	PROP(vr::Prop_RegisteredDeviceType_String, "oculus/F00BAAF00F");
-	PROP(vr::Prop_RenderModelName_String, "oculusHmdRenderModel");
-
-	PROP(vr::Prop_ControllerType_String, "oculus"); // If this is null on the HMD VRChat ignores the HMD entirely
-
+	// The rest from the HMD's row (Identity)
 	return XrTrackedDevice::GetStringTrackedDeviceProperty(prop, value, bufferSize, pErrorL);
+}
+
+DeviceIdentity XrHMD::Identity()
+{
+	// The OpenXR system's name picks the row; read once (it doesn't change while the instance lives)
+	static std::string systemName = [] {
+		XrSystemProperties properties = { XR_TYPE_SYSTEM_PROPERTIES };
+		if (xr_instance != XR_NULL_HANDLE && XR_SUCCEEDED(xrGetSystemProperties(xr_instance, xr_system, &properties)))
+			return std::string(properties.systemName);
+		return std::string();
+	}();
+	return HmdIdentity(systemName);
 }
 
 int32_t XrHMD::GetInt32TrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* pErrorL)

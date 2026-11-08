@@ -48,27 +48,68 @@ uint32_t XrTrackedDevice::GetStringTrackedDeviceProperty(vr::ETrackedDevicePrope
 	if (pErrorL)
 		*pErrorL = vr::TrackedProp_Success;
 
-#define PROP(in, out)                                                                                  \
-	if (prop == in) {                                                                                  \
-		if (value != NULL && bufferSize > 0) {                                                         \
-			strcpy_s(value, bufferSize, out); /* FFS msvc - strncpy IS the secure version of strcpy */ \
-		}                                                                                              \
-		return (uint32_t)strlen(out) + 1;                                                              \
+	// The device's row in the identity table; an empty field isn't answered here
+	DeviceIdentity id = Identity();
+	const std::string* field = nullptr;
+	switch (prop) {
+	case vr::Prop_TrackingSystemName_String:
+		field = &id.trackingSystem;
+		break;
+	case vr::Prop_ManufacturerName_String:
+		field = &id.manufacturer;
+		break;
+	case vr::Prop_ModelNumber_String:
+		field = &id.modelNumber;
+		break;
+	case vr::Prop_RenderModelName_String:
+		field = &id.renderModel; // passed on into IVRRenderModels as the render model name
+		break;
+	case vr::Prop_ControllerType_String:
+		field = &id.controllerType;
+		break;
+	case vr::Prop_RegisteredDeviceType_String:
+		field = &id.registeredDeviceType;
+		break;
+	case vr::Prop_InputProfilePath_String:
+		field = &id.inputProfilePath;
+		break;
+	case vr::Prop_SerialNumber_String:
+		field = &id.serial;
+		break;
+	default:
+		break;
 	}
+	if (field && !field->empty())
+		return AnswerString(*field, value, bufferSize, pErrorL);
 
-	// These have been validated against SteamVR
-	PROP(vr::Prop_TrackingSystemName_String, "oculus");
-	PROP(vr::Prop_ManufacturerName_String, "Oculus");
-
-	// TODO these?
-	PROP(vr::Prop_SerialNumber_String, "<unknown>"); // TODO
-	PROP(vr::Prop_RenderModelName_String, "<unknown>"); // It appears this just gets passed into IVRRenderModels as the render model name
-
-	// Used by Firebird The Unfinished - see #58
-	// Copied from SteamVR
-	PROP(vr::Prop_DriverVersion_String, "1.32.0");
-
-#undef PROP
+	// Used by Firebird The Unfinished - see #58. Copied from SteamVR
+	if (prop == vr::Prop_DriverVersion_String)
+		return AnswerString("1.32.0", value, bufferSize, pErrorL);
 
 	return ITrackedDevice::GetStringTrackedDeviceProperty(prop, value, bufferSize, pErrorL);
+}
+
+DeviceIdentity XrTrackedDevice::Identity()
+{
+	// A device of no class below: the generic answers
+	DeviceIdentity id;
+	id.trackingSystem = "oculus";
+	id.manufacturer = "Oculus";
+	id.serial = "<unknown>";
+	id.renderModel = "<unknown>";
+	return id;
+}
+
+uint32_t XrTrackedDevice::AnswerString(const std::string& text, char* value, uint32_t bufferSize, vr::ETrackedPropertyError* pErrorL)
+{
+	uint32_t needed = (uint32_t)text.size() + 1;
+	if (value && bufferSize >= needed) {
+		memcpy(value, text.c_str(), needed);
+	} else {
+		if (value && bufferSize)
+			value[0] = '\0';
+		if (pErrorL)
+			*pErrorL = vr::TrackedProp_BufferTooSmall;
+	}
+	return needed;
 }

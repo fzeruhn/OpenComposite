@@ -1,0 +1,32 @@
+{
+ "#": "The HMD's answers from the identity table's default row (today's), on the stand-in (run.py --cases device-identity --expect expect/device_identity.json). A string that doesn't fit: its size with the terminator, BufferTooSmall (3), an empty string. IVRSystem_003's ComputeDistortion: the coordinates given, as the OpenXR runtime distorts the frames itself.",
+ "device-identity/HMD TrackingSystemName/-/-": {
+  "ret": 7,
+  "error": 0,
+  "value": "oculus"
+ },
+ "device-identity/HMD ManufacturerName/-/-": {
+  "ret": 7,
+  "error": 0,
+  "value": "Oculus"
+ },
+ "device-identity/HMD RenderModelName/-/-": {
+  "ret": 21,
+  "error": 0,
+  "value": "oculusHmdRenderModel"
+ },
+ "device-identity/HMD ControllerType/-/-": {
+  "ret": 7,
+  "error": 0,
+  "value": "oculus"
+ },
+ "device-identity/HMD TrackingSystemName in 3 bytes/-/-": {
+  "ret": 7,
+  "error": 3,
+  "value": ""
+ },
+ "device-identity/IVRSystem_003 ComputeDistortion/-/-": {
+  "red": "0.250000,0.750000",
+  "blue": "0.250000,0.750000"
+ }
+}

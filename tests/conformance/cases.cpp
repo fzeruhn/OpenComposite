@@ -784,6 +784,47 @@ void NewInterfaces(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// What the devices say they are (expect/device_identity.json): the HMD's row in the identity table, a string answer
+// that doesn't fit, and IVRSystem_003's distortion
+void DeviceIdentityCase(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	auto* sys003 = (vr::IVRSystem_003::IVRSystem*)c.core->GetGenericInterface("IVRSystem_003", &le);
+	if (!sys || !sys003) {
+		c.Record("no IVRSystem_022 or 003", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	auto stringProp = [&](const char* label, vr::ETrackedDeviceProperty prop, uint32_t size) {
+		char value[64];
+		memset(value, 'x', sizeof(value));
+		vr::ETrackedPropertyError err = vr::TrackedProp_Success;
+		Json::Value r;
+		r["ret"] = sys->GetStringTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, prop, value, size, &err);
+		r["error"] = (int)err;
+		r["value"] = size ? std::string(value, strnlen(value, size)) : std::string();
+		c.Record(label, r);
+	};
+	stringProp("HMD TrackingSystemName", vr::Prop_TrackingSystemName_String, 64);
+	stringProp("HMD ManufacturerName", vr::Prop_ManufacturerName_String, 64);
+	stringProp("HMD RenderModelName", vr::Prop_RenderModelName_String, 64);
+	stringProp("HMD ControllerType", vr::Prop_ControllerType_String, 64);
+	stringProp("HMD TrackingSystemName in 3 bytes", vr::Prop_TrackingSystemName_String, 3);
+
+	Json::Value r;
+	vr::DistortionCoordinates_t d = sys003->ComputeDistortion(vr::Eye_Left, 0.25f, 0.75f);
+	r["red"] = std::to_string(d.rfRed[0]) + "," + std::to_string(d.rfRed[1]);
+	r["blue"] = std::to_string(d.rfBlue[0]) + "," + std::to_string(d.rfBlue[1]);
+	c.Record("IVRSystem_003 ComputeDistortion", r);
+
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -861,6 +902,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "old-overlay", OldOverlay },
 		{ "old-misc", OldMisc },
 		{ "new-interfaces", NewInterfaces },
+		{ "device-identity", DeviceIdentityCase },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

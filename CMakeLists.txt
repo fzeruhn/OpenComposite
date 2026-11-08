@@ -233,6 +233,8 @@ add_library(DrvOpenXR STATIC
 	DrvOpenXR/XrHMD.h
 
 	DrvOpenXR/XrController.cpp
+	DrvOpenXR/DeviceIdentity.cpp
+	DrvOpenXR/DeviceIdentity.h
 	DrvOpenXR/XrController.h
 
 	DrvOpenXR/XrGenericTracker.cpp

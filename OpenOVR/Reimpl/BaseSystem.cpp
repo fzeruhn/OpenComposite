@@ -18,6 +18,7 @@
 #include <string>
 
 #ifdef SUPPORT_DX
+#include <d3d9.h> // for GetD3D9AdapterIndex (loaded when asked, not linked)
 #include <dxgi.h> // for GetDefaultAdapterLuid
 #pragma comment(lib, "dxgi.lib")
 #endif
@@ -141,8 +142,36 @@ bool BaseSystem::GetTimeSinceLastVsync(float* pfSecondsSinceLastVsync, uint64_t*
 
 int32_t BaseSystem::GetD3D9AdapterIndex()
 {
-	// The first adapter, until the OpenXR runtime's adapter is looked up for D3D9 too
+	// The D3D9Ex adapter with the OpenXR runtime's D3D11 adapter's LUID, else the first
+#ifdef SUPPORT_DX
+	if (!xr_ext || xr_instance == XR_NULL_HANDLE)
+		return 0;
+	XrGraphicsRequirementsD3D11KHR graphicsRequirements = { XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR };
+	if (XR_FAILED(xr_ext->xrGetD3D11GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements)))
+		return 0;
+
+	HMODULE d3d9 = LoadLibraryW(L"d3d9.dll");
+	if (!d3d9)
+		return 0;
+	using Create9Ex = HRESULT(WINAPI*)(UINT, IDirect3D9Ex**);
+	auto create = (Create9Ex)GetProcAddress(d3d9, "Direct3DCreate9Ex");
+	IDirect3D9Ex* d3d = nullptr;
+	int32_t index = 0;
+	if (create && SUCCEEDED(create(D3D_SDK_VERSION, &d3d)) && d3d) {
+		for (UINT i = 0; i < d3d->GetAdapterCount(); i++) {
+			LUID luid = {};
+			if (SUCCEEDED(d3d->GetAdapterLUID(i, &luid)) && memcmp(&luid, &graphicsRequirements.adapterLuid, sizeof(LUID)) == 0) {
+				index = (int32_t)i;
+				break;
+			}
+		}
+		d3d->Release();
+	}
+	FreeLibrary(d3d9);
+	return index;
+#else
 	return 0;
+#endif
 }
 
 void BaseSystem::GetDXGIOutputInfo(int32_t* pnAdapterIndex, int32_t* pnAdapterOutputIndex)
@@ -791,8 +820,12 @@ const char* BaseSystem::GetRuntimeVersion()
 
 DistortionCoordinates_t BaseSystem::ComputeDistortion(EVREye eEye, float fU, float fV)
 {
-	DistortionCoordinates_t out;
-	ComputeDistortion(eEye, fU, fV, &out);
+	// IVRSystem_003-008 return the coordinates, with no way to say there are none: the OpenXR runtime distorts the
+	// frames itself, so they're the ones given, unless the HMD has others (it left them uninitialised before)
+	DistortionCoordinates_t out = { { fU, fV }, { fU, fV }, { fU, fV } };
+	DistortionCoordinates_t computed = out;
+	if (ComputeDistortion(eEye, fU, fV, &computed))
+		out = computed;
 	return out;
 }
 

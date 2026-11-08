@@ -91,6 +91,8 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases new-interfaces --expect tests/conformance/expect/new_interfaces.json --out conformance/new-interfaces
           if ($LASTEXITCODE) { $failed++ }
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases device-identity --expect tests/conformance/expect/device_identity.json --out conformance/device-identity
+          if ($LASTEXITCODE) { $failed++ }
           exit $failed
 
       - uses: actions/upload-artifact@v7
