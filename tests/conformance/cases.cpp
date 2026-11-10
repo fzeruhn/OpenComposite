@@ -1080,10 +1080,11 @@ void EventsCase(CaseContext& c)
 
 // Events between programs (expect/events.json): run at the same time (run.py --jobs 2), "events-commit"
 // commits the room setup 1.5 s in, and "events-listen", polling for 5 s, gets its two events; the committing program
-// gets each once, not again back from the store. Utility apps, so they run without an OpenXR runtime too.
-vr::IVRSystem_022::IVRSystem* OpenUtilitySystem(CaseContext& c)
+// gets each once, not again back from the store. Scene apps, each with its own session on the stand-in: OpenComposite
+// gives a Utility app no IVRSystem, and refuses overlay and background apps (not implemented yet)
+vr::IVRSystem_022::IVRSystem* OpenSceneSystem(CaseContext& c)
 {
-	if (c.core->Init(vr::VRApplication_Utility, nullptr) != vr::VRInitError_None) {
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
 		c.Record("Init failed");
 		return nullptr;
 	}
@@ -1116,7 +1117,7 @@ Json::Value CountChaperoneEvents(vr::IVRSystem_022::IVRSystem* sys, int millisec
 
 void EventsListenCase(CaseContext& c)
 {
-	auto* sys = OpenUtilitySystem(c);
+	auto* sys = OpenSceneSystem(c);
 	if (!sys)
 		return;
 	c.Record("events from the other program", CountChaperoneEvents(sys, 5000));
@@ -1125,7 +1126,7 @@ void EventsListenCase(CaseContext& c)
 
 void EventsCommitCase(CaseContext& c)
 {
-	auto* sys = OpenUtilitySystem(c);
+	auto* sys = OpenSceneSystem(c);
 	if (!sys)
 		return;
 	std::this_thread::sleep_for(std::chrono::milliseconds(1500));

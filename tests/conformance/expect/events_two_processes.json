@@ -1,5 +1,5 @@
 {
- "#": "events between programs, on the stand-in (run.py --cases events-listen,events-commit --jobs 2 --expect expect/events_two_processes.json): the two run at the same time; the committing program gets each chaperone event once, not again from the store, and the other program gets both.",
+ "#": "Events between programs, on the stand-in (run.py --cases events-listen,events-commit --jobs 2 --expect expect/events_two_processes.json): two scene apps run at the same time, each with its session; the committing program gets each chaperone event once, not again from the store, and the other program gets both.",
  "events-commit/CommitWorkingCopy/-/-": { "ret": true },
  "events-commit/own events/-/-": { "ChaperoneDataHasChanged": 1, "ChaperoneUniverseHasChanged": 1 },
  "events-listen/events from the other program/-/-": { "ChaperoneDataHasChanged": 1, "ChaperoneUniverseHasChanged": 1 }
