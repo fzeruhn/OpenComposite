@@ -1,0 +1,11 @@
+{
+ "#": "The room setup, on the stand-in with a 2 x 3 m stage (run.py --cases chaperone,chaperone-read --jobs 1 --script scripts/stage_2x3.json --expect expect/chaperone.json). The live collision bounds: one quad on the floor at half the width and depth. A 4 x 5 play area committed in one process is the next one's working copy; exported and imported back.",
+ "chaperone/GetLiveCollisionBoundsInfo/-/-": { "count_ret": true, "count": 1, "ret": true, "corners": "-1.000000,-1.500000 -1.000000,1.500000 1.000000,1.500000 1.000000,-1.500000" },
+ "chaperone/working play area before/-/-": { "ret": true, "size": "2.000000,3.000000" },
+ "chaperone/working play area set/-/-": { "ret": true, "size": "4.000000,5.000000" },
+ "chaperone/CommitWorkingCopy/-/-": { "ret": true },
+ "chaperone-read/working play area in the next process/-/-": { "ret": true, "size": "4.000000,5.000000" },
+ "chaperone-read/ExportLiveToBuffer/-/-": { "size_ret": false, "ret": true },
+ "chaperone-read/ImportFromBufferToWorking/-/-": { "ret": true },
+ "chaperone-read/working play area imported/-/-": { "ret": true, "size": "4.000000,5.000000" }
+}

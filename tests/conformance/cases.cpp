@@ -7,6 +7,7 @@
 #include "IVRApplications_007.h"
 #include "IVRChaperone_002.h"
 #include "IVRChaperone_004.h"
+#include "IVRChaperoneSetup_006.h"
 #include "IVRCompositor_005.h"
 #include "IVRControlPanel_001.h"
 #include "IVRDriverManager_001.h"
@@ -946,6 +947,83 @@ void ApplicationsCase(CaseContext& c)
 	fs::remove_all(dir, ec);
 }
 
+// The room setup (expect/chaperone.json), on the stand-in with stage_bounds [2, 3]
+// (scripts/stage_2x3.json). "chaperone" commits a 4 x 5 play area; "chaperone-read", run after it in another process
+// (run.py --jobs 1), finds it.
+vr::IVRChaperoneSetup_006::IVRChaperoneSetup* OpenChaperoneSetup(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return nullptr;
+	}
+	vr::EVRInitError le;
+	auto* setup = (vr::IVRChaperoneSetup_006::IVRChaperoneSetup*)c.core->GetGenericInterface("IVRChaperoneSetup_006", &le);
+	if (!setup) {
+		c.Record("no IVRChaperoneSetup_006", Err(le));
+		c.core->Cleanup();
+	}
+	return setup;
+}
+
+void RecordPlayArea(CaseContext& c, vr::IVRChaperoneSetup_006::IVRChaperoneSetup* setup, const char* label)
+{
+	float x = -1, z = -1;
+	Json::Value r;
+	r["ret"] = setup->GetWorkingPlayAreaSize(&x, &z);
+	r["size"] = std::to_string(x) + "," + std::to_string(z);
+	c.Record(label, r);
+}
+
+void ChaperoneCase(CaseContext& c)
+{
+	auto* setup = OpenChaperoneSetup(c);
+	if (!setup)
+		return;
+
+	uint32_t count = 0;
+	Json::Value live;
+	live["count_ret"] = setup->GetLiveCollisionBoundsInfo(nullptr, &count);
+	live["count"] = count;
+	vr::HmdQuad_t quad{};
+	count = 1;
+	live["ret"] = setup->GetLiveCollisionBoundsInfo(&quad, &count);
+	std::string corners;
+	for (const vr::HmdVector3_t& v : quad.vCorners)
+		corners += (corners.empty() ? "" : " ") + std::to_string(v.v[0]) + "," + std::to_string(v.v[2]);
+	live["corners"] = corners;
+	c.Record("GetLiveCollisionBoundsInfo", live);
+
+	RecordPlayArea(c, setup, "working play area before");
+	setup->SetWorkingPlayAreaSize(4, 5);
+	RecordPlayArea(c, setup, "working play area set");
+	Json::Value commit;
+	commit["ret"] = setup->CommitWorkingCopy(vr::IVRChaperoneSetup_006::EChaperoneConfigFile_Live);
+	c.Record("CommitWorkingCopy", commit);
+	c.core->Cleanup();
+}
+
+void ChaperoneReadCase(CaseContext& c)
+{
+	auto* setup = OpenChaperoneSetup(c);
+	if (!setup)
+		return;
+	RecordPlayArea(c, setup, "working play area in the next process");
+
+	// Exported, changed, and imported back into the working copy
+	uint32_t size = 0;
+	Json::Value exported;
+	exported["size_ret"] = setup->ExportLiveToBuffer(nullptr, &size);
+	std::string text(size, '\0');
+	exported["ret"] = size > 0 && setup->ExportLiveToBuffer(text.data(), &size);
+	c.Record("ExportLiveToBuffer", exported);
+	setup->SetWorkingPlayAreaSize(1, 1);
+	Json::Value imported;
+	imported["ret"] = setup->ImportFromBufferToWorking(text.c_str(), 0);
+	c.Record("ImportFromBufferToWorking", imported);
+	RecordPlayArea(c, setup, "working play area imported");
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -1025,6 +1103,8 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "new-interfaces", NewInterfaces },
 		{ "device-identity", DeviceIdentityCase },
 		{ "applications", ApplicationsCase },
+		{ "chaperone", ChaperoneCase },
+		{ "chaperone-read", ChaperoneReadCase },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;
