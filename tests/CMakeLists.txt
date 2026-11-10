@@ -80,6 +80,7 @@ add_executable(oc_unit_tests
 	unit/SettingsTests.cpp
 	unit/ApplicationsTests.cpp
 	unit/ChaperoneTests.cpp
+	unit/SkeletonTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE

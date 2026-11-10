@@ -5,6 +5,7 @@
 
 #include "Drivers/Backend.h"
 #include <numbers>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -397,6 +398,8 @@ public:
 	EVRInputError GetBindingVariant(vr::VRInputValueHandle_t ulDevicePath, char* pchVariantArray, uint32_t unVariantArraySize);
 
 public: // INTERNAL FUNCTIONS
+	/** Each finger's bones from parent space into model space (the wrist and aux bones are the same in both) */
+	static void ParentSpaceSkeletonToModelSpace(VRBoneTransform_t* joints);
 	/**
 	 * Bind all the inputs to the current OpenXR session. This must be called after swapping the session to keep
 	 * the inputs working.
@@ -865,7 +868,6 @@ private:
 	LegacyControllerActions legacyControllers[2] = {};
 
 	static bool XrHandJointsToSkeleton(const std::vector<XrHandJointLocationEXT>& joints, bool isRight, VRBoneTransform_t* output, glm::mat4 transform);
-	static void ParentSpaceSkeletonToModelSpace(VRBoneTransform_t* joints);
 
 	// Utility functions
 	Action* cast_AH(VRActionHandle_t);
@@ -909,3 +911,22 @@ private:
 	void checkIfActionsMustBeDiscoveredFromSteam();
 	bool triedDiscoveringManifest = false;
 };
+
+// Valve's 31-bone hand skeleton, its hierarchy and names, and OpenComposite's compressed bone data
+// (BaseInput_Hand.cpp)
+
+/** Bone's parent (-1 for the root), as https://github.com/ValveSoftware/openvr/wiki/Hand-Skeleton has them */
+vr::BoneIndex_t HandBoneParent(vr::BoneIndex_t bone);
+/** Bone's name in SteamVR's glove skeleton, with the hand's suffix (_l or _r); empty past the last bone */
+std::string HandBoneName(vr::BoneIndex_t bone, bool rightHand);
+/** The inverse of BaseInput::ParentSpaceSkeletonToModelSpace */
+void ModelSpaceSkeletonToParentSpace(vr::VRBoneTransform_t* joints);
+
+/** Compressed bone data, OpenComposite's own format: little-endian { char magic[4] = "OCSK"; uint16_t version = 1;
+ * uint8_t space; uint8_t range; uint32_t count = 31; } then the 31 transforms */
+constexpr uint32_t kCompressedBonesSize = 12 + 31 * sizeof(vr::VRBoneTransform_t);
+/** Writes the bones into out if outSize is big enough; the size needed (kCompressedBonesSize) */
+uint32_t CompressBones(OOVR_EVRSkeletalTransformSpace space, vr::EVRSkeletalMotionRange range, const vr::VRBoneTransform_t* bones31, void* out, uint32_t outSize);
+/** Reads bones back into out31, converted to the space wanted. *storedSpace (if given) is the space they were in. */
+vr::EVRInputError DecompressBones(const void* in, uint32_t size, std::optional<OOVR_EVRSkeletalTransformSpace> wanted, vr::VRBoneTransform_t* out31,
+    OOVR_EVRSkeletalTransformSpace* storedSpace = nullptr);

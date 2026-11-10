@@ -537,3 +537,140 @@ EVRInputError BaseInput::getEstimatedSkeletalSummary(ITrackedDevice::TrackedDevi
 
 	return vr::VRInputError_None;
 }
+
+// THE SKELETON'S HIERARCHY AND NAMES, AND COMPRESSED BONE DATA
+
+namespace {
+
+// The parents from https://github.com/ValveSoftware/openvr/wiki/Hand-Skeleton: each finger a chain from the wrist,
+// the aux bones children of the root. The names are the bones' in SteamVR's glove skeleton
+// (resources/skeletons/vr_glove_*_skeleton), less the hand's suffix.
+struct BoneInfo {
+	const char* name;
+	BoneIndex_t parent;
+};
+constexpr BoneInfo kBones[eBone_Count] = {
+	{ "Root", -1 },
+	{ "wrist", eBone_Root },
+	{ "finger_thumb_0", eBone_Wrist },
+	{ "finger_thumb_1", eBone_Thumb0 },
+	{ "finger_thumb_2", eBone_Thumb1 },
+	{ "finger_thumb_end", eBone_Thumb2 },
+	{ "finger_index_meta", eBone_Wrist },
+	{ "finger_index_0", eBone_IndexFinger0 },
+	{ "finger_index_1", eBone_IndexFinger1 },
+	{ "finger_index_2", eBone_IndexFinger2 },
+	{ "finger_index_end", eBone_IndexFinger3 },
+	{ "finger_middle_meta", eBone_Wrist },
+	{ "finger_middle_0", eBone_MiddleFinger0 },
+	{ "finger_middle_1", eBone_MiddleFinger1 },
+	{ "finger_middle_2", eBone_MiddleFinger2 },
+	{ "finger_middle_end", eBone_MiddleFinger3 },
+	{ "finger_ring_meta", eBone_Wrist },
+	{ "finger_ring_0", eBone_RingFinger0 },
+	{ "finger_ring_1", eBone_RingFinger1 },
+	{ "finger_ring_2", eBone_RingFinger2 },
+	{ "finger_ring_end", eBone_RingFinger3 },
+	{ "finger_pinky_meta", eBone_Wrist },
+	{ "finger_pinky_0", eBone_PinkyFinger0 },
+	{ "finger_pinky_1", eBone_PinkyFinger1 },
+	{ "finger_pinky_2", eBone_PinkyFinger2 },
+	{ "finger_pinky_end", eBone_PinkyFinger3 },
+	{ "finger_thumb_aux", eBone_Root },
+	{ "finger_index_aux", eBone_Root },
+	{ "finger_middle_aux", eBone_Root },
+	{ "finger_ring_aux", eBone_Root },
+	{ "finger_pinky_aux", eBone_Root },
+};
+
+VRBoneTransform_t Inverse(const VRBoneTransform_t& t)
+{
+	HmdQuaternionf_t conj = -t.orientation;
+	HmdVector4_t negPos = { -t.position.v[0], -t.position.v[1], -t.position.v[2], t.position.v[3] };
+	return { negPos * conj, conj };
+}
+
+struct CompressedHeader {
+	char magic[4];
+	uint16_t version;
+	uint8_t space;
+	uint8_t range;
+	uint32_t count;
+};
+static_assert(sizeof(CompressedHeader) == 12, "the compressed header is 12 bytes");
+static_assert(sizeof(VRBoneTransform_t) == 32, "a bone is 32 bytes");
+
+} // namespace
+
+BoneIndex_t HandBoneParent(BoneIndex_t bone)
+{
+	return bone >= 0 && bone < eBone_Count ? kBones[bone].parent : k_unInvalidBoneIndex;
+}
+
+std::string HandBoneName(BoneIndex_t bone, bool rightHand)
+{
+	if (bone < 0 || bone >= eBone_Count)
+		return {};
+	if (bone == eBone_Root)
+		return kBones[bone].name;
+	// The aux bones' suffix goes before _aux, as the glove skeleton has them (finger_index_r_aux)
+	std::string name = kBones[bone].name;
+	const char* hand = rightHand ? "_r" : "_l";
+	size_t aux = name.rfind("_aux");
+	if (aux != std::string::npos)
+		return name.substr(0, aux) + hand + "_aux";
+	size_t end = name.rfind("_end");
+	if (end != std::string::npos && end == name.size() - 4)
+		return name.substr(0, end) + hand + "_end";
+	return name + hand;
+}
+
+void ModelSpaceSkeletonToParentSpace(VRBoneTransform_t* joints)
+{
+	// From each finger's tip back to its base, so a bone's parent is still in model space when it's used. The wrist
+	// and aux bones are children of the root, which doesn't move: the same in both spaces (as the conversion the
+	// other way treats them).
+	for (int i = eBone_Count - 1; i >= eBone_Thumb0; i--) {
+		BoneIndex_t parent = kBones[i].parent;
+		if (parent == eBone_Root)
+			continue;
+		joints[i] = Inverse(joints[parent]) * joints[i];
+	}
+}
+
+uint32_t CompressBones(OOVR_EVRSkeletalTransformSpace space, EVRSkeletalMotionRange range, const VRBoneTransform_t* bones31, void* out, uint32_t outSize)
+{
+	if (!out || outSize < kCompressedBonesSize || !bones31)
+		return kCompressedBonesSize;
+	CompressedHeader header = { { 'O', 'C', 'S', 'K' }, 1, (uint8_t)space, (uint8_t)range, eBone_Count };
+	// Every platform OpenComposite builds for is little-endian, so the structs go as they are
+	memcpy(out, &header, sizeof(header));
+	memcpy((uint8_t*)out + sizeof(header), bones31, sizeof(VRBoneTransform_t) * eBone_Count);
+	return kCompressedBonesSize;
+}
+
+EVRInputError DecompressBones(const void* in, uint32_t size, std::optional<OOVR_EVRSkeletalTransformSpace> wanted, VRBoneTransform_t* out31,
+    OOVR_EVRSkeletalTransformSpace* storedSpace)
+{
+	if (!in || !out31)
+		return VRInputError_InvalidParam;
+	CompressedHeader header;
+	if (size != kCompressedBonesSize)
+		return VRInputError_InvalidCompressedData;
+	memcpy(&header, in, sizeof(header));
+	if (memcmp(header.magic, "OCSK", 4) != 0 || header.version != 1 || header.count != eBone_Count
+	    || (header.space != VRSkeletalTransformSpace_Model && header.space != VRSkeletalTransformSpace_Parent))
+		return VRInputError_InvalidCompressedData;
+
+	memcpy(out31, (const uint8_t*)in + sizeof(header), sizeof(VRBoneTransform_t) * eBone_Count);
+	OOVR_EVRSkeletalTransformSpace space = (OOVR_EVRSkeletalTransformSpace)header.space;
+	if (storedSpace)
+		*storedSpace = space;
+	if (wanted && *wanted != space) {
+		if (*wanted == VRSkeletalTransformSpace_Model)
+			BaseInput::ParentSpaceSkeletonToModelSpace(out31);
+		else
+			ModelSpaceSkeletonToParentSpace(out31);
+	}
+	return VRInputError_None;
+}
