@@ -5,7 +5,6 @@
 #define BASE_IMPL
 #include "BaseInput.h"
 #include "Misc/AppManifest.h"
-#include "Misc/Input/Bindings/BindingSearch.h"
 #include "Misc/ProgramEvents.h"
 #include "Misc/Config.h"
 #include <string>
@@ -708,23 +707,16 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		{ "generic", 1 }
 	};
 
-	// The user's own bindings first: their folder, then the game's working folder's OpenComposite folder, then
-	// the game's default
-	const std::string appKey = CurrentProcessAppKey();
-	const std::filesystem::path userBindings = UserBindingsDir();
-	std::error_code cwdError;
-	const std::filesystem::path workingDir = std::filesystem::current_path(cwdError);
-	const std::filesystem::path manifestDir = PathFromUtf8(dirnameOf(pchActionManifestPath));
-
 	for (Json::Value item : root["default_bindings"]) {
 		std::string controller_type = item["controller_type"].asString();
 		std::string path = dirnameOf(pchActionManifestPath) + "/" + item["binding_url"].asString();
 
-		std::optional<std::filesystem::path> found = FindBindingFile(appKey, controller_type, userBindings, workingDir, manifestDir,
-		    item["binding_url"].asString());
-		if (found && found->lexically_normal() != (manifestDir / PathFromUtf8(item["binding_url"].asString())).lexically_normal()) {
-			OOVR_LOGF("Loading the user's own bindings for controller type %s: %s", controller_type.c_str(), PathToUtf8(*found).c_str());
-			path = PathToUtf8(*found);
+		// check if a custom binding file exists in current_dir/OpenComposite/controller_type.json
+		std::filesystem::path customPath = std::filesystem::current_path() / "OpenComposite" / (controller_type + ".json");
+
+		if (std::filesystem::exists(customPath)) {
+			OOVR_LOGF("Loading user-defined custom bindings file for controller type %s", controller_type.c_str());
+			path = customPath.string();
 		}
 
 		// look if we know about this OpenVR name
@@ -749,12 +741,9 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		}
 	}
 
-	// remaining profiles: the user's own bindings for them if there are any, else our backup path
+	// remaining profiles: bind to our backup path
 	for (auto& [name, profile_ptr] : OpenVRNameToProfile) {
-		std::optional<std::filesystem::path> own = FindBindingFile(appKey, name, userBindings, workingDir, {}, "");
-		if (own)
-			OOVR_LOGF("Loading the user's own bindings for controller type %s: %s", name.c_str(), PathToUtf8(*own).c_str());
-		LoadBindingsSet(*profile_ptr, own ? PathToUtf8(*own) : backupPath);
+		LoadBindingsSet(*profile_ptr, backupPath);
 	}
 
 	// Attach everything to the current session
