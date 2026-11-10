@@ -10,10 +10,26 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <windows.h>
 #define FAKE_API __declspec(dllexport)
 #else
 #define FAKE_API __attribute__((visibility("default")))
 #endif
+
+/* The process's environment: under /MT this library has a C runtime of its own, whose getenv doesn't see the tests'
+ * _putenv_s, so on Windows it's read from the process itself */
+static const char* fake_getenv(const char* name)
+{
+#ifdef _WIN32
+	static char buffers[2][256];
+	static int next;
+	char* buffer = buffers[next++ % 2];
+	DWORD n = GetEnvironmentVariableA(name, buffer, sizeof(buffers[0]));
+	return n > 0 && n < sizeof(buffers[0]) ? buffer : NULL;
+#else
+	return getenv(name);
+#endif
+}
 
 static const char* names[] = { "Fake HMD", "Fake Left", "Fake Right" };
 static const char* serials[] = { "SN0", "SN1", "SN2" };
@@ -22,7 +38,7 @@ static int root_storage;
 
 FAKE_API int mnd_api_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
 {
-	const char* m = getenv("FAKE_MND_MAJOR");
+	const char* m = fake_getenv("FAKE_MND_MAJOR");
 	*major = m ? (uint32_t)atoi(m) : 1;
 	*minor = 2;
 	*patch = 0;
@@ -81,7 +97,7 @@ FAKE_API int mnd_root_get_device_battery_status(void* root, uint32_t index, bool
 		return -1;
 	int p = 0, c = 0;
 	float level = 0;
-	const char* b = getenv("FAKE_MND_BATTERY");
+	const char* b = fake_getenv("FAKE_MND_BATTERY");
 	if (b)
 		sscanf(b, "%d,%d,%f", &p, &c, &level);
 	*present = p != 0;
