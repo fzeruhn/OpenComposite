@@ -382,14 +382,14 @@ public:
 		bool centre = r <= Param("deadzone_pct") / 100.0f;
 		float angle = std::atan2(s.y, s.x) * 180.0f / 3.14159265f; // east 0, north 90
 		float half = 45.0f * (1.0f + Param("overlap_pct") / 100.0f);
-		auto near = [&](float direction) {
+		auto inSector = [&](float direction) {
 			float d = std::fabs(std::remainder(angle - direction, 360.0f));
 			return on && !centre && d <= half;
 		};
-		Digital(out, "north", near(90), in.time);
-		Digital(out, "east", near(0), in.time);
-		Digital(out, "south", near(-90), in.time);
-		Digital(out, "west", near(180), in.time);
+		Digital(out, "north", inSector(90), in.time);
+		Digital(out, "east", inSector(0), in.time);
+		Digital(out, "south", inSector(-90), in.time);
+		Digital(out, "west", inSector(180), in.time);
 		Digital(out, "center", on && centre, in.time);
 	}
 };
