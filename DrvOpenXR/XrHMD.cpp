@@ -8,6 +8,8 @@
 #include "../OpenOVR/Misc/Config.h"
 #include "../OpenOVR/Misc/xrmoreutils.h"
 #include "../OpenOVR/Reimpl/BaseSystem.h"
+#include "../OpenOVR/Reimpl/BaseSettings.h"
+#include "../OpenOVR/Misc/SharedStore.h"
 #include "../OpenOVR/convert.h"
 #include "generated/static_bases.gen.h"
 #include <chrono>
@@ -33,10 +35,12 @@ static bool WaitForSessionGlobals()
 
 void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 {
+	// opencomposite.ini's supersampleRatio, unless a program or the user's SteamVR settings chose another
+	float scale = BaseSettings::RenderScale(SharedStore::Get(), oovr_global_configuration.SupersampleRatio());
 	if (width)
-		*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * oovr_global_configuration.SupersampleRatio());
+		*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * scale);
 	if (height)
-		*height = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectHeight * oovr_global_configuration.SupersampleRatio());
+		*height = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectHeight * scale);
 }
 
 // from BaseSystem

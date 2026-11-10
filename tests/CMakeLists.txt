@@ -74,6 +74,7 @@ add_executable(oc_unit_tests
 	unit/SteamVRPathsTests.cpp
 	unit/SharedStoreTests.cpp
 	unit/DeviceIdentityTests.cpp
+	unit/SettingsTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE
