@@ -1,0 +1,16 @@
+﻿// A binding file as people edit them by hand: a BOM, comments, trailing commas, CRLF line ends
+{
+	"controller_type" : "Oculus_Touch",
+	/* one set */
+	"bindings" : {
+		"/actions/main" : {
+			"sources" : [
+				{
+					"path" : "/user/hand/left/input/X",
+					"mode" : "button",
+					"inputs" : { "click" : { "output" : "/actions/main/in/Jump", }, },
+				},
+			],
+		},
+	},
+}

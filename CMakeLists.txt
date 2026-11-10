@@ -336,6 +336,7 @@ add_library(OCCore STATIC
 	OpenOVR/Misc/Keyboard/SudoFontMeta.cpp
 	OpenOVR/Misc/Keyboard/VRKeyboard.cpp
 	OpenOVR/Misc/Input/InteractionProfile.cpp
+	OpenOVR/Misc/Input/Bindings/BindingFile.cpp
 	OpenOVR/Misc/Input/OculusInteractionProfile.cpp
 	OpenOVR/Misc/Input/KhrSimpleInteractionProfile.cpp
 	OpenOVR/Misc/Input/ViveInteractionProfile.cpp

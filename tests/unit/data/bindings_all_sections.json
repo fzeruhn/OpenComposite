@@ -1,0 +1,37 @@
+{
+	"controller_type" : "knuckles",
+	"description" : "Every section of a binding file (written for the tests)",
+	"name" : "all sections",
+	"bindings" : {
+		"/actions/Main" : {
+			"sources" : [
+				{
+					"path" : "/user/hand/right/input/trigger",
+					"mode" : "trigger",
+					"parameters" : { "click_activate_threshold" : "0.8", "click_deactivate_threshold" : 0.6, "haptic_on_click" : true },
+					"inputs" : { "pull" : { "output" : "/actions/main/in/Throttle" }, "click" : { "output" : "/actions/main/in/fire" } }
+				},
+				{
+					"path" : "/user/hand/left/input/thumbstick",
+					"mode" : "dpad",
+					"parameters" : { "sub_mode" : "click", "deadzone_pct" : "25", "overlap_pct" : "10" },
+					"inputs" : { "north" : { "output" : "/actions/main/in/up" }, "south" : { "output" : "/actions/main/in/down" } }
+				},
+				{
+					"path" : "/user/hand/left/input/a",
+					"mode" : "button",
+					"disabled" : true,
+					"inputs" : { "click" : { "output" : "/actions/main/in/never" } }
+				}
+			],
+			"poses" : [ { "output" : "/actions/main/in/Hand_Left", "path" : "/user/hand/left/pose/raw" } ],
+			"haptics" : [ { "output" : "/actions/main/out/buzz", "path" : "/user/hand/right/output/haptic", "parameters" : { "amplitude" : "0.5" } } ],
+			"skeleton" : [ { "output" : "/actions/main/in/skeleton_left", "path" : "/user/hand/left/input/skeleton/left" } ],
+			"chords" : [ { "output" : "/actions/main/in/both", "inputs" : [ [ "/user/hand/left/input/a", "click" ], [ "/user/hand/right/input/a", "click" ] ] } ]
+		},
+		"/actions/menu" : {
+			"sources" : [ { "path" : "/user/hand/right/input/b", "mode" : "button", "inputs" : { "click" : { "output" : "/actions/menu/in/back" } } } ]
+		}
+	},
+	"simulated_actions" : [ { "name" : "/actions/main/in/Fire", "type" : "click" } ]
+}
