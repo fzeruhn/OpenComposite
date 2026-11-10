@@ -84,6 +84,7 @@ add_executable(oc_unit_tests
 	unit/BindingFileTests.cpp
 	unit/ModesTests.cpp
 	unit/EvaluatorTests.cpp
+	unit/BindingSearchTests.cpp
 	unit/ConversionTests.cpp
 	${OC_TEST_RESOURCES}
 )
