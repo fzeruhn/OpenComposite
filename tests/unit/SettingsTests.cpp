@@ -115,9 +115,9 @@ TEST_CASE("Settings_set_get_each_type")
 	CHECK(error == VRSettingsError_ReadFailed);
 
 	// A buffer too small: cut short and terminated, with an error
-	char small[3];
-	settings.GetString("oc_test", "label", small, sizeof(small), &error);
-	CHECK(std::string(small) == "he");
+	char shortBuffer[3];
+	settings.GetString("oc_test", "label", shortBuffer, sizeof(shortBuffer), &error);
+	CHECK(std::string(shortBuffer) == "he");
 	CHECK(error == VRSettingsError_ReadFailed);
 
 	// Null section or key: nothing written, no crash
