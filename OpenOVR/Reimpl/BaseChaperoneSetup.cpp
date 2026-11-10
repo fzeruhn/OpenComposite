@@ -48,8 +48,10 @@ void PostChangedEvents()
 
 } // namespace
 
-ChaperoneData BaseChaperoneSetup::LiveData()
+ChaperoneData BaseChaperoneSetup::LiveData(bool* found)
 {
+	if (found)
+		*found = true;
 	if (auto committed = ChaperoneData::FromJson(SharedStore::Get().Read(StoreDoc::Chaperone)))
 		return *committed;
 
@@ -68,13 +70,18 @@ ChaperoneData BaseChaperoneSetup::LiveData()
 		}
 		return ChaperoneData::FromStage(maxX - minX, maxZ - minZ);
 	}
+	if (found)
+		*found = false;
 	return ChaperoneData{};
 }
 
-ChaperoneData& BaseChaperoneSetup::Working()
+ChaperoneData& BaseChaperoneSetup::Working(bool editing)
 {
-	if (!working)
-		working = LiveData();
+	// Neither a committed room nor the runtime's stage (before tracking starts, say): looked for again next time
+	if (!working || !workingKept)
+		working = LiveData(&workingKept);
+	if (editing)
+		workingKept = true;
 	return *working;
 }
 
@@ -93,7 +100,7 @@ bool BaseChaperoneSetup::CommitWorkingCopy(EChaperoneConfigFile configFile)
 void BaseChaperoneSetup::RevertWorkingCopy()
 {
 	std::lock_guard guard(lock);
-	working = LiveData();
+	working = LiveData(&workingKept);
 }
 bool BaseChaperoneSetup::GetWorkingPlayAreaSize(float* pSizeX, float* pSizeZ)
 {
@@ -160,32 +167,32 @@ void BaseChaperoneSetup::SetWorkingPlayAreaSize(float sizeX, float sizeZ)
 	// VRGIN (a VR mod framework) sets it to hide the chaperone during seated play: kept in the working copy only,
 	// unless the program commits it
 	std::lock_guard guard(lock);
-	Working().playArea[0] = sizeX;
-	Working().playArea[1] = sizeZ;
+	Working(true).playArea[0] = sizeX;
+	Working(true).playArea[1] = sizeZ;
 }
 void BaseChaperoneSetup::SetWorkingCollisionBoundsInfo(VR_ARRAY_COUNT(unQuadsCount) HmdQuad_t* pQuadsBuffer, uint32_t unQuadsCount)
 {
 	std::lock_guard guard(lock);
 	if (!pQuadsBuffer)
 		unQuadsCount = 0;
-	Working().collisionBounds.assign(pQuadsBuffer, pQuadsBuffer + unQuadsCount);
+	Working(true).collisionBounds.assign(pQuadsBuffer, pQuadsBuffer + unQuadsCount);
 }
 void BaseChaperoneSetup::SetWorkingSeatedZeroPoseToRawTrackingPose(const HmdMatrix34_t* pMatSeatedZeroPoseToRawTrackingPose)
 {
 	std::lock_guard guard(lock);
 	if (pMatSeatedZeroPoseToRawTrackingPose)
-		Working().seatedZero = *pMatSeatedZeroPoseToRawTrackingPose;
+		Working(true).seatedZero = *pMatSeatedZeroPoseToRawTrackingPose;
 }
 void BaseChaperoneSetup::SetWorkingStandingZeroPoseToRawTrackingPose(const HmdMatrix34_t* pMatStandingZeroPoseToRawTrackingPose)
 {
 	std::lock_guard guard(lock);
 	if (pMatStandingZeroPoseToRawTrackingPose)
-		Working().standingZero = *pMatStandingZeroPoseToRawTrackingPose;
+		Working(true).standingZero = *pMatStandingZeroPoseToRawTrackingPose;
 }
 void BaseChaperoneSetup::ReloadFromDisk(EChaperoneConfigFile configFile)
 {
 	std::lock_guard guard(lock);
-	working = LiveData();
+	working = LiveData(&workingKept);
 }
 bool BaseChaperoneSetup::GetLiveSeatedZeroPoseToRawTrackingPose(HmdMatrix34_t* pmatSeatedZeroPoseToRawTrackingPose)
 {
@@ -204,7 +211,7 @@ void BaseChaperoneSetup::SetWorkingCollisionBoundsTagsInfo(VR_ARRAY_COUNT(unTagC
 	std::lock_guard guard(lock);
 	if (!pTagsBuffer)
 		unTagCount = 0;
-	Working().tags.assign(pTagsBuffer, pTagsBuffer + unTagCount);
+	Working(true).tags.assign(pTagsBuffer, pTagsBuffer + unTagCount);
 }
 bool BaseChaperoneSetup::GetLiveCollisionBoundsTagsInfo(VR_OUT_ARRAY_COUNT(punTagCount) uint8_t* pTagsBuffer, uint32_t* punTagCount)
 {
@@ -223,8 +230,9 @@ bool BaseChaperoneSetup::SetWorkingPhysicalBoundsInfo(VR_ARRAY_COUNT(unQuadsCoun
 	std::lock_guard guard(lock);
 	if (!pQuadsBuffer)
 		unQuadsCount = 0;
-	Working().physicalBounds.assign(pQuadsBuffer, pQuadsBuffer + unQuadsCount);
-	return true;
+	Working(true).physicalBounds.assign(pQuadsBuffer, pQuadsBuffer + unQuadsCount);
+	// Kept, but answered as SteamVR answers it for any quads
+	return false;
 }
 bool BaseChaperoneSetup::GetLivePhysicalBoundsInfo(VR_OUT_ARRAY_COUNT(punQuadsCount) HmdQuad_t* pQuadsBuffer, uint32_t* punQuadsCount)
 {
@@ -268,7 +276,7 @@ bool BaseChaperoneSetup::ImportFromBufferToWorking(const char* pBuffer, uint32_t
 	if (!imported)
 		return false;
 	std::lock_guard guard(lock);
-	ChaperoneData& d = Working();
+	ChaperoneData& d = Working(true);
 	if (nImportFlags & EChaperoneImport_BoundsOnly) {
 		d.playArea[0] = imported->playArea[0];
 		d.playArea[1] = imported->playArea[1];
@@ -284,7 +292,7 @@ void BaseChaperoneSetup::SetWorkingPerimeter(VR_ARRAY_COUNT(unPointCount) const 
 	std::lock_guard guard(lock);
 	if (!pPointBuffer)
 		unPointCount = 0;
-	Working().perimeter.assign(pPointBuffer, pPointBuffer + unPointCount);
+	Working(true).perimeter.assign(pPointBuffer, pPointBuffer + unPointCount);
 }
 void BaseChaperoneSetup::ShowWorkingSetPreview()
 {

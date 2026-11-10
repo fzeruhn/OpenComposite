@@ -100,13 +100,16 @@ public:
 	 * live in HMD using a tweak tool, keep in mind that calling this might cause the user to see the room jump. */
 	void RoomSetupStarting();
 
-	/** The committed room setup: the store's Chaperone document, else the OpenXR runtime's stage */
-	static ChaperoneData LiveData();
+	/** The committed room setup: the store's Chaperone document, else the OpenXR runtime's stage. found, if given,
+	 * says whether either existed. */
+	static ChaperoneData LiveData(bool* found = nullptr);
 
 private:
-	// Loaded from LiveData on first use, and by RevertWorkingCopy and ReloadFromDisk; lock held
-	ChaperoneData& Working();
+	// Loaded from LiveData on first use, and by RevertWorkingCopy and ReloadFromDisk; lock held. While LiveData
+	// found neither source, it's loaded again on each use, until editing (a Set*) keeps it.
+	ChaperoneData& Working(bool editing = false);
 
 	std::mutex lock;
 	std::optional<ChaperoneData> working;
+	bool workingKept = false;
 };
