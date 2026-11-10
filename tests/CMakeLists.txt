@@ -87,6 +87,7 @@ add_executable(oc_unit_tests
 	unit/BindingSearchTests.cpp
 	unit/ConversionTests.cpp
 	unit/LegacyBindingsTests.cpp
+	unit/LibMonadoTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE
@@ -97,6 +98,15 @@ target_include_directories(oc_unit_tests PRIVATE
 	${CMAKE_SOURCE_DIR}/DrvOpenXR
 	${CMAKE_BINARY_DIR}
 )
+# A stand-in for Monado's libmonado (LibMonadoTests.cpp)
+add_library(fake_libmonado SHARED fakes/fake_libmonado.c)
+set_target_properties(fake_libmonado PROPERTIES C_VISIBILITY_PRESET hidden)
+if (MSVC)
+	target_compile_options(fake_libmonado PRIVATE /wd4996) # sscanf
+endif ()
+add_dependencies(oc_unit_tests fake_libmonado)
+target_compile_definitions(oc_unit_tests PRIVATE OC_TEST_FAKE_LIBMONADO="$<TARGET_FILE:fake_libmonado>")
+
 # The standard headers rather than doctest's forward declarations (MSVC 19.5x warns about its std::tuple one)
 target_compile_definitions(oc_unit_tests PRIVATE ${GRAPHICS_API_SUPPORT_FLAGS} DOCTEST_CONFIG_USE_STD_HEADERS
 	OC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/data" OC_ECHO_APP="$<TARGET_FILE:oc_echo_app>")

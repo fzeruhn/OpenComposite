@@ -6,6 +6,7 @@
 #include "XrBackend.h"
 
 #include "../OpenOVR/Misc/Config.h"
+#include "../OpenOVR/Misc/LibMonado.h"
 #include "../OpenOVR/Misc/xrmoreutils.h"
 #include "../OpenOVR/Reimpl/BaseSystem.h"
 #include "../OpenOVR/Reimpl/BaseSettings.h"
@@ -343,8 +344,17 @@ bool XrHMD::GetBoolTrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ET
 	TRY_PROFILE_PROP(bool);
 
 	switch (prop) {
-	case vr::Prop_DeviceProvidesBatteryStatus_Bool:
-		return false;
+	case vr::Prop_DeviceProvidesBatteryStatus_Bool: {
+		// From libmonado when Monado offers it
+		std::optional<LibMonado::Battery> battery = LibMonado::Get().BatteryForRole("head");
+		return battery && battery->present;
+	}
+	case vr::Prop_DeviceIsCharging_Bool: {
+		std::optional<LibMonado::Battery> battery = LibMonado::Get().BatteryForRole("head");
+		if (battery && battery->present)
+			return battery->charging;
+		break;
+	}
 	case vr::Prop_HasDriverDirectModeComponent_Bool:
 		return true; // Who knows what this is used for? It's in HL:A anyway.
 	case vr::Prop_ContainsProximitySensor_Bool:
@@ -370,6 +380,12 @@ float XrHMD::GetFloatTrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::
 	TRY_PROFILE_PROP(float);
 
 	switch (prop) {
+	case vr::Prop_DeviceBatteryPercentage_Float: {
+		std::optional<LibMonado::Battery> battery = LibMonado::Get().BatteryForRole("head");
+		if (battery && battery->present)
+			return battery->charge;
+		break;
+	}
 	case vr::Prop_DisplayFrequency_Float:
 		return 90.0; // TODO use the real value
 	case vr::Prop_LensCenterLeftU_Float:

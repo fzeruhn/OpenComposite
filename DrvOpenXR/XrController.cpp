@@ -1,5 +1,7 @@
 #include "XrController.h"
 
+#include "../OpenOVR/Misc/LibMonado.h"
+
 // HACK: grab the pose from BaseInput
 #include "../OpenOVR/Misc/xrmoreutils.h"
 #include "../OpenOVR/Misc/Config.h"
@@ -28,12 +30,31 @@ bool XrController::GetBoolTrackedDeviceProperty(vr::ETrackedDeviceProperty prop,
 
 	TRY_PROFILE_PROP(bool);
 
+	// The battery, from libmonado when Monado offers it
+	const char* role = type == XCT_LEFT ? "left" : type == XCT_RIGHT ? "right" : nullptr;
+	std::optional<LibMonado::Battery> battery = role ? LibMonado::Get().BatteryForRole(role) : std::nullopt;
+
 	switch (prop) {
 	case vr::Prop_DeviceProvidesBatteryStatus_Bool:
-		return true;
+		return battery ? battery->present : true;
+	case vr::Prop_DeviceIsCharging_Bool:
+		if (battery && battery->present)
+			return battery->charging;
+		return XrTrackedDevice::GetBoolTrackedDeviceProperty(prop, pErrorL);
 	default:
 		return XrTrackedDevice::GetBoolTrackedDeviceProperty(prop, pErrorL);
 	}
+}
+
+float XrController::GetFloatTrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* pErrorL)
+{
+	// Only the battery here; the rest as before
+	if (prop == vr::Prop_DeviceBatteryPercentage_Float && (type == XCT_LEFT || type == XCT_RIGHT)) {
+		std::optional<LibMonado::Battery> battery = LibMonado::Get().BatteryForRole(type == XCT_LEFT ? "left" : "right");
+		if (battery && battery->present)
+			return battery->charge;
+	}
+	return XrTrackedDevice::GetFloatTrackedDeviceProperty(prop, pErrorL);
 }
 
 int32_t XrController::GetInt32TrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* pErrorL)
