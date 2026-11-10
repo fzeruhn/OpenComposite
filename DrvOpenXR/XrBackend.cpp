@@ -23,6 +23,8 @@
 #endif
 
 // FIXME find a better way to send the OnPostFrame call?
+#include "../OpenOVR/Reimpl/BaseApplications.h"
+#include "../OpenOVR/Reimpl/BaseClientCore.h"
 #include "../OpenOVR/Reimpl/BaseInput.h"
 #include "../OpenOVR/Reimpl/BaseOverlay.h"
 #include "../OpenOVR/Reimpl/BaseSystem.h"
@@ -95,6 +97,10 @@ XrBackend::~XrBackend()
 	// First clear out the compositors, since they might try and access the OpenXR instance
 	// in their destructor.
 	PrepareForSessionShutdown();
+
+	// Only here and not in PrepareForSessionShutdown, which also runs when the session is restarted
+	if (BaseClientCore::appType == vr::VRApplication_Scene)
+		BaseApplications::SetSceneProcess(false);
 
 	DrvOpenXR::FullShutdown();
 
@@ -1259,6 +1265,10 @@ void XrBackend::OnSessionCreated()
 		// OnSessionLost has told the game to quit
 		return;
 	}
+
+	// A scene application's session makes it the scene application for every program
+	if (BaseClientCore::appType == vr::VRApplication_Scene)
+		BaseApplications::SetSceneProcess(true);
 }
 
 void XrBackend::PrepareForSessionShutdown()

@@ -56,6 +56,9 @@ add_executable(oc_conformance
 	conformance/crash_report.cpp
 )
 target_link_libraries(oc_conformance PRIVATE oc_callers)
+# The program the applications case launches (next to oc_conformance)
+add_executable(oc_echo_app conformance/echo_app.cpp)
+add_dependencies(oc_conformance oc_echo_app)
 if (WIN32)
 	target_link_libraries(oc_conformance PRIVATE dbghelp)
 endif ()
@@ -75,6 +78,7 @@ add_executable(oc_unit_tests
 	unit/SharedStoreTests.cpp
 	unit/DeviceIdentityTests.cpp
 	unit/SettingsTests.cpp
+	unit/ApplicationsTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE
@@ -87,7 +91,9 @@ target_include_directories(oc_unit_tests PRIVATE
 )
 # The standard headers rather than doctest's forward declarations (MSVC 19.5x warns about its std::tuple one)
 target_compile_definitions(oc_unit_tests PRIVATE ${GRAPHICS_API_SUPPORT_FLAGS} DOCTEST_CONFIG_USE_STD_HEADERS
-	OC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/data")
+	OC_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/data" OC_ECHO_APP="$<TARGET_FILE:oc_echo_app>")
+# The program the launch test starts
+add_dependencies(oc_unit_tests oc_echo_app)
 if (WIN32)
 	target_link_libraries(oc_unit_tests PRIVATE OCCore DrvOpenXR OpenVR Vulkan ${XrLib} ${glmLib} oc_callers)
 else ()

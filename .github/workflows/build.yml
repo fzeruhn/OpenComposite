@@ -93,6 +93,8 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases device-identity --expect tests/conformance/expect/device_identity.json --out conformance/device-identity
           if ($LASTEXITCODE) { $failed++ }
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases applications --expect tests/conformance/expect/applications.json --out conformance/applications
+          if ($LASTEXITCODE) { $failed++ }
           exit $failed
 
       - uses: actions/upload-artifact@v7
@@ -147,7 +149,9 @@ jobs:
 
       - name: Conformance
         if: matrix.tests
-        run: python3 tests/conformance/run.py --runtime build/bin/linux64/vrclient.so --conformance build/tests/oc_conformance --xr-runtime none --out conformance/none
+        run: |
+          python3 tests/conformance/run.py --runtime build/bin/linux64/vrclient.so --conformance build/tests/oc_conformance --xr-runtime none --out conformance/none
+          python3 tests/conformance/run.py --runtime build/bin/linux64/vrclient.so --conformance build/tests/oc_conformance --xr-runtime none --cases applications --cases-only --expect tests/conformance/expect/applications.json --out conformance/applications
 
       - uses: actions/upload-artifact@v7
         if: always() && matrix.tests

@@ -1,0 +1,20 @@
+{
+	"source" : "oc_tests",
+	"applications" : [
+		{
+			"app_key" : "oc.test.echo",
+			"launch_type" : "binary",
+			"binary_path_windows" : "oc_echo_app.exe",
+			"binary_path_linux" : "oc_echo_app",
+			"arguments" : "",
+			"image_path" : "echo.png",
+			"mime_types" : [ "vr/oc-echo" ],
+			"strings" : {
+				"en_us" : {
+					"name" : "Echo",
+					"description" : "Writes a marker file and exits"
+				}
+			}
+		}
+	]
+}

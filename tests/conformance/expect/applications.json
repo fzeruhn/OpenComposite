@@ -1,0 +1,10 @@
+{
+ "#": "The application registry (run.py --cases applications --expect expect/applications.json), with or without an OpenXR runtime (a Utility app). tests/unit/data/echo.vrmanifest, its binary oc_echo_app (built next to oc_conformance), which writes its arguments into the marker file.",
+ "applications/AddApplicationManifest/-/-": { "ret": 0 },
+ "applications/IsApplicationInstalled/-/-": { "ret": true },
+ "applications/LaunchApplication/-/-": { "ret": 0, "marker": true, "marker_text": "launched" },
+ "applications/GetApplicationPropertyString Name/-/-": { "ret": 5, "error": 0, "value": "Echo" },
+ "applications/LastLaunchTime/-/-": { "after_launch": true },
+ "applications/RemoveApplicationManifest/-/-": { "ret": 0 },
+ "applications/IsApplicationInstalled after removal/-/-": { "ret": false }
+}

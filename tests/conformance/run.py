@@ -27,7 +27,7 @@ import unelevated  # noqa: E402
 ARGSETS = ["valid", "edge", "null", "invalid"]
 APPTYPES_VALID_ONLY = [2, 3, 4, 0]  # Overlay, Background, Utility, Other
 CASES = ["init-matrix", "init-repeat", "init-other-thread", "lookup-before-init", "unknown-interface",
-         "overlay-lifecycle", "input-manifest", "frame-loop", "submit-edges"]
+         "overlay-lifecycle", "input-manifest", "frame-loop", "submit-edges", "applications"]
 TIMEOUT = 60
 CASE_TIMEOUT = 600  # init-repeat starts OpenComposite 200 times
 # SteamVR's answers while vrserver was starting or stopping between children (Retry, AnotherAppLaunching,

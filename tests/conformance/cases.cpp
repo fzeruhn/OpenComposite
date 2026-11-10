@@ -4,6 +4,7 @@
 #include "conformance.h"
 
 #include "IVRApplications_001.h"
+#include "IVRApplications_007.h"
 #include "IVRChaperone_002.h"
 #include "IVRChaperone_004.h"
 #include "IVRCompositor_005.h"
@@ -28,9 +29,16 @@
 #include "IVRSystem_009.h"
 #include "IVRSystem_022.h"
 
+#include <chrono>
 #include <cstring>
-
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <thread>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace conformance;
 
@@ -825,6 +833,119 @@ void DeviceIdentityCase(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// This program's folder, where oc_echo_app is built
+std::filesystem::path OwnFolder()
+{
+#ifdef _WIN32
+	wchar_t path[MAX_PATH * 4];
+	DWORD n = GetModuleFileNameW(nullptr, path, (DWORD)(sizeof(path) / sizeof(path[0])));
+	return std::filesystem::path(std::wstring(path, n)).parent_path();
+#else
+	std::error_code ec;
+	return std::filesystem::read_symlink("/proc/self/exe", ec).parent_path();
+#endif
+}
+
+std::string JsonEscaped(const std::string& s)
+{
+	std::string out;
+	for (char ch : s) {
+		if (ch == '\\' || ch == '"')
+			out += '\\';
+		out += ch;
+	}
+	return out;
+}
+
+// The application registry (expect/applications.json): a manifest added, its application installed, launched
+// (oc_echo_app writes a marker file) and named. A Utility app, so it runs without an OpenXR runtime too.
+void ApplicationsCase(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Utility, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* apps = (vr::IVRApplications_007::IVRApplications*)c.core->GetGenericInterface("IVRApplications_007", &le);
+	if (!apps) {
+		c.Record("no IVRApplications_007", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	// echo.vrmanifest, with the binary where it was built and the marker to write as its argument
+	namespace fs = std::filesystem;
+	auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	fs::path dir = fs::temp_directory_path() / ("oc_applications_case_" + std::to_string(stamp));
+	fs::create_directories(dir);
+	fs::path marker = dir / "marker.txt";
+	std::ifstream in(c.call->dataDir / "echo.vrmanifest");
+	std::stringstream text;
+	text << in.rdbuf();
+	std::string manifest = text.str();
+#ifdef _WIN32
+	const char* binaryKey = "\"binary_path_windows\" : \"oc_echo_app.exe\"";
+	fs::path binary = OwnFolder() / "oc_echo_app.exe";
+#else
+	const char* binaryKey = "\"binary_path_linux\" : \"oc_echo_app\"";
+	fs::path binary = OwnFolder() / "oc_echo_app";
+#endif
+	auto replace = [&](const std::string& from, const std::string& to) {
+		size_t at = manifest.find(from);
+		if (at != std::string::npos)
+			manifest.replace(at, from.size(), to);
+	};
+	std::string key = binaryKey;
+	replace(key, key.substr(0, key.find(':') + 2) + "\"" + JsonEscaped(binary.generic_string()) + "\"");
+	replace("\"arguments\" : \"\"", "\"arguments\" : \"\\\"" + JsonEscaped(marker.generic_string()) + "\\\" launched\"");
+	fs::path manifestPath = dir / "echo.vrmanifest";
+	std::ofstream(manifestPath) << manifest;
+
+	c.Record("AddApplicationManifest", Err(apps->AddApplicationManifest(manifestPath.string().c_str(), false)));
+	Json::Value installed;
+	installed["ret"] = apps->IsApplicationInstalled("oc.test.echo");
+	c.Record("IsApplicationInstalled", installed);
+
+	Json::Value launch = Err(apps->LaunchApplication("oc.test.echo"));
+	bool appeared = false;
+	for (int i = 0; i < 50 && !appeared; i++) {
+		std::error_code ec;
+		appeared = fs::exists(marker, ec) && fs::file_size(marker, ec) > 0;
+		if (!appeared)
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+	launch["marker"] = appeared;
+	if (appeared) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(100)); // its one line written
+		std::ifstream m(marker);
+		std::string line;
+		std::getline(m, line);
+		launch["marker_text"] = line;
+	}
+	c.Record("LaunchApplication", launch);
+
+	char name[64] = "unchanged";
+	vr::IVRApplications_007::EVRApplicationError error = vr::IVRApplications_007::VRApplicationError_None;
+	Json::Value prop;
+	prop["ret"] = apps->GetApplicationPropertyString("oc.test.echo", vr::IVRApplications_007::VRApplicationProperty_Name_String, name, sizeof(name), &error);
+	prop["error"] = (int)error;
+	prop["value"] = std::string(name);
+	c.Record("GetApplicationPropertyString Name", prop);
+
+	Json::Value last;
+	last["after_launch"] = apps->GetApplicationPropertyUint64("oc.test.echo", vr::IVRApplications_007::VRApplicationProperty_LastLaunchTime_Uint64, &error) > 0;
+	c.Record("LastLaunchTime", last);
+
+	c.Record("RemoveApplicationManifest", Err(apps->RemoveApplicationManifest(manifestPath.string().c_str())));
+	Json::Value gone;
+	gone["ret"] = apps->IsApplicationInstalled("oc.test.echo");
+	c.Record("IsApplicationInstalled after removal", gone);
+
+	c.core->Cleanup();
+	std::error_code ec;
+	fs::remove_all(dir, ec);
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -903,6 +1024,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "old-misc", OldMisc },
 		{ "new-interfaces", NewInterfaces },
 		{ "device-identity", DeviceIdentityCase },
+		{ "applications", ApplicationsCase },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;
