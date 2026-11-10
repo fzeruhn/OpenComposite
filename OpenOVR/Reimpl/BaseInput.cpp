@@ -5,6 +5,7 @@
 #define BASE_IMPL
 #include "BaseInput.h"
 #include "Misc/AppManifest.h"
+#include "Misc/ProgramEvents.h"
 #include "Misc/Config.h"
 #include <string>
 
@@ -397,6 +398,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		return VRInputError_InvalidParam;
 	}
 
+	bool reloading = hasLoadedActions;
 	if (hasLoadedActions) {
 		// It stands to reason that nothing would happen if we try to load the same manifest again
 		if (loadedActionsPath == pchActionManifestPath)
@@ -421,6 +423,11 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 
 	hasLoadedActions = true;
 	loadedActionsPath = pchActionManifestPath;
+
+	// Another manifest in place of the first: its bindings are new
+	if (reloading) {
+		OcPostEvent(vr::VREvent_ActionBindingReloaded, vr::k_unTrackedDeviceIndexInvalid, vr::VREvent_Data_t{}, false);
+	}
 
 	// Random setting which is in the action manifest
 	const Json::Value& dominantHandSetting = root["supports_dominant_hand_setting"];

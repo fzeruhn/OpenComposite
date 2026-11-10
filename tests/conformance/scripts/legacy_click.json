@@ -1,0 +1,10 @@
+{
+  "#": "The Index profile's right trigger clicked from frame 10 to frame 20 (the events case)",
+  "interaction_profile": "/interaction_profiles/valve/index_controller",
+  "inputs": [
+    { "frame": 10, "path": "/user/hand/right/input/trigger/click", "value": 1.0 },
+    { "frame": 10, "path": "/user/hand/right/input/trigger/value", "value": 1.0 },
+    { "frame": 20, "path": "/user/hand/right/input/trigger/click", "value": 0.0 },
+    { "frame": 20, "path": "/user/hand/right/input/trigger/value", "value": 0.0 }
+  ]
+}

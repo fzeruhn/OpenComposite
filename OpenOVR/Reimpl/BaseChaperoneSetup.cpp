@@ -6,6 +6,7 @@
 
 #include "Drivers/Backend.h"
 #include "Misc/JsonFile.h"
+#include "Misc/ProgramEvents.h"
 #include "Misc/SharedStore.h"
 #include "convert.h"
 #include "generated/static_bases.gen.h"
@@ -40,16 +41,9 @@ bool CopyArray(const std::vector<T>& items, T* buffer, uint32_t* count)
 
 void PostChangedEvents()
 {
-	// They go to the other programs too
-	BaseSystem* system = GetUnsafeBaseSystem();
-	if (!system)
-		return;
-	for (EVREventType type : { VREvent_ChaperoneDataHasChanged, VREvent_ChaperoneUniverseHasChanged }) {
-		VREvent_t e{};
-		e.eventType = type;
-		e.trackedDeviceIndex = k_unTrackedDeviceIndexInvalid;
-		system->_EnqueueEvent(e);
-	}
+	// For this program and every other one
+	for (EVREventType type : { VREvent_ChaperoneDataHasChanged, VREvent_ChaperoneUniverseHasChanged })
+		OcPostEvent(type, k_unTrackedDeviceIndexInvalid, VREvent_Data_t{}, true);
 }
 
 } // namespace

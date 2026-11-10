@@ -7,6 +7,8 @@
 #include "BaseRenderModels.h"
 #include "BaseOverlay.h"
 #include "BaseSystem.h"
+#include "Misc/ProgramEvents.h"
+#include "Misc/SharedStore.h"
 #include "Drivers/Backend.h"
 #include "Misc/Config.h"
 #include "Misc/EnumNames.h"
@@ -100,6 +102,21 @@ public:
 BaseSystem::BaseSystem()
 {
 	// The default origin is now set by the default value of currentSpace
+
+	// Other programs' events from now on, and this program's events from calls into this queue
+	SharedStore::Get().PollEvents(storeEventCursor);
+	OcSetLocalEventSink([](const VREvent_t& e) {
+		if (BaseSystem* system = GetUnsafeBaseSystem())
+			system->_EnqueueEvent(e);
+	});
+}
+
+BaseSystem::~BaseSystem()
+{
+	OcSetLocalEventSink(nullptr);
+	// The origin is static (compositor and overlay calls may come before IVRSystem), but goes with the session:
+	// a VR_Init after VR_Shutdown starts on the default again
+	currentSpace = XR_REFERENCE_SPACE_TYPE_STAGE;
 }
 
 void BaseSystem::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
@@ -569,6 +586,13 @@ void BaseSystem::_OnPostFrame()
 
 	if (inputSystem) {
 		inputSystem->InternalUpdate();
+
+		// The legacy button events, once the game reads the legacy input (asking for the controller state before
+		// then would load the empty manifest, and a game's own manifest after that couldn't be bound)
+		if (inputSystem->IsUsingLegacyInput()) {
+			CheckControllerEvents(leftHandIndex, lastLegacyStates[0]);
+			CheckControllerEvents(rightHandIndex, lastLegacyStates[1]);
+		}
 	}
 }
 
@@ -576,6 +600,11 @@ void BaseSystem::_EnqueueEvent(const VREvent_t& e)
 {
 	std::unique_lock lock(events_mutex);
 	events.push(e);
+}
+
+void BaseSystem::_PostEvent(EVREventType type, TrackedDeviceIndex_t device, const VREvent_Data_t& data, bool alsoToOtherPrograms)
+{
+	OcPostEvent(type, device, data, alsoToOtherPrograms);
 }
 
 void BaseSystem::_BlockInputsUntilReleased()
@@ -664,7 +693,12 @@ bool BaseSystem::PollNextEventWithPose(ETrackingUniverseOrigin eOrigin, VREvent_
 		return false;
 	memset(pEvent, 0, uncbVREvent);
 
+	// Other programs' events first join the queue
+	std::vector<StoreEvent> others = SharedStore::Get().PollEvents(storeEventCursor);
+
 	std::unique_lock lock(events_mutex);
+	for (const StoreEvent& s : others)
+		events.push(OcUnpackEvent(s.eventType, s.data));
 
 	if (events.empty()) {
 		return false;
@@ -873,6 +907,9 @@ void BaseSystem::ResetSeatedZeroPose()
 			xr_gbl->seatedSpace = newSpace;
 		}
 	}
+
+	// As SteamVR, whether or not the pose could be found
+	_PostEvent(VREvent_SeatedZeroPoseReset, k_unTrackedDeviceIndex_Hmd, VREvent_Data_t{}, false);
 }
 
 namespace {

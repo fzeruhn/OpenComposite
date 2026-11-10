@@ -1024,6 +1024,120 @@ void ChaperoneReadCase(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// Events from calls (expect/events.json), on the stand-in with scripts/legacy_click.json: the Index profile's
+// right trigger clicked from frame 10 to 20. The game reads the legacy input (GetControllerState at frame 2), so the
+// legacy button events come; ResetSeatedZeroPose's event is the next one polled after it.
+void EventsCase(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	int pressFrame = -1, unpressFrame = -1, pressDevice = -1;
+	Json::Value reset;
+	for (int frame = 1; frame <= 40; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		if (frame == 2) {
+			vr::VRControllerState_t state;
+			f.sys->GetControllerState(2, &state, sizeof(state));
+		}
+		vr::VREvent_t ev{};
+		while (f.sys->PollNextEvent(&ev, sizeof(ev))) {
+			if (ev.data.controller.button != vr::k_EButton_SteamVR_Trigger)
+				continue;
+			if (ev.eventType == vr::VREvent_ButtonPress && pressFrame < 0) {
+				pressFrame = frame;
+				pressDevice = (int)ev.trackedDeviceIndex;
+			}
+			if (ev.eventType == vr::VREvent_ButtonUnpress && unpressFrame < 0)
+				unpressFrame = frame;
+		}
+		if (frame == 5) {
+			// IVRSystem_022 has it no more: IVRChaperone's
+			vr::EVRInitError le;
+			auto* chap = (vr::IVRChaperone_004::IVRChaperone*)c.core->GetGenericInterface("IVRChaperone_004", &le);
+			if (chap)
+				chap->ResetZeroPose(vr::TrackingUniverseSeated);
+			reset["polled"] = f.sys->PollNextEvent(&ev, sizeof(ev));
+			reset["type"] = (int)ev.eventType;
+		}
+	}
+	c.Record("ResetSeatedZeroPose then PollNextEvent", reset);
+	Json::Value buttons;
+	buttons["press_frame"] = pressFrame;
+	buttons["unpress_frame"] = unpressFrame;
+	// The stand-in counts frames per session, and reading the legacy input may restart the session once: a few
+	// frames late, then the ten frames the script holds it
+	buttons["press_in_frames_10_to_16"] = pressFrame >= 10 && pressFrame <= 16;
+	buttons["held_10_frames"] = unpressFrame - pressFrame >= 9 && unpressFrame - pressFrame <= 11;
+	buttons["device"] = pressDevice;
+	c.Record("trigger button events", buttons);
+	c.core->Cleanup();
+}
+
+// Events between programs (expect/events.json): run at the same time (run.py --jobs 2), "events-commit"
+// commits the room setup 1.5 s in, and "events-listen", polling for 5 s, gets its two events; the committing program
+// gets each once, not again back from the store. Utility apps, so they run without an OpenXR runtime too.
+vr::IVRSystem_022::IVRSystem* OpenUtilitySystem(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Utility, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return nullptr;
+	}
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	if (!sys) {
+		c.Record("no IVRSystem_022", Err(le));
+		c.core->Cleanup();
+	}
+	return sys;
+}
+
+Json::Value CountChaperoneEvents(vr::IVRSystem_022::IVRSystem* sys, int milliseconds)
+{
+	int data = 0, universe = 0;
+	auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+	while (std::chrono::steady_clock::now() < until) {
+		vr::VREvent_t ev{};
+		while (sys->PollNextEvent(&ev, sizeof(ev))) {
+			data += ev.eventType == vr::VREvent_ChaperoneDataHasChanged;
+			universe += ev.eventType == vr::VREvent_ChaperoneUniverseHasChanged;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	Json::Value r;
+	r["ChaperoneDataHasChanged"] = data;
+	r["ChaperoneUniverseHasChanged"] = universe;
+	return r;
+}
+
+void EventsListenCase(CaseContext& c)
+{
+	auto* sys = OpenUtilitySystem(c);
+	if (!sys)
+		return;
+	c.Record("events from the other program", CountChaperoneEvents(sys, 5000));
+	c.core->Cleanup();
+}
+
+void EventsCommitCase(CaseContext& c)
+{
+	auto* sys = OpenUtilitySystem(c);
+	if (!sys)
+		return;
+	std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+	vr::EVRInitError le;
+	auto* setup = (vr::IVRChaperoneSetup_006::IVRChaperoneSetup*)c.core->GetGenericInterface("IVRChaperoneSetup_006", &le);
+	Json::Value commit;
+	commit["ret"] = setup ? setup->CommitWorkingCopy(vr::IVRChaperoneSetup_006::EChaperoneConfigFile_Live) : false;
+	c.Record("CommitWorkingCopy", commit);
+	c.Record("own events", CountChaperoneEvents(sys, 1000));
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -1105,6 +1219,9 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "applications", ApplicationsCase },
 		{ "chaperone", ChaperoneCase },
 		{ "chaperone-read", ChaperoneReadCase },
+		{ "events", EventsCase },
+		{ "events-listen", EventsListenCase },
+		{ "events-commit", EventsCommitCase },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

@@ -3,6 +3,7 @@
 
 #include "plat.h"
 
+#include "Reimpl/BaseSystem.h"
 #include "Reimpl/Interfaces.h"
 
 // Needed for the system-wide usage of this DLL (when renamed to vrclient[_x64].dll)
@@ -449,6 +450,9 @@ VR_INTERFACE void VR_CALLTYPE VR_ShutdownInternal()
 
 	// Shut down OpenXR
 	BackendManager::Reset();
+
+	// The origin outlives the interfaces (SetTrackingSpace may come without IVRSystem): the next Init starts on the default
+	BaseSystem::currentSpace = XR_REFERENCE_SPACE_TYPE_STAGE;
 
 	running = false;
 	BaseClientCore::appType = VRApplication_Max;

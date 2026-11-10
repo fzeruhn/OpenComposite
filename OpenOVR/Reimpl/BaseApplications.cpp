@@ -3,6 +3,7 @@
 #define BASE_IMPL
 #include "BaseApplications.h"
 #include "BaseClientCore.h"
+#include "Misc/ProgramEvents.h"
 #include "Misc/AppManifest.h"
 #include "Misc/Process.h"
 #include "Misc/SharedStore.h"
@@ -169,8 +170,10 @@ void BaseApplications::SetSceneProcess(SharedStore& store, bool running)
 {
 	uint32_t pid = oc_current_pid();
 	std::string key = running ? CurrentProcessAppKey(store) : std::string();
+	bool changed = false;
 	store.Update(StoreDoc::Scene, [&](Json::Value& scene) {
 		if (running) {
+			changed = PidOf(scene["pid"]) != pid;
 			scene = Json::Value(Json::objectValue);
 			scene["pid"] = pid;
 			scene["app_key"] = key;
@@ -178,8 +181,16 @@ void BaseApplications::SetSceneProcess(SharedStore& store, bool running)
 		} else if (scene.isObject() && PidOf(scene["pid"]) == pid) {
 			// Only our own: another program may have become the scene application since
 			scene = Json::Value(Json::objectValue);
+			changed = true;
 		}
 	});
+
+	// For this program and every other one
+	if (changed) {
+		vr::VREvent_Data_t data{};
+		data.process.pid = pid;
+		OcPostEvent(vr::VREvent_SceneApplicationStateChanged, vr::k_unTrackedDeviceIndexInvalid, data, true);
+	}
 }
 
 // Used by Viveport
