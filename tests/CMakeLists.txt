@@ -83,6 +83,7 @@ add_executable(oc_unit_tests
 	unit/SkeletonTests.cpp
 	unit/BindingFileTests.cpp
 	unit/ModesTests.cpp
+	unit/EvaluatorTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE
