@@ -5,6 +5,7 @@
 #define BASE_IMPL
 #include "BaseInput.h"
 #include "Misc/AppManifest.h"
+#include "Misc/Input/Bindings/Conversion.h"
 #include "Misc/ProgramEvents.h"
 #include "Misc/Config.h"
 #include <string>
@@ -1021,19 +1022,36 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 				}
 
 				// Translate path string to an appropriate path supported by this interaction profile, if necessary
-				std::string pathStr;
-				// special case: "position" in OpenVR is a 2D vector, in OpenXR this can be represented by the parent of the input value
-				// See the OpenXR spec section 11.4 ("Suggested Bindings")
-				if (inputName == "position") {
-					pathStr = profile.TranslateAction(importBasePath);
-				} else if (inputName == "click" && importBasePath.find("trigger") != std::string::npos) {
-					// vive wands only need this for the trigger to do thr thresholds
-					pathStr = profile.TranslateAction(importBasePath + "/" + "value");
-					OOVR_LOGF("Using input value instead of click");
-				} else if (knucklesGripMainInput) {
-					pathStr = profile.TranslateAction(importBasePath + "/value");
-				} else {
-					pathStr = profile.TranslateAction(importBasePath + "/" + inputName);
+				auto buildPath = [&](const std::string& basePath) {
+					// special case: "position" in OpenVR is a 2D vector, in OpenXR this can be represented by the parent of the input value
+					// See the OpenXR spec section 11.4 ("Suggested Bindings")
+					if (inputName == "position")
+						return profile.TranslateAction(basePath);
+					if (inputName == "click" && basePath.find("trigger") != std::string::npos) {
+						// vive wands only need this for the trigger to do thr thresholds
+						OOVR_LOGF("Using input value instead of click");
+						return profile.TranslateAction(basePath + "/" + "value");
+					}
+					if (knucklesGripMainInput)
+						return profile.TranslateAction(basePath + "/value");
+					return profile.TranslateAction(basePath + "/" + inputName);
+				};
+				std::string pathStr = buildPath(importBasePath);
+
+				// A source this controller has no input of that name for: its counterpart here, if it has one.
+				// This only adds bindings the translation above dropped; every binding it made stays as it was.
+				// OC_NO_BINDING_CONVERSION turns it off, for the check that it only adds (check_bindings_superset.py)
+				static const bool convert = !getenv("OC_NO_BINDING_CONVERSION");
+				if (convert && !profile.IsInputPathValid(pathStr) && profile.GetOpenVRName()) {
+					std::string fileType = lowerStr(bindingsRoot["controller_type"].asString());
+					if (std::optional<std::string> counterpart = ConvertSourcePath(importBasePath, fileType, profile.GetOpenVRName().value())) {
+						std::string converted = buildPath(*counterpart);
+						if (profile.IsInputPathValid(converted)) {
+							OOVR_LOGF("Bound %s (a %s input) to its counterpart %s on %s", importBasePath.c_str(), fileType.c_str(),
+							    converted.c_str(), profile.GetPath().c_str());
+							pathStr = converted;
+						}
+					}
 				}
 
 				if (!profile.IsInputPathValid(pathStr)) {

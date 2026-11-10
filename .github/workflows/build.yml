@@ -101,6 +101,13 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events-listen,events-commit --jobs 2 --expect tests/conformance/expect/events_two_processes.json --out conformance/events-two-processes
           if ($LASTEXITCODE) { $failed++ }
+          # Converting bindings to other controllers only adds: everything bound without it is bound with it
+          $env:OC_NO_BINDING_CONVERSION = '1'
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-unconverted
+          Remove-Item Env:OC_NO_BINDING_CONVERSION
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-converted
+          python tests/conformance/check_bindings_superset.py conformance/bindings-unconverted/raw/case-input-manifest.dump.json conformance/bindings-converted/raw/case-input-manifest.dump.json
+          if ($LASTEXITCODE) { $failed++ }
           exit $failed
 
       - uses: actions/upload-artifact@v7
