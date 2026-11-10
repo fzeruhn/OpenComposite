@@ -10,8 +10,10 @@
 
 TEST_CASE("Hmd_default_row_matches_todays_answers")
 {
-	// What every HMD answered before the table (XrTrackedDevice.cpp and XrHMD.cpp's fixed values)
-	const DeviceIdentity& hmd = HmdIdentity("");
+	// The default row: an Oculus HMD's answers
+	// A named string: gcc 13's -Wdangling-reference takes a reference returned from a temporary argument for a dangling one
+	const std::string noName;
+	const DeviceIdentity& hmd = HmdIdentity(noName);
 	CHECK(hmd.trackingSystem == "oculus");
 	CHECK(hmd.manufacturer == "Oculus");
 	CHECK(hmd.renderModel == "oculusHmdRenderModel");
