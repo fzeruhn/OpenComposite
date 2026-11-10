@@ -34,12 +34,13 @@ struct Runner {
 		REQUIRE(mode);
 		CHECK(warnings.empty());
 	}
-	void Step(std::map<std::string, float> raw, double seconds = 1.0 / 60)
+	// Doubles, so the tests' whole numbers (0, 1) need no conversion warning
+	void Step(std::map<std::string, double> raw, double seconds = 1.0 / 60)
 	{
 		in.time = frame++ * seconds;
 		in.value.clear();
 		for (auto& [k, v] : raw)
-			in.value[k] = v;
+			in.value[k] = static_cast<float>(v);
 		mode->Update(in, out);
 	}
 	bool Digital(const std::string& action) { return out.digital[action].state; }
@@ -220,9 +221,9 @@ TEST_CASE("Unknown_mode_warns")
 namespace {
 const std::string kPad = "/user/hand/right/input/trackpad";
 const std::string kStick = "/user/hand/right/input/joystick";
-std::map<std::string, float> At(const std::string& path, float x, float y, bool touch = true, bool click = false)
+std::map<std::string, double> At(const std::string& path, float x, float y, bool touch = true, bool click = false)
 {
-	return { { path + "/x", x }, { path + "/y", y }, { path + "/touch", touch ? 1.f : 0.f }, { path + "/click", click ? 1.f : 0.f } };
+	return { { path + "/x", x }, { path + "/y", y }, { path + "/touch", touch ? 1.0 : 0.0 }, { path + "/click", click ? 1.0 : 0.0 } };
 }
 } // namespace
 

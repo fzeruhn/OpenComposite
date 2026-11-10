@@ -8,12 +8,13 @@
 namespace {
 const std::string kA = "/user/hand/right/input/a", kB = "/user/hand/right/input/b", kLeftA = "/user/hand/left/input/a";
 
-RawInputState Raw(std::map<std::string, float> values, double time = 0)
+// Doubles, so the tests' whole numbers (0, 1) need no conversion warning
+RawInputState Raw(std::map<std::string, double> values, double time = 0)
 {
 	RawInputState in;
 	in.time = time;
 	for (auto& [k, v] : values)
-		in.value[k] = v;
+		in.value[k] = static_cast<float>(v);
 	return in;
 }
 } // namespace
