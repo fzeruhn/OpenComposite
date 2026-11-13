@@ -36,12 +36,15 @@ public:
 	std::optional<Battery> BatteryForRole(const char* role);
 	/** The name of the device in a role */
 	std::optional<std::string> DeviceForRole(const char* role);
-	/** Moves a reference space (not used yet: for the room setup's zero poses). False without libmonado. */
+	/** Moves a reference space (not used yet: for the room setup's zero poses); the type is an mnd_reference_space_type_t. False
+	 * without libmonado. */
 	bool SetReferenceSpaceOffset(int referenceSpaceType, const vr::HmdMatrix34_t& offset);
 
 	/** The active OpenXR runtime's manifest, as the loader finds it (XR_RUNTIME_JSON, else the registry or the XDG
 	 * config folders) */
 	static std::optional<std::filesystem::path> ActiveRuntimeManifest();
+	/** XR_RUNTIME_JSON as a path (read wide on Windows), whatever the process's elevation; nothing if it isn't set */
+	static std::optional<std::filesystem::path> RuntimeManifestFromEnvironment();
 	/** The manifest's MND_libmonado_path, resolved against its folder */
 	static std::optional<std::filesystem::path> LibraryFromManifest(const std::filesystem::path& manifest);
 
@@ -49,6 +52,9 @@ public:
 
 private:
 	std::optional<uint32_t> DeviceIndex(const std::string& deviceName, const std::string& serial);
+	/** The battery of the device at an index (lock held): a failed call (Monado's answer for a device without battery
+	 * status) is no battery */
+	Battery BatteryAt(uint32_t index);
 
 	void* library = nullptr;
 	void* root = nullptr; // mnd_root_t*

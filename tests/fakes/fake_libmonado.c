@@ -1,6 +1,10 @@
 /* A stand-in for Monado's libmonado (LibMonadoTests.cpp), scripted through environment variables:
- *   FAKE_MND_MAJOR    the major version it reports (default 1)
- *   FAKE_MND_BATTERY  "present,charging,charge" for every device (default "0,0,0")
+ *   FAKE_MND_MAJOR       the major version it reports (default 1)
+ *   FAKE_MND_BATTERY     "present,charging,charge" for every device (default "0,0,0"), or up to three of them
+ *                        separated by ';', one per device
+ *   FAKE_MND_NO_BATTERY  set: the battery call fails with MND_ERROR_OPERATION_FAILED (-4), as Monado's does for a
+ *                        device without battery status
+ *   FAKE_MND_SAME_NAMES  set: every device is called "Fake Controller"
  * Three devices: 0 "Fake HMD" (head), 1 "Fake Left" (left), 2 "Fake Right" (right); serials SN0, SN1, SN2. */
 
 #include <stdbool.h>
@@ -36,13 +40,13 @@ static const char* serials[] = { "SN0", "SN1", "SN2" };
 static const char* roles[] = { "head", "left", "right" };
 static int root_storage;
 
-FAKE_API int mnd_api_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
+/* void, as libmonado's own */
+FAKE_API void mnd_api_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
 {
 	const char* m = fake_getenv("FAKE_MND_MAJOR");
 	*major = m ? (uint32_t)atoi(m) : 1;
 	*minor = 2;
 	*patch = 0;
-	return 0;
 }
 
 FAKE_API int mnd_root_create(void** out_root)
@@ -69,7 +73,7 @@ FAKE_API int mnd_root_get_device_info_string(void* root, uint32_t index, int pro
 	if (index > 2)
 		return -1;
 	if (prop == 0)
-		*out = names[index];
+		*out = fake_getenv("FAKE_MND_SAME_NAMES") ? "Fake Controller" : names[index];
 	else if (prop == 1)
 		*out = serials[index];
 	else
@@ -95,9 +99,14 @@ FAKE_API int mnd_root_get_device_battery_status(void* root, uint32_t index, bool
 	(void)root;
 	if (index > 2)
 		return -1;
+	if (fake_getenv("FAKE_MND_NO_BATTERY"))
+		return -4; /* MND_ERROR_OPERATION_FAILED */
 	int p = 0, c = 0;
 	float level = 0;
 	const char* b = fake_getenv("FAKE_MND_BATTERY");
+	/* The index-th of the ';'-separated entries, or the only one */
+	for (uint32_t i = 0; b && i < index && strchr(b, ';'); i++)
+		b = strchr(b, ';') + 1;
 	if (b)
 		sscanf(b, "%d,%d,%f", &p, &c, &level);
 	*present = p != 0;
