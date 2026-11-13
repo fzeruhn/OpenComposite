@@ -11,7 +11,7 @@ Alyx, have waited without review. This fork takes them, fixes what review found 
 publishes Windows and Linux builds.
 
 **Bugs and questions about this fork go to [its issues](https://github.com/fzeruhn/OpenComposite/issues)**, not to
-upstream's GitLab or Discord: they can't help with changes they haven't made.
+upstream's GitLab or Discord as they can't help with changes they haven't made.
 
 ## What this fork has that upstream doesn't
 
@@ -96,7 +96,7 @@ It used to be called OpenOVR ("OpenVR for OculusVR") and was renamed to avoid co
 Two community resources written for upstream mostly apply here too: mbucchia's
 [FAQ](https://mbucchia.github.io/OpenXR-Toolkit/opencomposite.html) and the
 [game compatibility spreadsheet](https://docs.google.com/spreadsheets/d/1s2SSuRt0oHm91RUZB-R-ef5BrfOtvP_jwDwb6FuMF9Q/edit#gid=2068512515).
-A game listed there as broken by a missing interface may work with this fork.
+A game listed there as broken by a missing interface will likely work with this fork, make an issue if not!
 
 ## Installing
 
@@ -122,9 +122,6 @@ The **OpenComposite** app (Start menu) shows what OpenVR games use and the activ
 
 To uninstall, use Windows' *Installed apps*. The uninstaller first takes OpenComposite out of
 `openvrpaths.vrpath`, putting SteamVR first again if OpenComposite was. It won't run while a game uses OpenComposite.
-
-[Mirador](https://github.com/fzeruhn/Mirador) users don't need this: Mirador keeps its own copy for Monado. Both can
-be installed side by side; OpenVR games use whichever was switched to last, and the app shows which one that is.
 
 For scripts: `OpenComposite-Setup.exe /VERYSILENT /SWITCH` installs and switches without asking anything (leave out
 `/SWITCH` to only install). `OpenComposite.exe --use-opencomposite`, `--use-steamvr` and `--remove` switch without
