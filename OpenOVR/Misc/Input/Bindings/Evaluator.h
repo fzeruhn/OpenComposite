@@ -7,6 +7,7 @@
 #include "Modes.h"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,14 +18,23 @@ class BindingEvaluator {
 public:
 	explicit BindingEvaluator(const BindingFile& file);
 
-	/** The sets UpdateActionState made active, with their priorities (higher wins) */
-	void SetActiveActionSets(const std::vector<std::pair<std::string, int32_t>>& setsWithPriority);
+	/** An active set as UpdateActionState gives it: its priority (higher wins) and the hand it's restricted to
+	 * (ulRestrictedToDevice: "/user/hand/left"; empty for every hand). A set may be there once per hand. */
+	struct ActiveSet {
+		std::string name;
+		int32_t priority = 0;
+		std::string restrictTo;
+	};
+	void SetActiveActionSets(const std::vector<ActiveSet>& sets);
 
 	/** One frame: every active binding reads the raw inputs, and the actions' outputs are combined */
 	void Update(const RawInputState& in);
 
 	/** This frame's actions: an action of no active binding isn't there (inactive) */
 	const ActionOutputs& Outputs() const { return outputs; }
+	/** The same from one hand's bindings only ("/user/hand/left"), its changes and deltas against that hand's frame
+	 * before: for a read restricted to the hand. Null if none of its bindings wrote an action */
+	const ActionOutputs* OutputsOn(const std::string& hand) const;
 
 	/** Every raw input any binding reads */
 	std::vector<std::string> RawInputs() const;
@@ -33,8 +43,9 @@ public:
 		std::string path;
 		float amplitudeScale = 1.0f;
 	};
-	/** Where a haptic action goes, from the active sets' haptics, and its amplitude parameter */
-	std::optional<HapticTarget> HapticFor(const std::string& actionPath) const;
+	/** Where a haptic action goes, from the active sets' haptics (every hand it's bound on, each once, on the hands
+	 * its sets are active for), with their amplitude parameter */
+	std::vector<HapticTarget> HapticsFor(const std::string& actionPath) const;
 
 	const std::vector<std::string>& Warnings() const { return warnings; }
 
@@ -48,7 +59,8 @@ private:
 	};
 	std::vector<Set> sets;
 	std::vector<SimulatedAction> simulated;
-	std::vector<std::pair<std::string, int32_t>> active;
+	std::vector<ActiveSet> active;
 	ActionOutputs outputs, previous;
+	std::map<std::string, ActionOutputs> handOutputs, handPrevious; // by hand; "" for outputs on none
 	std::vector<std::string> warnings;
 };

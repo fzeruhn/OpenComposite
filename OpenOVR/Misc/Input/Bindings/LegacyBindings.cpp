@@ -179,7 +179,7 @@ BindingFile LoadLegacyBindingsFrom(const std::string& controllerType, const std:
 	return BuiltInLegacyBindings(controllerType);
 }
 
-std::optional<BindingFile> LoadLegacyBindings(const std::string& controllerType)
+const BindingFile* LoadLegacyBindings(const std::string& controllerType)
 {
 	static std::mutex lock;
 	static std::map<std::string, BindingFile> cache;
@@ -187,7 +187,7 @@ std::optional<BindingFile> LoadLegacyBindings(const std::string& controllerType)
 	auto it = cache.find(controllerType);
 	if (it == cache.end())
 		it = cache.emplace(controllerType, LoadLegacyBindingsFrom(controllerType, FindSteamVRInstall())).first;
-	return it->second;
+	return &it->second;
 }
 
 void ApplyLegacyOutputs(const ActionOutputs& out, const std::string& hand, vr::VRControllerState_t& state)

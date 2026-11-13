@@ -414,6 +414,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		}
 		OC_XR_LOG(xrDestroyActionSet(legacyInputsSet));
 		legacyInputsSet = XR_NULL_HANDLE;
+		std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
 		if (rawInputsSet != XR_NULL_HANDLE)
 			OC_XR_LOG(xrDestroyActionSet(rawInputsSet));
 		rawInputsSet = XR_NULL_HANDLE;
@@ -432,6 +433,10 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 	restartingSession = true;
 	XrBackend::MaybeRestartForInputs();
 	restartingSession = false;
+
+	// The evaluators' state is filled from here on while the submit thread may read it. Not held over the restart:
+	// Submit takes evaluatorLock under the session's shared lock, which the restart takes exclusively
+	std::lock_guard<std::recursive_mutex> loadGuard(evaluatorLock);
 
 	hasLoadedActions = true;
 	loadedActionsPath = pchActionManifestPath;
@@ -792,6 +797,9 @@ void BaseInput::LoadEmptyManifestIfRequired()
 	restartingSession = true;
 	XrBackend::MaybeRestartForInputs();
 	restartingSession = false;
+
+	// As in SetActionManifestPath: the evaluators' state is filled under evaluatorLock, after the restart
+	std::lock_guard<std::recursive_mutex> loadGuard(evaluatorLock);
 
 	OOVR_LOG("Loading virtual empty manifest");
 
@@ -1196,14 +1204,16 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 		OOVR_SOFT_ABORTF("Skipping an action set of bindings file '%s': %s", bindingsPath.c_str(), e.what());
 	}
 
-	// inputEvaluator=steamvr: the raw inputs for this profile, and its binding file's evaluator
-	SuggestRawBindings(profile, bindingsPath, bindings);
-
 	// If there aren't any bindings, that makes it simple
 	// If we didn't return then xrSuggestInteractionProfileBindings would fail
 	if (bindings.empty()) {
 		return;
 	}
+
+	// inputEvaluator=steamvr: the raw inputs for this profile, and its binding file's evaluator. Only for a profile the
+	// game's bindings gave something, as today: OpenComposite's own raw inputs mustn't make the runtime pick a
+	// controller the game has no bindings for
+	SuggestRawBindings(profile, bindingsPath, bindings);
 
 	// Only register legacy bindings if this profile is supported by the application. This is to avoid the runtime picking
 	// an input profile we know about but the game doesn't (eg khr/simple_controller) over one that the game has actually
@@ -1524,14 +1534,27 @@ void BaseInput::SuggestRawBindings(const InteractionProfile& profile, const std:
 
 void BaseInput::UpdateEvaluators(const VRActiveActionSet_t* sets, uint32_t count)
 {
+	if (!useEvaluator)
+		return; // inputEvaluator=direct: nothing to do, and no wait on a manifest loading on another thread
+	std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
 	evaluatedThisSync.clear();
 	if (!useEvaluator || rawInputsSet == XR_NULL_HANDLE)
 		return;
 
-	std::vector<std::pair<std::string, int32_t>> active;
+	// Each active set with the hand it's restricted to (ulRestrictedToDevice), as xrSyncActions' subaction path does
+	// under direct
+	std::vector<BindingEvaluator::ActiveSet> active;
 	for (uint32_t i = 0; i < count; i++) {
-		if (ActionSet* as = cast_ASH(sets[i].ulActionSet))
-			active.emplace_back(as->manifestName, sets[i].nPriority);
+		ActionSet* as = cast_ASH(sets[i].ulActionSet);
+		if (!as)
+			continue;
+		std::string restrictTo;
+		if (sets[i].ulRestrictedToDevice != vr::k_ulInvalidInputValueHandle) {
+			std::shared_ptr<ITrackedDevice> dev = ivhToDev(sets[i].ulRestrictedToDevice);
+			if (dev && dev->GetHand() != ITrackedDevice::HAND_NONE && (size_t)dev->GetHand() < allSubactionPathNames.size())
+				restrictTo = allSubactionPathNames[dev->GetHand()];
+		}
+		active.push_back({ as->manifestName, sets[i].nPriority, restrictTo });
 	}
 
 	// Each profile a hand uses: its raw inputs from those hands, then its evaluator
@@ -1592,11 +1615,11 @@ const BindingEvaluator* BaseInput::LegacyEvaluatorFor(const InteractionProfile* 
 	std::string type = profile->GetOpenVRName().value_or("generic");
 	LegacyEvaluator& legacy = legacyEvaluators[type];
 	if (!legacy.evaluator) {
-		std::optional<BindingFile> file = LoadLegacyBindings(type);
+		const BindingFile* file = LoadLegacyBindings(type);
 		if (!file)
 			return nullptr;
 		legacy.evaluator = std::make_unique<BindingEvaluator>(*file);
-		legacy.evaluator->SetActiveActionSets({ { kLegacyActionSet, 0 } });
+		legacy.evaluator->SetActiveActionSets({ { kLegacyActionSet, 0, "" } });
 		for (const std::string& warning : legacy.evaluator->Warnings())
 			OOVR_LOGF("Legacy binding evaluator (%s): %s", type.c_str(), warning.c_str());
 	}
@@ -1617,43 +1640,52 @@ const BindingEvaluator* BaseInput::LegacyEvaluatorFor(const InteractionProfile* 
 	return legacy.evaluator.get();
 }
 
-// Whether an output whose source is sourcePath is on the device restrictToDevice names (any, if it names none)
-static bool OriginOnDevice(const std::string& sourcePath, VRInputValueHandle_t restrictToDevice, const std::vector<std::string>& handNames,
+// The outputs a read restricted to restrictToDevice sees: every binding's if it names no device, else those of the
+// bindings on its hand (null if none)
+static const ActionOutputs* OutputsOnDevice(const BindingEvaluator& ev, VRInputValueHandle_t restrictToDevice, const std::vector<std::string>& handNames,
     const std::vector<XrPath>& handPaths, bool (*check)(VRInputValueHandle_t, XrPath))
 {
 	if (restrictToDevice == vr::k_ulInvalidInputValueHandle)
-		return true;
+		return &ev.Outputs();
 	for (size_t i = 0; i < handNames.size() && i < handPaths.size(); i++) {
-		if (sourcePath == handNames[i] || sourcePath.starts_with(handNames[i] + "/"))
-			return check(restrictToDevice, handPaths[i]);
+		if (check(restrictToDevice, handPaths[i]))
+			return ev.OutputsOn(handNames[i]);
 	}
-	return false;
+	return nullptr;
 }
 
-const DigitalOut* BaseInput::EvaluatedDigital(const Action& action, VRInputValueHandle_t restrictToDevice) const
+std::optional<DigitalOut> BaseInput::EvaluatedDigital(const Action& action, VRInputValueHandle_t restrictToDevice) const
 {
-	// Several controllers' bindings writing one action: the first that's on, else the first
+	std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
+	// Several controllers' bindings writing one action: the first that's on, else the first that changed (a release on
+	// one controller), else the first
 	const DigitalOut* found = nullptr;
 	for (const BindingEvaluator* ev : evaluatedThisSync) {
-		auto it = ev->Outputs().digital.find(action.manifestName);
-		if (it == ev->Outputs().digital.end()
-		    || !OriginOnDevice(it->second.origin, restrictToDevice, allSubactionPathNames, allSubactionPaths, &BaseInput::checkRestrictToDevice))
+		const ActionOutputs* outs = OutputsOnDevice(*ev, restrictToDevice, allSubactionPathNames, allSubactionPaths, &BaseInput::checkRestrictToDevice);
+		if (!outs)
 			continue;
-		if (!found || (it->second.state && !found->state))
-			found = &it->second;
+		auto it = outs->digital.find(action.manifestName);
+		if (it == outs->digital.end())
+			continue;
+		const DigitalOut& d = it->second;
+		if (!found || (d.state && !found->state) || (!d.state && !found->state && d.changed && !found->changed))
+			found = &d;
 	}
-	return found;
+	return found ? std::optional<DigitalOut>(*found) : std::nullopt;
 }
 
-const AnalogOut* BaseInput::EvaluatedAnalog(const Action& action, VRInputValueHandle_t restrictToDevice) const
+std::optional<AnalogOut> BaseInput::EvaluatedAnalog(const Action& action, VRInputValueHandle_t restrictToDevice) const
 {
+	std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
 	// Several controllers' bindings writing one action: the largest
 	const AnalogOut* found = nullptr;
 	float best = -1;
 	for (const BindingEvaluator* ev : evaluatedThisSync) {
-		auto it = ev->Outputs().analog.find(action.manifestName);
-		if (it == ev->Outputs().analog.end()
-		    || !OriginOnDevice(it->second.origin, restrictToDevice, allSubactionPathNames, allSubactionPaths, &BaseInput::checkRestrictToDevice))
+		const ActionOutputs* outs = OutputsOnDevice(*ev, restrictToDevice, allSubactionPathNames, allSubactionPaths, &BaseInput::checkRestrictToDevice);
+		if (!outs)
+			continue;
+		auto it = outs->analog.find(action.manifestName);
+		if (it == outs->analog.end())
 			continue;
 		const AnalogOut& a = it->second;
 		float size = a.x * a.x + a.y * a.y + a.z * a.z;
@@ -1662,7 +1694,7 @@ const AnalogOut* BaseInput::EvaluatedAnalog(const Action& action, VRInputValueHa
 			found = &a;
 		}
 	}
-	return found;
+	return found ? std::optional<AnalogOut>(*found) : std::nullopt;
 }
 
 VRInputValueHandle_t BaseInput::OriginHandle(const std::string& sourcePath)
@@ -1747,8 +1779,9 @@ EVRInputError BaseInput::UpdateActionState(VR_ARRAY_COUNT(unSetCount) VRActiveAc
 	if (sizeof(*pSets) != unSizeOfVRSelectedActionSet_t || (unSetCount && !pSets))
 		return VRInputError_InvalidParam;
 
-	// Make sure all the ActionSets have the same priority, since we don't have any way around that right now
-	if (unSetCount > 1) {
+	// Make sure all the ActionSets have the same priority, since we don't have any way around that right now (the
+	// binding evaluator, inputEvaluator=steamvr, does)
+	if (unSetCount > 1 && !(useEvaluator && rawInputsSet != XR_NULL_HANDLE)) {
 		int priority = pSets[0].nPriority;
 		for (uint32_t i = 1; i < unSetCount; i++) {
 			if (pSets[i].nPriority != priority) {
@@ -2059,11 +2092,11 @@ EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigi
 
 	// inputEvaluator=steamvr: the evaluators' output, inactive if no active binding writes it
 	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE) {
-		if (const DigitalOut* d = EvaluatedDigital(*act, ulRestrictToDevice)) {
+		if (std::optional<DigitalOut> d = EvaluatedDigital(*act, ulRestrictToDevice)) {
 			pActionData->bActive = true;
 			pActionData->bState = d->state;
 			pActionData->bChanged = d->changed;
-			pActionData->fUpdateTime = (float)(d->changeTime - EvaluatorClock());
+			pActionData->fUpdateTime = d->changeTime == 0 ? 0 : (float)(d->changeTime - EvaluatorClock()); // 0: never changed
 			pActionData->activeOrigin = OriginHandle(d->origin);
 		}
 		return VRInputError_None;
@@ -2127,7 +2160,7 @@ EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalo
 	// inputEvaluator=steamvr: the evaluators' output, inactive if no active binding writes it
 	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE
 	    && (act->type == ActionType::Vector1 || act->type == ActionType::Vector2 || act->type == ActionType::Vector3)) {
-		if (const AnalogOut* a = EvaluatedAnalog(*act, ulRestrictToDevice)) {
+		if (std::optional<AnalogOut> a = EvaluatedAnalog(*act, ulRestrictToDevice)) {
 			pActionData->bActive = true;
 			pActionData->x = a->x;
 			pActionData->y = act->type == ActionType::Vector1 ? 0 : a->y;
@@ -2877,24 +2910,33 @@ EVRInputError BaseInput::TriggerHapticVibrationAction(VRActionHandle_t action, f
 		}
 	}
 
-	// inputEvaluator=steamvr: the active sets' haptic binding picks the hand and scales the amplitude
+	// inputEvaluator=steamvr: the active sets' haptic bindings pick the hands, each scaling the amplitude. A
+	// hand ulRestrictToDevice names, else every hand it's bound on; no binding: nothing vibrates, as under SteamVR
 	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE) {
-		std::optional<BindingEvaluator::HapticTarget> target;
-		for (const BindingEvaluator* ev : evaluatedThisSync) {
-			target = ev->HapticFor(act->manifestName);
-			if (target)
-				break;
+		std::vector<BindingEvaluator::HapticTarget> targets;
+		{
+			std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
+			for (const BindingEvaluator* ev : evaluatedThisSync)
+				for (BindingEvaluator::HapticTarget& t : ev->HapticsFor(act->manifestName))
+					targets.push_back(std::move(t));
 		}
-		if (!target)
-			return VRInputError_None; // no active binding: nothing vibrates, as under SteamVR
-		XrPath targetHand = XR_NULL_PATH;
-		for (size_t i = 0; i < allSubactionPathNames.size(); i++)
-			if (target->path.starts_with(allSubactionPathNames[i] + "/"))
-				targetHand = allSubactionPaths[i];
-		if (subactionPath != XR_NULL_PATH && targetHand != subactionPath)
-			return VRInputError_None; // bound to the other hand
-		subactionPath = targetHand;
-		fAmplitude = std::clamp(fAmplitude * target->amplitudeScale, 0.0f, 1.0f);
+		for (size_t i = 0; i < allSubactionPathNames.size() && i < allSubactionPaths.size(); i++) {
+			if (subactionPath != XR_NULL_PATH && allSubactionPaths[i] != subactionPath)
+				continue;
+			auto target = std::find_if(targets.begin(), targets.end(),
+			    [&](const BindingEvaluator::HapticTarget& t) { return t.path.starts_with(allSubactionPathNames[i] + "/"); });
+			if (target == targets.end())
+				continue;
+			XrHapticActionInfo handInfo = { XR_TYPE_HAPTIC_ACTION_INFO };
+			handInfo.action = act->xr;
+			handInfo.subactionPath = allSubactionPaths[i];
+			XrHapticVibration handVibration = { XR_TYPE_HAPTIC_VIBRATION };
+			handVibration.frequency = fFrequency == 0.0f ? XR_FREQUENCY_UNSPECIFIED : fFrequency;
+			handVibration.duration = (int)(fDurationSeconds * 1000000000.0f);
+			handVibration.amplitude = std::clamp(fAmplitude * target->amplitudeScale, 0.0f, 1.0f);
+			OC_XR_LOG(xrApplyHapticFeedback(xr_session.get(), &handInfo, (XrHapticBaseHeader*)&handVibration));
+		}
+		return VRInputError_None;
 	}
 
 	XrHapticActionInfo info = { XR_TYPE_HAPTIC_ACTION_INFO };
@@ -3326,6 +3368,7 @@ bool BaseInput::GetLegacyControllerState(vr::TrackedDeviceIndex_t controllerDevi
 	// inputEvaluator=steamvr: SteamVR's legacy binding file for the controller
 	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE) {
 		std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(controllerDeviceIndex);
+		std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
 		if (const BindingEvaluator* legacy = LegacyEvaluatorFor(dev ? dev->GetInteractionProfile() : nullptr))
 			ApplyLegacyOutputs(legacy->Outputs(), hand == 0 ? "left" : "right", *state);
 		return true;
@@ -3430,13 +3473,15 @@ void BaseInput::TriggerLegacyHapticPulse(vr::TrackedDeviceIndex_t controllerDevi
 	// inputEvaluator=steamvr: the legacy file's haptic for this hand, and its amplitude (none: nothing vibrates)
 	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE) {
 		std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(controllerDeviceIndex);
-		const BindingEvaluator* legacy = LegacyEvaluatorFor(dev ? dev->GetInteractionProfile() : nullptr);
-		std::optional<BindingEvaluator::HapticTarget> target;
-		if (legacy)
-			target = legacy->HapticFor(std::string("/actions/legacy/out/") + (hand == 0 ? "left" : "right") + "_haptic");
-		if (!target)
+		std::vector<BindingEvaluator::HapticTarget> targets;
+		{
+			std::lock_guard<std::recursive_mutex> evalGuard(evaluatorLock);
+			if (const BindingEvaluator* legacy = LegacyEvaluatorFor(dev ? dev->GetInteractionProfile() : nullptr))
+				targets = legacy->HapticsFor(std::string("/actions/legacy/out/") + (hand == 0 ? "left" : "right") + "_haptic");
+		}
+		if (targets.empty())
 			return;
-		vibration.amplitude = std::clamp(target->amplitudeScale, 0.0f, 1.0f);
+		vibration.amplitude = std::clamp(targets.front().amplitudeScale, 0.0f, 1.0f);
 	}
 
 	OC_XR_LOG(xrApplyHapticFeedback(xr_session.get(), &info, (XrHapticBaseHeader*)&vibration));

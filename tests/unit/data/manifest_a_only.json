@@ -1,0 +1,8 @@
+{
+  "default_bindings": [{ "controller_type": "knuckles", "binding_url": "bindings_a_only_knuckles.json" }],
+  "actions": [
+    { "name": "/actions/main/in/jump", "type": "boolean" },
+    { "name": "/actions/main/in/pose", "type": "pose" }
+  ],
+  "action_sets": [{ "name": "/actions/main", "usage": "leftright" }]
+}

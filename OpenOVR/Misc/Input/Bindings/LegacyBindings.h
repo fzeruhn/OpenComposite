@@ -25,8 +25,9 @@ std::filesystem::path LegacyBindingsRelativePath(const std::string& controllerTy
  * built-in one (written to map as SteamVR's do). Never empty: a type neither knows gets the generic one. */
 BindingFile LoadLegacyBindingsFrom(const std::string& controllerType, const std::optional<std::filesystem::path>& steamvrDir);
 
-/** As LoadLegacyBindingsFrom, with SteamVR's install (FindSteamVRInstall); read once per type and kept */
-std::optional<BindingFile> LoadLegacyBindings(const std::string& controllerType);
+/** As LoadLegacyBindingsFrom, with SteamVR's install (FindSteamVRInstall); read once per type and kept for good (the
+ * pointer stays valid) */
+const BindingFile* LoadLegacyBindings(const std::string& controllerType);
 
 /** OpenComposite's own legacy binding file for a controller type (the generic one for a type it has none for) */
 BindingFile BuiltInLegacyBindings(const std::string& controllerType);

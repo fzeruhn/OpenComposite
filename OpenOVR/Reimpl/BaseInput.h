@@ -5,6 +5,7 @@
 
 #include "Drivers/Backend.h"
 #include <map>
+#include <mutex>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -851,12 +852,16 @@ private:
 	std::map<const InteractionProfile*, std::vector<std::pair<std::string, std::string>>> rawComponents;
 	std::map<const InteractionProfile*, std::unique_ptr<BindingEvaluator>> evaluators;
 	std::vector<const BindingEvaluator*> evaluatedThisSync;
+	// Guards everything above and the legacy evaluators: a game reads input on its own thread while OpenComposite
+	// reads the old input after each frame on the thread that submits
+	mutable std::recursive_mutex evaluatorLock;
 	void CreateRawActions();
 	void SuggestRawInputs(const InteractionProfile& profile, std::vector<XrActionSuggestedBinding>& bindings);
 	void SuggestRawBindings(const InteractionProfile& profile, const std::string& bindingsPath, std::vector<XrActionSuggestedBinding>& bindings);
 	/** One hand's raw inputs (index into allSubactionPaths) on a profile, by SteamVR path, into state */
 	void ReadRawInputs(size_t hand, const InteractionProfile& profile, RawInputState& state);
-	/** The old input's evaluator for a controller's profile, evaluated once per sync; null if it has none */
+	/** The old input's evaluator for a controller's profile, evaluated once per sync; null if it has none.
+	 * Call it, and use what it returns, with evaluatorLock held. */
 	const BindingEvaluator* LegacyEvaluatorFor(const InteractionProfile* profile);
 	struct LegacyEvaluator {
 		std::unique_ptr<BindingEvaluator> evaluator;
@@ -865,9 +870,10 @@ private:
 	};
 	std::map<std::string, LegacyEvaluator> legacyEvaluators; // by controller type
 	void UpdateEvaluators(const VRActiveActionSet_t* sets, uint32_t count);
-	/** This sync's digital or analog output for an action from the evaluators, matching ulRestrictToDevice */
-	const DigitalOut* EvaluatedDigital(const Action& action, VRInputValueHandle_t restrictToDevice) const;
-	const AnalogOut* EvaluatedAnalog(const Action& action, VRInputValueHandle_t restrictToDevice) const;
+	/** This sync's digital or analog output for an action from the evaluators, matching ulRestrictToDevice (a copy,
+	 * taken under evaluatorLock) */
+	std::optional<DigitalOut> EvaluatedDigital(const Action& action, VRInputValueHandle_t restrictToDevice) const;
+	std::optional<AnalogOut> EvaluatedAnalog(const Action& action, VRInputValueHandle_t restrictToDevice) const;
 	/** The input source handle of a binding's source path (an evaluated action's origin) */
 	VRInputValueHandle_t OriginHandle(const std::string& sourcePath);
 

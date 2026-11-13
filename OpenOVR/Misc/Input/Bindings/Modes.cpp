@@ -68,6 +68,10 @@ std::optional<float> RawInputState::Get(const std::string& path) const
 
 namespace {
 
+// A click from a force sensor, for a source that has a force and no click (Index's trackpad): on at this force, off
+// below the second. An estimate, not measured against SteamVR.
+constexpr float kForceClickOn = 0.3f, kForceClickOff = 0.25f;
+
 // What every mode shares: its source, its parameters, and its inputs' last states (for change times and chords)
 class ModeBase : public ModeBinding {
 public:
@@ -135,6 +139,7 @@ protected:
 	static bool Hysteresis(bool was, float v, float on, float off) { return was ? v > off : v >= on; }
 
 	SourceBinding binding;
+	bool forceClick = false; // a click from the force (kForceClickOn), for sources without a click
 	std::map<std::string, DigitalOut> states;
 	std::map<std::string, AnalogOut> analogs;
 };
@@ -199,6 +204,8 @@ private:
 			state = Hysteresis(state, *analog, Param("click_activate_threshold"), Param("click_deactivate_threshold"));
 		else if (click)
 			state = *click >= 0.5f;
+		else if (std::optional<float> f = in.Get(Raw("force")))
+			state = Hysteresis(state, *f, kForceClickOn, kForceClickOff); // no click: the force (Index's trackpad)
 		else
 			state = false;
 		return state;
@@ -323,12 +330,16 @@ struct Stick {
 	bool touched = false, clicked = false;
 	float Radius() const { return std::sqrt(x * x + y * y); }
 };
-Stick ReadStick(const RawInputState& in, const std::string& path)
+Stick ReadStick(const RawInputState& in, const std::string& path, bool& forceClick)
 {
 	Stick s;
 	s.x = in.Get(path + "/x").value_or(0);
 	s.y = in.Get(path + "/y").value_or(0);
-	s.clicked = in.Get(path + "/click").value_or(0) >= 0.5f;
+	std::optional<float> click = in.Get(path + "/click"), force = in.Get(path + "/force");
+	if (click)
+		s.clicked = *click >= 0.5f;
+	else if (force) // a pad with a force sensor and no click (Index's)
+		s.clicked = forceClick = forceClick ? *force > kForceClickOff : *force >= kForceClickOn;
 	std::optional<float> touch = in.Get(path + "/touch");
 	s.touched = touch ? *touch >= 0.5f || s.clicked : s.Radius() > 0.0f || s.clicked;
 	return s;
@@ -339,11 +350,11 @@ class TrackpadMode : public ModeBase {
 public:
 	using ModeBase::ModeBase;
 
-	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click") }; }
+	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click"), Raw("force") }; }
 
 	void Update(const RawInputState& in, ActionOutputs& out) override
 	{
-		Stick s = ReadStick(in, binding.path);
+		Stick s = ReadStick(in, binding.path, forceClick);
 		bool inside = s.Radius() < Param("deadzone_pct") / 100.0f;
 		Analog(out, "position", inside ? 0 : s.x, inside ? 0 : s.y, 0);
 		Digital(out, "touch", s.touched, in.time);
@@ -356,11 +367,11 @@ class JoystickMode : public ModeBase {
 public:
 	using ModeBase::ModeBase;
 
-	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click") }; }
+	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click"), Raw("force") }; }
 
 	void Update(const RawInputState& in, ActionOutputs& out) override
 	{
-		Stick s = ReadStick(in, binding.path);
+		Stick s = ReadStick(in, binding.path, forceClick);
 		float r = s.Radius();
 		float dead = Param("deadzone_pct") / 100.0f, max = Param("maxzone_pct") / 100.0f;
 		float x = 0, y = 0;
@@ -381,11 +392,11 @@ class DpadMode : public ModeBase {
 public:
 	using ModeBase::ModeBase;
 
-	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click") }; }
+	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click"), Raw("force") }; }
 
 	void Update(const RawInputState& in, ActionOutputs& out) override
 	{
-		Stick s = ReadStick(in, binding.path);
+		Stick s = ReadStick(in, binding.path, forceClick);
 		bool on = TextParam("sub_mode", "touch") == "click" ? s.clicked : s.touched;
 		float r = s.Radius();
 		bool centre = r <= Param("deadzone_pct") / 100.0f;
@@ -413,7 +424,7 @@ public:
 
 	void Update(const RawInputState& in, ActionOutputs& out) override
 	{
-		Stick s = ReadStick(in, binding.path);
+		Stick s = ReadStick(in, binding.path, forceClick);
 		float dx = 0, dy = 0;
 		if (s.touched && wasTouched) {
 			dx = s.x - lastX;
@@ -469,11 +480,11 @@ class RadialMode : public ModeBase {
 public:
 	using ModeBase::ModeBase;
 
-	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click") }; }
+	std::vector<std::string> RawInputs() const override { return { Raw("x"), Raw("y"), Raw("touch"), Raw("click"), Raw("force") }; }
 
 	void Update(const RawInputState& in, ActionOutputs& out) override
 	{
-		Stick s = ReadStick(in, binding.path);
+		Stick s = ReadStick(in, binding.path, forceClick);
 		bool on = TextParam("sub_mode", "touch") == "click" ? s.clicked : s.touched;
 		float wanted = Param("segments");
 		int segments = std::isfinite(wanted) ? std::clamp((int)std::min(wanted, 64.0f), 1, 64) : 4;

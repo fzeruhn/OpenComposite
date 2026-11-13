@@ -1,0 +1,4 @@
+{
+ "#": "Threads: input-threads on the stand-in with scripts/input_toggle.json and --manifest tests/unit/data/manifest_toggle.json, under inputEvaluator=steamvr and direct. A second thread reads the old input, the toggle action and plays haptics all the time while the game's thread syncs, reads and submits 300 frames: nothing crashes, and the toggle still changes three times under steamvr (direct follows the click: six).",
+ "input-threads/threads/-/-": { "frames": 300, "polled": true }
+}

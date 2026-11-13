@@ -109,6 +109,16 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-frames --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --expected tests/conformance/baseline/input-direct.json --expect tests/conformance/expect/input_direct.json --out conformance/input-direct
           if ($LASTEXITCODE) { $failed++ }
+          # Input from two threads at once, under both evaluators
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-threads --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/input_threads.json --out conformance/input-threads-steamvr
+          if ($LASTEXITCODE) { $failed++ }
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-threads --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --expect tests/conformance/expect/input_threads.json --out conformance/input-threads-direct
+          if ($LASTEXITCODE) { $failed++ }
+          # inputEvaluator=steamvr suggests bindings for the same profiles as direct
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --out conformance/profiles-direct
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --ini tests/conformance/ini/steamvr_evaluator.ini --out conformance/profiles-steamvr
+          python tests/conformance/check_suggested_profiles.py conformance/profiles-direct/raw/case-input-manifest.dump.json conformance/profiles-steamvr/raw/case-input-manifest.dump.json
+          if ($LASTEXITCODE) { $failed++ }
           # Converting bindings to other controllers only adds: everything bound without it is bound with it
           $env:OC_NO_BINDING_CONVERSION = '1'
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-unconverted

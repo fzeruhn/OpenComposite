@@ -345,3 +345,23 @@ TEST_CASE("Radial_segments")
 	CHECK_FALSE(r.Digital("/top"));
 	CHECK(r.mode->DigitalInput("0") == false);
 }
+
+TEST_CASE("Trackpad_click_from_force")
+{
+	// Index's trackpad has a force sensor and no click: its click comes from the force, through thresholds
+	const std::string pad = "/user/hand/right/input/trackpad";
+	Runner r(Source("trackpad", { { "click", "/click" } }, {}, pad));
+	r.Step({ { pad + "/x", 0 }, { pad + "/y", 0 }, { pad + "/touch", 1 }, { pad + "/force", 0.1 } });
+	CHECK_FALSE(r.Digital("/click"));
+	r.Step({ { pad + "/x", 0 }, { pad + "/y", 0 }, { pad + "/touch", 1 }, { pad + "/force", 0.9 } });
+	CHECK(r.Digital("/click"));
+	r.Step({ { pad + "/x", 0 }, { pad + "/y", 0 }, { pad + "/touch", 1 }, { pad + "/force", 0.0 } });
+	CHECK_FALSE(r.Digital("/click"));
+
+	// A button on it (no force_input) the same way, as SteamVR's Index legacy file binds it
+	Runner b(Source("button", { { "click", "/press" } }, {}, pad));
+	b.Step({ { pad + "/touch", 1 }, { pad + "/force", 0.9 } });
+	CHECK(b.Digital("/press"));
+	b.Step({ { pad + "/touch", 1 }, { pad + "/force", 0.0 } });
+	CHECK_FALSE(b.Digital("/press"));
+}
