@@ -1,6 +1,8 @@
 [
  { "#": "Fields regress.py skips: values that change from run to run (or from machine to machine), so a baseline can't pin them. Each entry has interface, method and field regexes, as differences.json's, and its reason. Found by comparing three full stand-in runs on one PC; a field that differs on CI's runner gets its entry here too." },
+ { "interface": "frame-loop", "method": "frame 1", "field": "events", "reason": "how many session state changes (each a SceneApplicationStateChanged) arrive before the first frame's poll: 4 to 6 on CI" },
  { "interface": "IVRApplications_\\d+", "method": "GetCurrentSceneProcessId", "field": "ret", "reason": "the scene app's process id" },
+ { "interface": "IVRApplications_\\d+", "method": "GetApplicationProcessId", "field": "ret", "reason": "the process id IdentifyApplication recorded" },
  { "interface": "IVRCompositor_\\d+", "method": "GetCurrentSceneFocusProcess|GetLastFrameRenderer", "field": "ret", "reason": "a process id" },
  { "interface": "IVRCompositor_\\d+", "method": "GetCumulativeStats", "field": "out", "reason": "its first field is the scene process id" },
  { "interface": "IVRInput_\\d+", "method": "GetActionHandle|GetActionSetHandle|GetInputSourceHandle", "field": "out", "reason": "handles are pointers" },

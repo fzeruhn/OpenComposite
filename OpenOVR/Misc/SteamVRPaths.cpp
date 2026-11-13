@@ -139,8 +139,18 @@ std::optional<fs::path> FromSteamLibraries(const fs::path& steamDir)
 
 } // namespace
 
+// Tests (the conformance runner sets it): OpenComposite finds no SteamVR and no Steam config, so a run answers the
+// same on a PC with SteamVR installed as on CI's runner without it
+static bool NoSteamVRForTests()
+{
+	const char* v = getenv("OC_TEST_NO_STEAMVR");
+	return v && v[0] && v[0] != '0';
+}
+
 std::optional<fs::path> FindSteamVRInstall(const fs::path* pathsFileOverride, const fs::path* steamDirOverride)
 {
+	if (!pathsFileOverride && !steamDirOverride && NoSteamVRForTests())
+		return std::nullopt;
 	// Called from games' IVRResources calls: nothing may escape
 	try {
 	std::optional<fs::path> pathsFile = pathsFileOverride ? std::optional<fs::path>(*pathsFileOverride) : DefaultPathsFile();
@@ -158,6 +168,8 @@ std::optional<fs::path> FindSteamVRInstall(const fs::path* pathsFileOverride, co
 
 std::optional<fs::path> FindSteamConfigDir()
 {
+	if (NoSteamVRForTests())
+		return std::nullopt;
 	try {
 		std::optional<fs::path> steamDir = DefaultSteamDir();
 		if (steamDir && IsDirectory(*steamDir / "config"))
