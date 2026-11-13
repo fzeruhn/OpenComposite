@@ -215,11 +215,10 @@ jobs:
         shell: pwsh
         run: |
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path -LiteralPath $iscc)) {
-            choco install innosetup --no-progress -y
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          (Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
+          # Pinned, and installed over any other version the runner image has.
+          choco install innosetup --version=6.7.1 --allow-downgrade --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $iscc /? | Select-Object -First 1
           dotnet --version
 
       - name: Build

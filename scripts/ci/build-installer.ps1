@@ -29,6 +29,9 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 if (-not $Out) {
     $Out = Join-Path $root 'build\installer'
 }
+# Absolute: Inno Setup reads relative paths from the .iss file's folder.
+$Out = [IO.Path]::GetFullPath($Out, (Get-Location).Path)
+$Artifacts = (Resolve-Path -LiteralPath $Artifacts).Path
 
 function Invoke-Checked([scriptblock]$command, [string]$what) {
     & $command
