@@ -112,7 +112,7 @@ namespace RuntimeSwitcher.Tests
 
         private const string SteamsFile = "{\n" +
                                           "\t\"config\" : \n\t[\n\t\t\"C:\\\\Program Files (x86)\\\\Steam\\\\config\"\n\t],\n" +
-                                          "\t\"external_drivers\" : \n\t[\n\t\t\"C:\\\\Pimax\\\\aapvr\"\n\t],\n" +
+                                          "\t\"external_drivers\" : \n\t[\n\t\t\"C:\\\\Drivers\\\\example\"\n\t],\n" +
                                           "\t\"jsonid\" : \"vrpathreg\",\n" +
                                           "\t\"log\" : \n\t[\n\t\t\"C:\\\\Program Files (x86)\\\\Steam\\\\logs\"\n\t],\n" +
                                           "\t\"runtime\" : \n\t[\n\t\t\"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\SteamVR\"\n\t],\n" +
@@ -137,7 +137,7 @@ namespace RuntimeSwitcher.Tests
                 json.Properties().Select(p => p.Name));
             Assert.Equal(new[] { @"C:\OC", @"C:\Program Files (x86)\Steam\steamapps\common\SteamVR" },
                 json["runtime"].Select(t => (string)t));
-            Assert.Equal(@"C:\Pimax\aapvr", (string)json["external_drivers"][0]);
+            Assert.Equal(@"C:\Drivers\example", (string)json["external_drivers"][0]);
             string text = File.ReadAllText(file);
             Assert.Contains("\"2026-11-04T10:00:00Z\"", text);
             Assert.Contains("1.50", text);
@@ -274,7 +274,7 @@ namespace RuntimeSwitcher.Tests
         [Fact]
         public void TheOnlyPreReleaseIsFoundOnlyWhenAskedFor()
         {
-            // The fork's first release, v2026.11.06, is a pre-release.
+            // A repository whose only release is a pre-release.
             string json = Json(("v2026.11.06", true, false, true, true));
             Assert.Null(Find(json, null, false));
             Assert.NotNull(Find(json, null, true));
