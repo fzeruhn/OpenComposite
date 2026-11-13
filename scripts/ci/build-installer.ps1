@@ -46,8 +46,9 @@ if ($Version -match '^(\d+(?:\.\d+){0,3})(?:-[0-9A-Za-z.-]+)?$') {
     }
 }
 
+$onPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 $iscc = @(
-    (Get-Command ISCC.exe -ErrorAction SilentlyContinue)?.Source
+    $(if ($onPath) { $onPath.Source })
     Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
     Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'
     Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'
