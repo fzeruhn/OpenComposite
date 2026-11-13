@@ -113,10 +113,8 @@ class Runner:
         env.update(env_extra or {})
         if unelevated.integrity_above_medium() and not self.args.ci:
             return unelevated.run_medium(cmd, env, None, timeout)
-        try:
-            return subprocess.run(cmd, env=env, timeout=timeout, capture_output=True).returncode
-        except subprocess.TimeoutExpired:
-            return 124
+        # In a memory-limited job (unelevated.py): a runaway child fails alone
+        return unelevated.run_limited(cmd, env, None, timeout, capture=True)[0]
 
     @staticmethod
     def take_crash(raw, record):

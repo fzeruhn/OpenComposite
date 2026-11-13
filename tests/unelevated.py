@@ -50,6 +50,79 @@ def integrity_above_medium():
     return level > 0x2000  # SECURITY_MANDATORY_MEDIUM_RID
 
 
+# Every test child runs in a job with a memory limit, so a test that runs away (a loop that allocates without end)
+# fails on its own instead of taking the PC's memory. Per process and for the child with everything it starts.
+PROCESS_MEMORY_LIMIT = 2 * 1024 ** 3
+JOB_MEMORY_LIMIT = 3 * 1024 ** 3
+
+
+def memory_limited_job():
+    """A job object whose processes may commit PROCESS_MEMORY_LIMIT each and JOB_MEMORY_LIMIT together (Windows; None
+    elsewhere or if it can't be made). Processes a member starts are members too."""
+    if os.name != "nt":
+        return None
+    ctypes, wintypes, advapi32, kernel32 = _win()
+
+    class BASIC(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+
+    class EXTENDED(ctypes.Structure):
+        _fields_ = [("BasicLimitInformation", BASIC), ("IoInfo", ctypes.c_uint64 * 6),
+                    ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    info = EXTENDED()
+    info.BasicLimitInformation.LimitFlags = 0x100 | 0x200  # JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY
+    info.ProcessMemoryLimit = PROCESS_MEMORY_LIMIT
+    info.JobMemoryLimit = JOB_MEMORY_LIMIT
+    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):  # ExtendedLimitInformation
+        kernel32.CloseHandle(job)
+        return None
+    return job
+
+
+def assign_to_job(job, process_handle):
+    if job is None:
+        return False
+    ctypes, wintypes, advapi32, kernel32 = _win()
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    return bool(kernel32.AssignProcessToJobObject(job, process_handle))
+
+
+def close_job(job):
+    if job is not None:
+        ctypes, wintypes, advapi32, kernel32 = _win()
+        kernel32.CloseHandle(job)
+
+
+def run_limited(command, env, cwd, timeout, capture=False):
+    """subprocess.run in a memory-limited job (not elevated, or not on Windows): its exit code, 124 on a timeout;
+    with capture, (code, stdout, stderr)"""
+    job = memory_limited_job()
+    p = subprocess.Popen(command, env=env, cwd=cwd, stdout=subprocess.PIPE if capture else None,
+                         stderr=subprocess.PIPE if capture else None)
+    if job is not None:
+        assign_to_job(job, int(p._handle))
+    try:
+        out, err = p.communicate(timeout=timeout)
+        code = p.returncode
+    except subprocess.TimeoutExpired:
+        p.kill()
+        out, err = p.communicate()
+        code = 124
+    finally:
+        close_job(job)
+    return (code, out, err) if capture else code
+
+
 def run_medium(command, env, cwd, timeout):
     import msvcrt
     ctypes, wintypes, advapi32, kernel32 = _win()
@@ -104,9 +177,12 @@ def run_medium(command, env, cwd, timeout):
     pi = PROCESS_INFORMATION()
     block = ctypes.create_unicode_buffer("".join(f"{k}={v}\0" for k, v in env.items()) + "\0")
     cmdline = ctypes.create_unicode_buffer(subprocess.list2cmdline(command))
-    # bInheritHandles, CREATE_UNICODE_ENVIRONMENT
-    check(advapi32.CreateProcessAsUserW(dup, None, cmdline, None, None, True, 0x400, block, cwd, ctypes.byref(si),
-                                        ctypes.byref(pi)), "CreateProcessAsUserW")
+    # bInheritHandles, CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED: in the memory-limited job before it runs
+    check(advapi32.CreateProcessAsUserW(dup, None, cmdline, None, None, True, 0x400 | 0x4, block, cwd,
+                                        ctypes.byref(si), ctypes.byref(pi)), "CreateProcessAsUserW")
+    job = memory_limited_job()
+    assign_to_job(job, pi.hProcess)
+    kernel32.ResumeThread(pi.hThread)
     wait = kernel32.WaitForSingleObject(pi.hProcess, int(timeout * 1000))
     if wait != 0:  # WAIT_TIMEOUT
         kernel32.TerminateProcess(pi.hProcess, 124)
@@ -119,6 +195,7 @@ def run_medium(command, env, cwd, timeout):
         result = code.value
     for h in (pi.hProcess, pi.hThread, dup, token):
         kernel32.CloseHandle(h)
+    close_job(job)
     kernel32.LocalFree(sid)
     return result
 
@@ -127,11 +204,10 @@ def run(command, env_pairs, cwd, timeout):
     env = dict(os.environ)
     env.update(env_pairs)
     if not integrity_above_medium():
-        try:
-            return subprocess.run(command, env=env, cwd=cwd, timeout=timeout).returncode
-        except subprocess.TimeoutExpired:
+        code = run_limited(command, env, cwd, timeout)
+        if code == 124:
             print(f"unelevated.py: timed out after {timeout} s", file=sys.stderr)
-            return 124
+        return code
     return run_medium(command, env, cwd, timeout)
 
 

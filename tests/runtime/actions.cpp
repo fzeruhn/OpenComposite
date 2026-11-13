@@ -307,7 +307,10 @@ XrResult XRAPI_CALL ApplyHapticFeedback(XrSession session, const XrHapticActionI
 		entry["frequency"] = v->frequency;
 		Dump& d = GetDump();
 		std::lock_guard<std::mutex> dg(d.lock);
-		d.root["haptics"].append(entry);
+		// The first 1000, then only a count: a game (or a test) calling it in a loop mustn't fill the memory
+		if (d.root["haptics"].size() < 1000)
+			d.root["haptics"].append(entry);
+		d.root["haptics_total"] = d.root["haptics_total"].asUInt64() + 1;
 	}
 	return XR_SUCCESS;
 }
