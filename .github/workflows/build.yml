@@ -227,8 +227,8 @@ jobs:
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { "dev-$($env:GITHUB_SHA.Substring(0, 12))" }
           scripts/ci/build-installer.ps1 -Artifacts artifacts -Version $version -Out build/installer -Repository $env:GITHUB_REPOSITORY
 
-      # Inno Setup's output isn't known to be byte-reproducible: build it again and say whether it is.
-      - name: Same bytes again?
+      # Packing is byte-reproducible, the installer included (its files carry the commit's time): build it again to check.
+      - name: Same bytes again
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { "dev-$($env:GITHUB_SHA.Substring(0, 12))" }
@@ -236,7 +236,7 @@ jobs:
           $a = (Get-FileHash build/installer/OpenComposite-Setup.exe).Hash
           $b = (Get-FileHash build/installer-again/OpenComposite-Setup.exe).Hash
           if ($a -eq $b) { "::notice::OpenComposite-Setup.exe is the same bytes when built again ($a)." }
-          else { "::warning::OpenComposite-Setup.exe differs when built again ($a, $b)." }
+          else { "::error::OpenComposite-Setup.exe differs when built again ($a, $b)."; exit 1 }
 
       - uses: actions/upload-artifact@v7
         with:
