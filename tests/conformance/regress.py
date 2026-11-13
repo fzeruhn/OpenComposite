@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """The regression run: a conformance run's records against a recorded baseline.
 
-  regress.py --results <dir>/results.json --baseline <file> [--differences differences.json] [--volatile volatile.json]
-             [--accept]
+  regress.py --results <dir>/results.json --baseline <file> [--volatile volatile.json] [--accept]
 
 Fails (exit 1) on any record that was ok in the baseline and is something else now (ended, crashed, timed out, or
-gone), and on any change of ret, out, init_error or lookup_error, except where differences.json (the known differences
-from SteamVR, which include this PC's own values) or volatile.json (values that change from run to run: process ids,
-handles) covers that field. New records are reported, not failed. --accept writes the results as the new baseline.
+gone), and on any change of an answer (every field but the record's identity and run bookkeeping: ret, out, the errors
+and what cases record), except where volatile.json covers that field (values that change from run to run: process
+ids, handles, timing). Every other answer is pinned, also those that differ from
+SteamVR's (differences.json): they're OpenComposite's own, and mustn't change unnoticed. New records are reported,
+not failed. --accept writes the results as the new baseline.
 
 The baseline keeps, per record, its status and a short hash of each compared field (not the values): one record per
 line, so a re-accepted baseline diffs readably.
@@ -21,7 +22,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FIELDS = ("ret", "out", "init_error", "lookup_error")
+# Not answers: which call the record is, and how the run went
+BOOKKEEPING = {"case", "interface", "method", "index", "apptype", "argset", "status", "exit_code", "skipped", "crash", "callers"}
 
 
 def key_of(r):
@@ -52,8 +54,8 @@ def summarise(results, rules):
         if r.get("skipped"):
             continue
         entry = {"s": r.get("status")}
-        for f in FIELDS:
-            if f in r and not covered(rules, r, f):
+        for f in r:
+            if f not in BOOKKEEPING and not covered(rules, r, f):
                 entry[f] = digest(r[f])
         base[key_of(r)] = entry
     return base
@@ -73,16 +75,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results", required=True)
     ap.add_argument("--baseline", required=True)
-    ap.add_argument("--differences", default=str(HERE / "differences.json"))
     ap.add_argument("--volatile", default=str(HERE / "volatile.json"))
     ap.add_argument("--accept", action="store_true")
     args = ap.parse_args()
 
     results = json.loads(Path(args.results).read_text(encoding="utf-8"))["records"]
     rules = []
-    for p in (args.differences, args.volatile):
-        if p and Path(p).exists():
-            rules += [d for d in json.loads(Path(p).read_text(encoding="utf-8")) if isinstance(d, dict) and "field" in d]
+    if args.volatile and Path(args.volatile).exists():
+        rules = [d for d in json.loads(Path(args.volatile).read_text(encoding="utf-8"))
+                 if isinstance(d, dict) and {"interface", "method", "field"} <= d.keys()]
     now = summarise(results, rules)
 
     if args.accept:
@@ -101,7 +102,7 @@ def main():
         if b["s"] == "ok" and n["s"] != "ok":
             problems.append(f"{k}: ok in the baseline, {n['s']} now")
             continue
-        for f in FIELDS:
+        for f in sorted((set(b) | set(n)) - {"s"}):
             if f in b and f in n and b[f] != n[f]:
                 problems.append(f"{k}: {f} changed")
             elif (f in b) != (f in n) and b["s"] == n["s"] == "ok":

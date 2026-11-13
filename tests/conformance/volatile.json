@@ -1,3 +1,10 @@
 [
- { "#": "Fields regress.py skips besides differences.json's: values that change from run to run or from machine to machine and that SteamVR's comparison doesn't already cover. Each entry as differences.json's (interface, method, field regexes, optional apptype) with its reason. Empty so far: differences.json covered every field that changed between three full runs on one PC." }
+ { "#": "Fields regress.py skips: values that change from run to run (or from machine to machine), so a baseline can't pin them. Each entry has interface, method and field regexes, as differences.json's, and its reason. Found by comparing three full stand-in runs on one PC; a field that differs on CI's runner gets its entry here too." },
+ { "interface": "IVRApplications_\\d+", "method": "GetCurrentSceneProcessId", "field": "ret", "reason": "the scene app's process id" },
+ { "interface": "IVRCompositor_\\d+", "method": "GetCurrentSceneFocusProcess|GetLastFrameRenderer", "field": "ret", "reason": "a process id" },
+ { "interface": "IVRCompositor_\\d+", "method": "GetCumulativeStats", "field": "out", "reason": "its first field is the scene process id" },
+ { "interface": "IVRInput_\\d+", "method": "GetActionHandle|GetActionSetHandle|GetInputSourceHandle", "field": "out", "reason": "handles are pointers" },
+ { "interface": "IVROverlay_\\d+", "method": "CreateOverlay|CreateDashboardOverlay|FindOverlay", "field": "out", "reason": "overlay handles are pointers" },
+ { "interface": "IVRSystem_\\d+", "method": "GetHiddenAreaMesh", "field": "ret", "reason": "the struct's padding bytes are uninitialised (a minor finding: zero them)" },
+ { "interface": "IVRSystem_\\d+", "method": "PollNextEvent|PollNextEventWithPose", "field": "ret|out", "reason": "whether VREvent_ProcessConnected from another test process is pending yet is timing" }
 ]

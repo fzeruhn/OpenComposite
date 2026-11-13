@@ -137,7 +137,9 @@ jobs:
         if: always() && matrix.tests
         with:
           name: conformance-windows
-          path: conformance/*/summary.txt
+          path: |
+            conformance/*/summary.txt
+            conformance/*/results.json
 
       - uses: actions/upload-artifact@v7
         with:
@@ -193,7 +195,9 @@ jobs:
         if: always() && matrix.tests
         with:
           name: conformance-linux
-          path: conformance/*/summary.txt
+          path: |
+            conformance/*/summary.txt
+            conformance/*/results.json
 
       - uses: actions/upload-artifact@v7
         with:
