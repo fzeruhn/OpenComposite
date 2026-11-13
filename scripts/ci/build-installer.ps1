@@ -94,9 +94,12 @@ if (-not (Test-Path -LiteralPath $jsonLicence)) {
 }
 Copy-Item -LiteralPath $jsonLicence -Destination (Join-Path $switcher 'LICENSE_Newtonsoft.Json.txt')
 
-# 3. The installer.
+# 3. The installer. Every file gets the commit's time, in the files and in the setup.
+$commitTime = [DateTimeOffset]::FromUnixTimeSeconds([long](git -C $root log -1 --format=%ct)).UtcDateTime
+Get-ChildItem -LiteralPath $folder, $switcher -Recurse -File | ForEach-Object { $_.LastWriteTimeUtc = $commitTime }
 Invoke-Checked {
     & $iscc /Q "/DAppVersion=$Version" "/DNumericVersion=$numeric" "/DFolder=$folder" "/DSwitcher=$switcher" "/DOutput=$Out" `
+        "/DTouchDate=$($commitTime.ToString('yyyy-MM-dd'))" "/DTouchTime=$($commitTime.ToString('HH:mm:ss'))" `
         (Join-Path $root 'installer\OpenComposite.iss')
 } 'Compiling the installer'
 

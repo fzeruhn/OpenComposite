@@ -32,6 +32,13 @@
 #ifndef Output
   #define Output "."
 #endif
+; The commit's time (UTC), given to every installed file, so that the same commit builds the same setup.
+#ifndef TouchDate
+  #define TouchDate "current"
+#endif
+#ifndef TouchTime
+  #define TouchTime "current"
+#endif
 
 #define Repository "https://github.com/fzeruhn/OpenComposite"
 
@@ -67,16 +74,18 @@ SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
 TimeStampsInUTC=yes
+TouchDate={#TouchDate}
+TouchTime={#TouchTime}
 
 [Messages]
 FinishedLabel=OpenComposite is installed. Its app (OpenComposite, in the Start menu) switches OpenVR games between OpenComposite and SteamVR.
 
 [Files]
-Source: "{#Folder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#Switcher}\OpenComposite.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Switcher}\OpenComposite.exe.config"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Switcher}\Newtonsoft.Json.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Switcher}\LICENSE_Newtonsoft.Json.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Folder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs touch
+Source: "{#Switcher}\OpenComposite.exe"; DestDir: "{app}"; Flags: ignoreversion touch
+Source: "{#Switcher}\OpenComposite.exe.config"; DestDir: "{app}"; Flags: ignoreversion touch
+Source: "{#Switcher}\Newtonsoft.Json.dll"; DestDir: "{app}"; Flags: ignoreversion touch
+Source: "{#Switcher}\LICENSE_Newtonsoft.Json.txt"; DestDir: "{app}"; Flags: ignoreversion touch
 
 [Icons]
 Name: "{autoprograms}\OpenComposite"; Filename: "{app}\OpenComposite.exe"; Comment: "Switch OpenVR games between OpenComposite and SteamVR"

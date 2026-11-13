@@ -64,7 +64,11 @@ $steamvr
 /opt/other-runtime" "install"
 cmp -s "$paths.bak" "$work/original" || fail "openvrpaths.vrpath.bak isn't the file as it was."
 
-sh "$copy/install.sh" --status | grep -q "OpenVR games use: OpenComposite" || fail "--status doesn't say OpenComposite."
+status=$(sh "$copy/install.sh" --status)
+case $status in
+*"OpenVR games use: OpenComposite"*) ;;
+*) fail "--status doesn't say OpenComposite: $status" ;;
+esac
 
 echo "haptics=off" >"$copy/bin/opencomposite.ini"
 sh "$installer" --no-switch >/dev/null
