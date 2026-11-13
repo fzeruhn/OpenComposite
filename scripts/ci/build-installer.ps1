@@ -99,7 +99,7 @@ $commitTime = [DateTimeOffset]::FromUnixTimeSeconds([long](git -C $root log -1 -
 Get-ChildItem -LiteralPath $folder, $switcher -Recurse -File | ForEach-Object { $_.LastWriteTimeUtc = $commitTime }
 Invoke-Checked {
     & $iscc /Q "/DAppVersion=$Version" "/DNumericVersion=$numeric" "/DFolder=$folder" "/DSwitcher=$switcher" "/DOutput=$Out" `
-        "/DTouchDate=$($commitTime.ToString('yyyy-MM-dd'))" "/DTouchTime=$($commitTime.ToString('HH:mm:ss'))" `
+        "/DTouchDate=$($commitTime.ToString('yyyy-MM-dd', [cultureinfo]::InvariantCulture))" "/DTouchTime=$($commitTime.ToString('HH:mm:ss', [cultureinfo]::InvariantCulture))" `
         (Join-Path $root 'installer\OpenComposite.iss')
 } 'Compiling the installer'
 
