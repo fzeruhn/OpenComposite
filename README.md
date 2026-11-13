@@ -100,19 +100,81 @@ A game listed there as broken by a missing interface may work with this fork.
 
 ## Installing
 
-Download from the [releases page](https://github.com/fzeruhn/OpenComposite/releases): `OpenComposite-windows.zip` or
-`OpenComposite-linux.tar.gz`. Each holds an `OpenComposite` folder with the 64- and 32-bit libraries in `bin`. Your
-headset's OpenXR runtime must be the active one.
+Your headset's OpenXR runtime must be the active one: OpenComposite runs OpenVR games on it. Everything is on the
+[releases page](https://github.com/fzeruhn/OpenComposite/releases).
 
-An installer for Windows and Linux is being worked on; this section will describe it. Until then, by hand: unpack the
-folder somewhere it can stay, and put it first in `"runtime"` of `openvrpaths.vrpath`
-(`%LOCALAPPDATA%\openvr\openvrpaths.vrpath` on Windows, `~/.config/openvr/openvrpaths.vrpath` on Linux), keeping the
-other entries after it. To switch back, put SteamVR's folder first again.
+### Windows
+
+1. Download `OpenComposite-Setup.exe` and run it. It installs for your user only, without an administrator, in
+   `%LOCALAPPDATA%\Programs\OpenComposite`. It isn't signed yet, so Windows may say it "protected your PC": choose
+   *More info*, then *Run anyway*. It needs the .NET Framework 4.8, which Windows 10 (1903 or later) and 11 come with.
+2. Leave *Use OpenComposite for OpenVR games now* ticked on its last page. OpenVR games then load OpenComposite.
+
+The **OpenComposite** app (Start menu) shows what OpenVR games use and the active OpenXR runtime, and has:
+
+- **Use OpenComposite** and **Use SteamVR**. Starting SteamVR from Steam also switches back to SteamVR, so after
+  using SteamVR, open the app and press *Use OpenComposite* again.
+- **Per-app settings**: send one program to SteamVR (or to OpenComposite) whatever the switch says. Programs appear in
+  the list once they have tried to start VR with OpenComposite.
+- **Updates**: when opened, it looks for a newer release here and offers *Update to …*, which downloads the new
+  installer, checks its SHA-256 against the one GitHub lists, and runs it. Nothing updates by itself. *Include
+  pre-releases* offers those too.
+
+To uninstall, use Windows' *Installed apps*. The uninstaller first takes OpenComposite out of
+`openvrpaths.vrpath`, putting SteamVR first again if OpenComposite was. It won't run while a game uses OpenComposite.
+
+[Mirador](https://github.com/fzeruhn/Mirador) users don't need this: Mirador keeps its own copy for Monado. Both can
+be installed side by side; OpenVR games use whichever was switched to last, and the app shows which one that is.
+
+For scripts: `OpenComposite-Setup.exe /VERYSILENT /SWITCH` installs and switches without asking anything (leave out
+`/SWITCH` to only install). `OpenComposite.exe --use-opencomposite`, `--use-steamvr` and `--remove` switch without
+opening the window.
+
+### Linux
+
+```bash
+tar -xzf OpenComposite-linux.tar.gz
+OpenComposite/install.sh
+```
+
+`install.sh` copies OpenComposite to `~/.local/share/OpenComposite`, then puts that folder first in `"runtime"` of
+`~/.config/openvr/openvrpaths.vrpath`, keeping the other entries after it (the old file is kept as
+`openvrpaths.vrpath.bak`). It doesn't need root, but it needs `python3`. At the end it prints the Steam launch options
+your OpenXR runtime needs inside the Steam Runtime (see [Linux-specific info](#linux-specific-info)). Afterwards, run
+the installed copy:
+
+```bash
+~/.local/share/OpenComposite/install.sh --status          # what OpenVR games use, what's installed
+~/.local/share/OpenComposite/install.sh --steamvr         # back to SteamVR (starting SteamVR from Steam does it too)
+~/.local/share/OpenComposite/install.sh --opencomposite   # and to OpenComposite again
+~/.local/share/OpenComposite/install.sh --update          # the newest release, if newer (--pre: pre-releases too)
+~/.local/share/OpenComposite/install.sh --launch-options  # the Steam launch options again
+~/.local/share/OpenComposite/install.sh --uninstall
+```
+
+`--update` downloads the release's archive and checks its SHA-256 against the one GitHub lists before installing it.
+Files you put in `bin/` (`opencomposite.ini`, `apps-config.json`) survive updates.
+
+**Flatpak Steam** has its own `openvrpaths.vrpath` and can't see `~/.local/share`. With only Flatpak Steam installed,
+`install.sh` uses its folders by itself (`~/.var/app/com.valvesoftware.Steam/.local/share/OpenComposite` and
+`.../.config/openvr/openvrpaths.vrpath`); with both kinds, add `--flatpak` to every command for Flatpak Steam.
+
+### By hand
+
+Unpack `OpenComposite-windows.zip` or `OpenComposite-linux.tar.gz` somewhere it can stay. Each holds an
+`OpenComposite` folder with the 64- and 32-bit libraries in `bin`. Put that folder first in `"runtime"` of
+`openvrpaths.vrpath` (`%LOCALAPPDATA%\openvr\openvrpaths.vrpath` on Windows, `~/.config/openvr/openvrpaths.vrpath` on
+Linux), keeping the other entries after it. To switch back, put SteamVR's folder first again.
+
+**One game only, on Windows:** back up the game's `openvr_api.dll`, then put `vrclient_x64.dll` (or `vrclient.dll` for a
+32-bit game) in its place, renamed to `openvr_api.dll`. Steam's *Verify integrity of game files* undoes this. The
+installer never changes game folders.
 
 ### Linux-specific info
 
-As most VR games are Windows games run through Proton, you'll usually install system-wide, but an environment variable
-lets you choose per game. Unpack the tarball, which gives an `OpenComposite` folder, and then:
+As most VR games are Windows games run through Proton, you'll usually install system-wide, which `install.sh` does
+(above). An environment variable lets you choose per game instead. By hand, unpack the tarball, which gives an
+`OpenComposite` folder, and then:
 
 1. Get the runtime in place, by one of these:
 	- Set `VR_OVERRIDE` to the `OpenComposite` folder, in the game's Steam launch options:
@@ -247,8 +309,18 @@ scripts/ci/build-linux.sh x64
 This makes `build/linux-x64/bin/linux64/vrclient.so` (`x86` makes `bin/vrclient.so`). A plain `cmake -B build && cmake
 --build build` works too, and the build folder can then be used directly as `VR_OVERRIDE`.
 
-`RuntimeSwitcher/` is upstream's Windows launcher. It downloads upstream's builds, so it isn't part of this fork's
-releases.
+**The installers:** `RuntimeSwitcher/` is the Windows app (`OpenComposite.exe`, C# on the .NET Framework 4.8, built
+with the .NET SDK on any OS), revived from upstream's switcher and pointed at this fork's releases.
+`installer/OpenComposite.iss` is the Windows installer and `installer/install.sh` the Linux one. With the two Windows
+DLLs in `artifacts\windows-x64` and `artifacts\windows-x86`, the .NET SDK 8 or later and Inno Setup 6:
+
+```powershell
+scripts\ci\build-installer.ps1 -Artifacts artifacts -Version 2026.11.06
+```
+
+This runs `RuntimeSwitcher/Tests` (`dotnet test RuntimeSwitcher/Tests` alone works on Linux too) and makes
+`build\installer\OpenComposite-Setup.exe`. `scripts/ci/test-install.sh OpenComposite-linux.tar.gz` tries `install.sh`
+on a scratch home folder.
 
 ### How the code is generated
 
