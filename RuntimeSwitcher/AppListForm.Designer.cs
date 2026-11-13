@@ -29,7 +29,6 @@ namespace RuntimeSwitcher
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(AppListForm));
             this.appsList = new System.Windows.Forms.ListView();
             this.contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.optUseOpenComposite = new System.Windows.Forms.ToolStripMenuItem();
@@ -122,9 +121,9 @@ namespace RuntimeSwitcher
             this.Controls.Add(this.defaultRuntime);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.appsList);
-            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.Icon = AppIcon.Get();
             this.Name = "AppListForm";
-            this.Text = "App Configuration";
+            this.Text = "OpenComposite: per-app settings";
             this.contextMenuStrip1.ResumeLayout(false);
             this.ResumeLayout(false);
             this.PerformLayout();

@@ -1,108 +1,48 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    OpenComposite.exe, the Windows app that installer/OpenComposite.iss installs next to the OpenComposite folder's
+    bin\: switches OpenVR games between OpenComposite and SteamVR, sends single programs to either (per-app settings),
+    and offers new releases of github.com/fzeruhn/OpenComposite. Built by scripts/ci/build-installer.ps1; Tests\ checks
+    Core\ (dotnet test RuntimeSwitcher/Tests).
+
+    .NET Framework 4.8, which Windows 10 (1903 and later) and 11 come with, so nothing else is installed. It builds with
+    the .NET SDK anywhere, Linux too, from the reference assemblies package.
+  -->
+
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{C8666599-403C-4DC0-A4AC-F61E6F53DB1D}</ProjectGuid>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>RuntimeSwitcher</RootNamespace>
+    <TargetFramework>net48</TargetFramework>
     <AssemblyName>OpenComposite</AssemblyName>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <TargetFrameworkProfile />
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-  </PropertyGroup>
-  <PropertyGroup>
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+    <RootNamespace>RuntimeSwitcher</RootNamespace>
+    <LangVersion>12</LangVersion>
     <ApplicationIcon>icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <DebugType>none</DebugType>
+    <!-- The same bytes from any checkout folder. -->
+    <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Product>OpenComposite</Product>
+    <Description>Switches OpenVR games between OpenComposite and SteamVR</Description>
+    <Company>github.com/fzeruhn/OpenComposite</Company>
+    <Copyright>GPL-3.0-or-later</Copyright>
+    <!-- The build script passes the release's: Version (numbers only) and InformationalVersion (the release's name). -->
+    <Version>0.0.0</Version>
   </PropertyGroup>
+
   <ItemGroup>
-    <Reference Include="OSIcon, Version=3.0.0.0, Culture=neutral, PublicKeyToken=2d4a153a84ea7847, processorArchitecture=MSIL">
-      <HintPath>..\packages\OSIcon.3.0.0.0\lib\OSIcon.dll</HintPath>
-    </Reference>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Xml.Linq" />
-    <Reference Include="System.Data.DataSetExtensions" />
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="System.Data" />
-    <Reference Include="System.Deployment" />
-    <Reference Include="System.Drawing" />
+    <Compile Remove="Tests/**" />
+    <None Remove="Tests/**" />
+    <EmbeddedResource Remove="Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Xml" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="AppListForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="AppListForm.Designer.cs">
-      <DependentUpon>AppListForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="ConfigReader.cs" />
-    <Compile Include="MainWindow.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="MainWindow.Designer.cs">
-      <DependentUpon>MainWindow.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Program.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="UpdateChecker.cs" />
-    <EmbeddedResource Include="AppListForm.resx">
-      <DependentUpon>AppListForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="MainWindow.resx">
-      <DependentUpon>MainWindow.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Properties\Resources.resx">
-      <Generator>ResXFileCodeGenerator</Generator>
-      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
-      <SubType>Designer</SubType>
-    </EmbeddedResource>
-    <Compile Include="Properties\Resources.Designer.cs">
-      <AutoGen>True</AutoGen>
-      <DependentUpon>Resources.resx</DependentUpon>
-    </Compile>
-    <None Include="Properties\Settings.settings">
-      <Generator>SettingsSingleFileGenerator</Generator>
-      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
-    </None>
-    <Compile Include="Properties\Settings.Designer.cs">
-      <AutoGen>True</AutoGen>
-      <DependentUpon>Settings.settings</DependentUpon>
-      <DesignTimeSharedInput>True</DesignTimeSharedInput>
-    </Compile>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="App.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="icon.ico" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json">
-      <Version>13.0.1</Version>
-    </PackageReference>
-    <PackageReference Include="OSIcon">
-      <Version>3.0.0</Version>
-    </PackageReference>
-  </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+
 </Project>
