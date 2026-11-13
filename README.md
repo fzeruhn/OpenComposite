@@ -101,36 +101,15 @@ A game listed there as broken by a missing interface may work with this fork.
 ## Installing
 
 Download from the [releases page](https://github.com/fzeruhn/OpenComposite/releases): `OpenComposite-windows.zip` or
-`OpenComposite-linux.tar.gz`. Each holds an `OpenComposite` folder with the 64- and 32-bit libraries in `bin`.
-Your headset's OpenXR runtime must be the active one.
+`OpenComposite-linux.tar.gz`. Each holds an `OpenComposite` folder with the 64- and 32-bit libraries in `bin`. Your
+headset's OpenXR runtime must be the active one.
 
-OpenComposite can be installed system-wide, so that every OpenVR game uses it, or for one game.
+An installer for Windows and Linux is being worked on; this section will describe it. Until then, by hand: unpack the
+folder somewhere it can stay, and put it first in `"runtime"` of `openvrpaths.vrpath`
+(`%LOCALAPPDATA%\openvr\openvrpaths.vrpath` on Windows, `~/.config/openvr/openvrpaths.vrpath` on Linux), keeping the
+other entries after it. To switch back, put SteamVR's folder first again.
 
-### Windows, system-wide
-
-1. Unpack the zip somewhere it can stay, for example `C:\OpenComposite`.
-2. Open `%LOCALAPPDATA%\openvr\openvrpaths.vrpath` in a text editor, and put that folder first in `"runtime"`, keeping
-   the other entries after it (backslashes doubled):
-
-   ```json
-   "runtime" : [
-       "C:\\OpenComposite",
-       "C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR"
-   ],
-   ```
-
-3. Start a game from Steam as usual.
-
-**Switching back:** move SteamVR's folder first again, or remove OpenComposite's line. Starting SteamVR yourself can
-also put it back first. To update, replace the folder's contents with a newer release.
-
-### Windows, one game
-
-Find the game's `openvr_api.dll` and keep a copy of it. Put `bin\vrclient_x64.dll` in its place, renamed to
-`openvr_api.dll` (`bin\vrclient.dll` for a 32-bit game; if one doesn't work, try the other). A game update may put
-Valve's DLL back.
-
-### Linux
+### Linux-specific info
 
 As most VR games are Windows games run through Proton, you'll usually install system-wide, but an environment variable
 lets you choose per game. Unpack the tarball, which gives an `OpenComposite` folder, and then:
