@@ -1,0 +1,3 @@
+[
+ { "#": "Fields regress.py skips besides differences.json's: values that change from run to run or from machine to machine and that SteamVR's comparison doesn't already cover. Each entry as differences.json's (interface, method, field regexes, optional apptype) with its reason. Empty so far: differences.json covered every field that changed between three full runs on one PC." }
+]
