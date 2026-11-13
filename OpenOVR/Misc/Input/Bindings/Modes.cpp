@@ -145,7 +145,12 @@ class ButtonMode : public ModeBase {
 public:
 	using ModeBase::ModeBase;
 
-	std::vector<std::string> RawInputs() const override { return { Raw("click"), Raw("value"), Raw("force"), Raw("touch") }; }
+	std::vector<std::string> RawInputs() const override
+	{
+		if (TextParam("force_input", "click") == "position")
+			return { Raw("x"), Raw("y"), Raw("touch") };
+		return { Raw("click"), Raw("value"), Raw("force"), Raw("touch") };
+	}
 
 	void Update(const RawInputState& in, ActionOutputs& out) override
 	{
@@ -178,10 +183,14 @@ private:
 	bool Pressed(const RawInputState& in)
 	{
 		// force_input picks what clicks it: the click (default), the value or the force through the thresholds, or the
-		// position (Half-Life: Alyx's walk: always on, as today's input has it)
+		// position: how far a stick or pad is pushed, through the thresholds (SteamVR's legacy file for Index presses
+		// axis 0 so, at 0.8 and 0.7)
 		std::string force = TextParam("force_input", "click");
-		if (force == "position")
-			return true;
+		if (force == "position") {
+			float x = in.Get(Raw("x")).value_or(0), y = in.Get(Raw("y")).value_or(0);
+			state = Hysteresis(state, std::sqrt(x * x + y * y), Param("click_activate_threshold"), Param("click_deactivate_threshold"));
+			return state;
+		}
 		std::optional<float> click = in.Get(Raw("click"));
 		std::optional<float> analog = force == "force" ? in.Get(Raw("force")) : in.Get(Raw("value"));
 		if (force == "click" && click)

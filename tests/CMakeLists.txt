@@ -86,6 +86,7 @@ add_executable(oc_unit_tests
 	unit/EvaluatorTests.cpp
 	unit/BindingSearchTests.cpp
 	unit/ConversionTests.cpp
+	unit/LegacyBindingsTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE

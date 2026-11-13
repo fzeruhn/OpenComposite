@@ -1034,15 +1034,28 @@ void EventsCase(CaseContext& c)
 		return;
 	callers::Texture tex(ArgSet::Valid, *c.call);
 	int pressFrame = -1, unpressFrame = -1, pressDevice = -1;
+	int statePressFirst = -1, statePressLast = -1, statePressFrames = 0; // GetControllerState's trigger
+	float axisAtPress = 0;
+	uint64_t aButtonMask = 0; // what the A click (frames 25 to 30) sets, from frame 27
 	Json::Value reset;
 	for (int frame = 1; frame <= 40; frame++) {
 		vr::TrackedDevicePose_t poses[16];
 		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
 		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
 		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
-		if (frame == 2) {
-			vr::VRControllerState_t state;
+		if (frame >= 2) {
+			vr::VRControllerState_t state{};
 			f.sys->GetControllerState(2, &state, sizeof(state));
+			if (state.ulButtonPressed & (1ull << vr::k_EButton_SteamVR_Trigger)) {
+				if (statePressFirst < 0) {
+					statePressFirst = frame;
+					axisAtPress = state.rAxis[1].x;
+				}
+				statePressLast = frame;
+				statePressFrames++;
+			}
+			if (frame == 27)
+				aButtonMask = state.ulButtonPressed;
 		}
 		vr::VREvent_t ev{};
 		while (f.sys->PollNextEvent(&ev, sizeof(ev))) {
@@ -1075,6 +1088,25 @@ void EventsCase(CaseContext& c)
 	buttons["held_10_frames"] = unpressFrame - pressFrame >= 9 && unpressFrame - pressFrame <= 11;
 	buttons["device"] = pressDevice;
 	c.Record("trigger button events", buttons);
+	// The same click through GetControllerState: the trigger pressed for the ten frames the script holds it (from
+	// frame 10, a few frames late if the session restarted), its axis 1 at 1
+	Json::Value polled;
+	polled["first"] = statePressFirst;
+	polled["last"] = statePressLast;
+	polled["pressed_from_10_to_16"] = statePressFirst >= 10 && statePressFirst <= 16;
+	polled["pressed_10_frames"] = statePressFrames == 10 && statePressLast - statePressFirst == 9;
+	polled["trigger_axis_full"] = axisAtPress == 1.0f;
+	c.Record("trigger controller state", polled);
+	// The A click as the old input shows it, and the buttons the right controller says it has
+	Json::Value a;
+	a["a_bit"] = (aButtonMask & (1ull << vr::k_EButton_A)) != 0;
+	a["grip_bit"] = (aButtonMask & (1ull << vr::k_EButton_Grip)) != 0;
+	vr::ETrackedPropertyError pe = vr::TrackedProp_Success;
+	a["supported_buttons"] = (Json::UInt64)f.sys->GetUint64TrackedDeviceProperty(2, vr::Prop_SupportedButtons_Uint64, &pe);
+	a["axis0_type"] = f.sys->GetInt32TrackedDeviceProperty(2, vr::Prop_Axis0Type_Int32, &pe);
+	a["axis1_type"] = f.sys->GetInt32TrackedDeviceProperty(2, vr::Prop_Axis1Type_Int32, &pe);
+	a["axis2_type"] = f.sys->GetInt32TrackedDeviceProperty(2, vr::Prop_Axis2Type_Int32, &pe);
+	c.Record("a button controller state", a);
 	c.core->Cleanup();
 }
 

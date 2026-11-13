@@ -1,0 +1,14 @@
+{
+  "#": "Written for OpenComposite's tests in the layout of SteamVR's legacy binding files: Touch's face buttons (x and a as A, y and b as the application menu)",
+  "controller_type": "oculus_touch",
+  "bindings": {
+    "/actions/legacy": {
+      "sources": [
+        { "path": "/user/hand/left/input/x", "mode": "button", "inputs": { "click": { "output": "/actions/legacy/in/left_a_press" }, "touch": { "output": "/actions/legacy/in/left_a_touch" } } },
+        { "path": "/user/hand/left/input/y", "mode": "button", "inputs": { "click": { "output": "/actions/legacy/in/left_applicationmenu_press" } } },
+        { "path": "/user/hand/right/input/a", "mode": "button", "inputs": { "click": { "output": "/actions/legacy/in/right_a_press" }, "touch": { "output": "/actions/legacy/in/right_a_touch" } } },
+        { "path": "/user/hand/right/input/b", "mode": "button", "inputs": { "click": { "output": "/actions/legacy/in/right_applicationmenu_press" } } }
+      ]
+    }
+  }
+}

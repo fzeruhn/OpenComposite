@@ -2,6 +2,8 @@
 
 // HACK: grab the pose from BaseInput
 #include "../OpenOVR/Misc/xrmoreutils.h"
+#include "../OpenOVR/Misc/Config.h"
+#include "../OpenOVR/Misc/Input/Bindings/LegacyBindings.h"
 #include "../OpenOVR/Reimpl/BaseInput.h"
 #include "generated/static_bases.gen.h"
 
@@ -41,6 +43,13 @@ int32_t XrController::GetInt32TrackedDeviceProperty(vr::ETrackedDeviceProperty p
 
 	TRY_PROFILE_PROP(int32_t);
 
+	// inputEvaluator=steamvr: the axis types SteamVR's legacy binding file for the controller gives it
+	if ((type == XCT_LEFT || type == XCT_RIGHT) && prop >= vr::Prop_Axis0Type_Int32 && prop <= vr::Prop_Axis4Type_Int32
+	    && oovr_global_configuration.InputEvaluator() == "steamvr") {
+		if (std::optional<BindingFile> legacy = LoadLegacyBindings(profile.GetOpenVRName().value_or("generic")))
+			return LegacyAxisType(*legacy, type == XCT_LEFT ? "left" : "right", prop - vr::Prop_Axis0Type_Int32);
+	}
+
 	// Continue to pretend to be a CV1
 	// Don't apply the inputs to the tracking object
 	if (type == XCT_LEFT || type == XCT_RIGHT) {
@@ -73,9 +82,15 @@ uint64_t XrController::GetUint64TrackedDeviceProperty(vr::ETrackedDeviceProperty
 
 	TRY_PROFILE_PROP(uint64_t);
 
-	// The old input system's buttons: those the controller's interaction profile has (DeviceIdentity)
-	if (prop == vr::Prop_SupportedButtons_Uint64)
+	// The old input system's buttons: those the controller's interaction profile has (DeviceIdentity); under
+	// inputEvaluator=steamvr those SteamVR's legacy binding file for the controller gives it
+	if (prop == vr::Prop_SupportedButtons_Uint64) {
+		if ((type == XCT_LEFT || type == XCT_RIGHT) && oovr_global_configuration.InputEvaluator() == "steamvr") {
+			if (std::optional<BindingFile> legacy = LoadLegacyBindings(profile.GetOpenVRName().value_or("generic")))
+				return LegacySupportedButtons(*legacy, type == XCT_LEFT ? "left" : "right");
+		}
 		return Identity().supportedButtons;
+	}
 
 	return XrTrackedDevice::GetUint64TrackedDeviceProperty(prop, pErrorL);
 }

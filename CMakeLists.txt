@@ -341,6 +341,7 @@ add_library(OCCore STATIC
 	OpenOVR/Misc/Input/Bindings/Evaluator.cpp
 	OpenOVR/Misc/Input/Bindings/BindingSearch.cpp
 	OpenOVR/Misc/Input/Bindings/Conversion.cpp
+	OpenOVR/Misc/Input/Bindings/LegacyBindings.cpp
 	OpenOVR/Misc/Input/OculusInteractionProfile.cpp
 	OpenOVR/Misc/Input/KhrSimpleInteractionProfile.cpp
 	OpenOVR/Misc/Input/ViveInteractionProfile.cpp

@@ -1,5 +1,7 @@
 {
- "#": "events from calls, on the stand-in with scripts/legacy_click.json (run.py --cases events --script scripts/legacy_click.json --expect expect/events.json). IVRChaperone_004::ResetZeroPose(Seated): VREvent_SeatedZeroPoseReset (804) is the next event polled. The game reads the legacy input, so the right controller (device 2) sends ButtonPress and ButtonUnpress for its trigger as the script clicks it.",
+ "#": "Events from calls, on the stand-in with scripts/legacy_click.json (run.py --cases events --script scripts/legacy_click.json --expect expect/events.json). IVRChaperone_004::ResetZeroPose(Seated): VREvent_SeatedZeroPoseReset (804) is the next event polled. The game reads the legacy input, so the right controller (device 2) sends ButtonPress and ButtonUnpress for its trigger as the script clicks it. GetControllerState, read every frame from frame 2, shows the trigger pressed for those ten frames, its axis 1 at 1. Today's old input (direct) shows Index's A as the A button, and the right controller's buttons and axis types as under inputEvaluator=direct.",
  "events/ResetSeatedZeroPose then PollNextEvent/-/-": { "polled": true, "type": 804 },
- "events/trigger button events/-/-": { "press_in_frames_10_to_16": true, "held_10_frames": true, "device": 2 }
+ "events/trigger button events/-/-": { "press_in_frames_10_to_16": true, "held_10_frames": true, "device": 2 },
+ "events/trigger controller state/-/-": { "pressed_from_10_to_16": true, "pressed_10_frames": true, "trigger_axis_full": true },
+ "events/a button controller state/-/-": { "a_bit": true, "grip_bit": false, "supported_buttons": 30064771327, "axis0_type": 2, "axis1_type": 3, "axis2_type": 3 }
 }

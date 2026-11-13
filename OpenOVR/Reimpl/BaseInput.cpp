@@ -7,6 +7,7 @@
 #include "Misc/AppManifest.h"
 #include "Misc/Input/Bindings/BindingSearch.h"
 #include "Misc/Input/Bindings/Conversion.h"
+#include "Misc/Input/Bindings/LegacyBindings.h"
 #include "Misc/ProgramEvents.h"
 #include "Misc/Config.h"
 #include <string>
@@ -420,6 +421,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		rawComponents.clear();
 		evaluators.clear();
 		evaluatedThisSync.clear();
+		legacyEvaluators.clear();
 		actions.Reset();
 		actionSets.Reset();
 		DpadBindingInfo::parents.clear();
@@ -803,6 +805,10 @@ void BaseInput::LoadEmptyManifestIfRequired()
 	// TODO deduplicate with the regular manifest loader
 	CreateLegacyActions();
 
+	// inputEvaluator=steamvr: the old input as SteamVR's legacy binding files map it, from the raw inputs
+	useEvaluator = oovr_global_configuration.InputEvaluator() == "steamvr";
+	CreateRawActions();
+
 	// Load in the suggested bindings for the legacy input actions
 	for (const std::unique_ptr<InteractionProfile>& profile : InteractionProfile::GetProfileList()) {
 		if (!profile->CanHaveBindings())
@@ -812,6 +818,7 @@ void BaseInput::LoadEmptyManifestIfRequired()
 		for (const auto& legacyController : legacyControllers) {
 			profile->AddLegacyBindings(legacyController, bindings);
 		}
+		SuggestRawInputs(*profile, bindings);
 
 		// Load the bindings into the runtime
 		XrPath interactionProfilePath = XR_NULL_PATH;
@@ -1479,7 +1486,7 @@ void BaseInput::CreateRawActions()
 	}
 }
 
-void BaseInput::SuggestRawBindings(const InteractionProfile& profile, const std::string& bindingsPath, std::vector<XrActionSuggestedBinding>& bindings)
+void BaseInput::SuggestRawInputs(const InteractionProfile& profile, std::vector<XrActionSuggestedBinding>& bindings)
 {
 	if (!useEvaluator || rawInputsSet == XR_NULL_HANDLE)
 		return;
@@ -1494,6 +1501,13 @@ void BaseInput::SuggestRawBindings(const InteractionProfile& profile, const std:
 		OC_XR_LOG(xrStringToPath(xr_instance, xrPath.c_str(), &path));
 		AddSuggestedBinding(bindings, action->second, path);
 	}
+}
+
+void BaseInput::SuggestRawBindings(const InteractionProfile& profile, const std::string& bindingsPath, std::vector<XrActionSuggestedBinding>& bindings)
+{
+	if (!useEvaluator || rawInputsSet == XR_NULL_HANDLE)
+		return;
+	SuggestRawInputs(profile, bindings);
 
 	// The binding file chosen as for today's input; turned into one for this controller if it's another's
 	BindingFile file = LoadBindingFile(PathFromUtf8(bindingsPath));
@@ -1540,20 +1554,7 @@ void BaseInput::UpdateEvaluators(const VRActiveActionSet_t* sets, uint32_t count
 			continue;
 		RawInputState& state = states[profile];
 		state.time = now;
-		const std::string prefix = allSubactionPathNames[i] + "/";
-		for (const auto& [xrPath, steamvrPath] : rawComponents[profile]) {
-			if (!xrPath.starts_with(prefix))
-				continue;
-			auto action = rawActions.find(WithoutHand(xrPath));
-			if (action == rawActions.end())
-				continue;
-			XrActionStateGetInfo getInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
-			getInfo.action = action->second;
-			getInfo.subactionPath = allSubactionPaths[i];
-			XrActionStateFloat value = { XR_TYPE_ACTION_STATE_FLOAT };
-			if (XR_SUCCEEDED(xrGetActionStateFloat(xr_session.get(), &getInfo, &value)) && value.isActive)
-				state.value[steamvrPath] = value.currentState;
-		}
+		ReadRawInputs(i, *profile, state);
 	}
 	for (auto& [profile, state] : states) {
 		BindingEvaluator& evaluator = *evaluators[profile];
@@ -1561,6 +1562,59 @@ void BaseInput::UpdateEvaluators(const VRActiveActionSet_t* sets, uint32_t count
 		evaluator.Update(state);
 		evaluatedThisSync.push_back(&evaluator);
 	}
+}
+
+void BaseInput::ReadRawInputs(size_t hand, const InteractionProfile& profile, RawInputState& state)
+{
+	const std::string prefix = allSubactionPathNames[hand] + "/";
+	auto components = rawComponents.find(&profile);
+	if (components == rawComponents.end())
+		components = rawComponents.emplace(&profile, profile.RawComponents()).first;
+	for (const auto& [xrPath, steamvrPath] : components->second) {
+		if (!xrPath.starts_with(prefix))
+			continue;
+		auto action = rawActions.find(WithoutHand(xrPath));
+		if (action == rawActions.end())
+			continue;
+		XrActionStateGetInfo getInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
+		getInfo.action = action->second;
+		getInfo.subactionPath = allSubactionPaths[hand];
+		XrActionStateFloat value = { XR_TYPE_ACTION_STATE_FLOAT };
+		if (XR_SUCCEEDED(xrGetActionStateFloat(xr_session.get(), &getInfo, &value)) && value.isActive)
+			state.value[steamvrPath] = value.currentState;
+	}
+}
+
+const BindingEvaluator* BaseInput::LegacyEvaluatorFor(const InteractionProfile* profile)
+{
+	if (!profile || !profile->CanHaveBindings() || rawInputsSet == XR_NULL_HANDLE)
+		return nullptr;
+	std::string type = profile->GetOpenVRName().value_or("generic");
+	LegacyEvaluator& legacy = legacyEvaluators[type];
+	if (!legacy.evaluator) {
+		std::optional<BindingFile> file = LoadLegacyBindings(type);
+		if (!file)
+			return nullptr;
+		legacy.evaluator = std::make_unique<BindingEvaluator>(*file);
+		legacy.evaluator->SetActiveActionSets({ { kLegacyActionSet, 0 } });
+		for (const std::string& warning : legacy.evaluator->Warnings())
+			OOVR_LOGF("Legacy binding evaluator (%s): %s", type.c_str(), warning.c_str());
+	}
+
+	// Once per sync: the raw inputs of every hand on this profile
+	if (legacy.evaluatedAt != syncSerial || !legacy.evaluated) {
+		RawInputState state;
+		state.time = EvaluatorClock();
+		for (size_t i = 0; i < allSubactionPaths.size(); i++) {
+			std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetBackendInstance()->GetDeviceByHand((ITrackedDevice::TrackedDeviceType)i);
+			if (dev && dev->GetInteractionProfile() == profile)
+				ReadRawInputs(i, *profile, state);
+		}
+		legacy.evaluator->Update(state);
+		legacy.evaluatedAt = syncSerial;
+		legacy.evaluated = true;
+	}
+	return legacy.evaluator.get();
 }
 
 // Whether an output whose source is sourcePath is on the device restrictToDevice names (any, if it names none)
@@ -1760,11 +1814,11 @@ void BaseInput::InternalUpdate()
 	if (!usingLegacyInput)
 		return;
 
-	XrActiveActionSet aas = { legacyInputsSet };
+	XrActiveActionSet aas[2] = { { legacyInputsSet }, { rawInputsSet } };
 
 	XrActionsSyncInfo syncInfo = { XR_TYPE_ACTIONS_SYNC_INFO };
-	syncInfo.activeActionSets = &aas;
-	syncInfo.countActiveActionSets = 1;
+	syncInfo.activeActionSets = aas;
+	syncInfo.countActiveActionSets = rawInputsSet != XR_NULL_HANDLE ? 2 : 1;
 	OC_XR_LOG(xrSyncActions(xr_session.get(), &syncInfo));
 	syncSerial++;
 }
@@ -3269,6 +3323,14 @@ bool BaseInput::GetLegacyControllerState(vr::TrackedDeviceIndex_t controllerDevi
 		return false;
 	LegacyControllerActions& ctrl = legacyControllers[hand];
 
+	// inputEvaluator=steamvr: SteamVR's legacy binding file for the controller
+	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE) {
+		std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(controllerDeviceIndex);
+		if (const BindingEvaluator* legacy = LegacyEvaluatorFor(dev ? dev->GetInteractionProfile() : nullptr))
+			ApplyLegacyOutputs(legacy->Outputs(), hand == 0 ? "left" : "right", *state);
+		return true;
+	}
+
 	auto bindButton = [state](XrAction action, XrAction touch, int shift) {
 		XrActionStateGetInfo getInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
 		XrActionStateBoolean xs = { XR_TYPE_ACTION_STATE_BOOLEAN };
@@ -3364,6 +3426,18 @@ void BaseInput::TriggerLegacyHapticPulse(vr::TrackedDeviceIndex_t controllerDevi
 	vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
 	vibration.duration = durationNanos;
 	vibration.amplitude = 1;
+
+	// inputEvaluator=steamvr: the legacy file's haptic for this hand, and its amplitude (none: nothing vibrates)
+	if (useEvaluator && rawInputsSet != XR_NULL_HANDLE) {
+		std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(controllerDeviceIndex);
+		const BindingEvaluator* legacy = LegacyEvaluatorFor(dev ? dev->GetInteractionProfile() : nullptr);
+		std::optional<BindingEvaluator::HapticTarget> target;
+		if (legacy)
+			target = legacy->HapticFor(std::string("/actions/legacy/out/") + (hand == 0 ? "left" : "right") + "_haptic");
+		if (!target)
+			return;
+		vibration.amplitude = std::clamp(target->amplitudeScale, 0.0f, 1.0f);
+	}
 
 	OC_XR_LOG(xrApplyHapticFeedback(xr_session.get(), &info, (XrHapticBaseHeader*)&vibration));
 }

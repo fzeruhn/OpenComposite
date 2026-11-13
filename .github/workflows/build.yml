@@ -101,6 +101,9 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events-listen,events-commit --jobs 2 --expect tests/conformance/expect/events_two_processes.json --out conformance/events-two-processes
           if ($LASTEXITCODE) { $failed++ }
+          # The old input as SteamVR's legacy binding files map it, under inputEvaluator=steamvr
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events --script tests/conformance/scripts/legacy_click.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/events_steamvr.json --out conformance/events-steamvr
+          if ($LASTEXITCODE) { $failed++ }
           # The binding evaluator: inputEvaluator=steamvr evaluates a toggle_button; direct stays as it was; both read vector3
           python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-frames --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/input_evaluator.json --out conformance/input-steamvr
           if ($LASTEXITCODE) { $failed++ }

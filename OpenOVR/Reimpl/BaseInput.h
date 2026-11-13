@@ -852,7 +852,18 @@ private:
 	std::map<const InteractionProfile*, std::unique_ptr<BindingEvaluator>> evaluators;
 	std::vector<const BindingEvaluator*> evaluatedThisSync;
 	void CreateRawActions();
+	void SuggestRawInputs(const InteractionProfile& profile, std::vector<XrActionSuggestedBinding>& bindings);
 	void SuggestRawBindings(const InteractionProfile& profile, const std::string& bindingsPath, std::vector<XrActionSuggestedBinding>& bindings);
+	/** One hand's raw inputs (index into allSubactionPaths) on a profile, by SteamVR path, into state */
+	void ReadRawInputs(size_t hand, const InteractionProfile& profile, RawInputState& state);
+	/** The old input's evaluator for a controller's profile, evaluated once per sync; null if it has none */
+	const BindingEvaluator* LegacyEvaluatorFor(const InteractionProfile* profile);
+	struct LegacyEvaluator {
+		std::unique_ptr<BindingEvaluator> evaluator;
+		uint64_t evaluatedAt = 0;
+		bool evaluated = false;
+	};
+	std::map<std::string, LegacyEvaluator> legacyEvaluators; // by controller type
 	void UpdateEvaluators(const VRActiveActionSet_t* sets, uint32_t count);
 	/** This sync's digital or analog output for an action from the evaluators, matching ulRestrictToDevice */
 	const DigitalOut* EvaluatedDigital(const Action& action, VRInputValueHandle_t restrictToDevice) const;
