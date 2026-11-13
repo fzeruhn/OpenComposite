@@ -26,6 +26,9 @@ HolographicInteractionProfile::HolographicInteractionProfile()
 		validInputPaths.insert("/user/hand/right" + path);
 	}
 
+	// SteamVR's names for the raw inputs the binding evaluator reads (RawComponents)
+	this->rawSourceNames = { { "squeeze", "grip" }, { "thumbstick", "joystick" }, { "menu", "application_menu" } };
+
 	pathTranslationMap = {
 		{ "application_menu", "menu" },
 		{ "grip", "squeeze" },

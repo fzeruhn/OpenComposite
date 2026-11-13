@@ -1,0 +1,5 @@
+{
+ "#": "Input-frames on the stand-in with scripts/input_toggle.json, --manifest tests/unit/data/manifest_toggle.json and --ini tests/conformance/ini/steamvr_evaluator.ini (inputEvaluator=steamvr). The toggle_button on the right trigger turns on at the first click (frame 10, a few frames later if loading the manifest restarted the session), off 20 frames later and on again 20 frames after that; bChanged only on those frames; active with an origin on every frame. The vector3 action reads (0.5, -0.25, 0) from the left thumbstick.",
+ "input-frames/toggle/-/-": { "on_off_on": true, "first_on_in_10_to_16": true, "twenty_frames_apart": true, "changed_only_on_changes": true, "active_every_frame": true, "origin_every_frame": true },
+ "input-frames/vector3/-/-": { "err": 0, "active": true, "x": 0.5, "y": -0.25, "z": 0.0 }
+}

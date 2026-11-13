@@ -38,6 +38,9 @@ ReverbG2InteractionProfile::ReverbG2InteractionProfile()
 		validInputPaths.insert("/user/hand/right" + path);
 	}
 
+	// SteamVR's names for the raw inputs the binding evaluator reads (RawComponents)
+	this->rawSourceNames = { { "squeeze", "grip" }, { "thumbstick", "joystick" }, { "menu", "application_menu" } };
+
 	pathTranslationMap = {
 		{ "grip", "squeeze" },
 		{ "joystick", "thumbstick" },

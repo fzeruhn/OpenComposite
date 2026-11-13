@@ -116,6 +116,17 @@ static string parse_string(string orig, string name, int line)
 	return orig;
 }
 
+// inputEvaluator: one of the two evaluators
+static string parse_evaluator(string orig, string name, int line)
+{
+	string val = str_tolower(orig);
+	if (val != "direct" && val != "steamvr") {
+		BAD_VALUE("Value " + orig + " for " + name + " on line " + to_string(line) + " is neither direct nor steamvr");
+	}
+	OOVR_LOGF("Setting config param %s to %s", name.c_str(), val.c_str());
+	return val;
+}
+
 int Config::ini_handler(void* user, const char* pSection,
     const char* pName, const char* pValue,
     int lineno)
@@ -152,6 +163,7 @@ int Config::ini_handler(void* user, const char* pSection,
 		CFGOPT(float, hiddenMeshVerticalScale);
 		CFGOPT(bool, logAllOpenVRCalls);
 		CFGOPT(string, bindingEditor);
+		CFGOPT(evaluator, inputEvaluator);
 	}
 
 #undef CFGOPT

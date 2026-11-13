@@ -1078,6 +1078,84 @@ void EventsCase(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// The action manifest's actions read frame by frame (expect/input_evaluator.json), on the stand-in with
+// scripts/input_toggle.json and --manifest manifest_toggle.json: a toggle_button on the right trigger, which the script
+// clicks at frames 10, 30 and 50, and a vector3 action on the left thumbstick, pushed from frame 40. Records where the
+// toggle's state changed (the stand-in counts frames per session, and loading the manifest may restart the session, so
+// a few frames late), and the vector3 action's data at the end.
+void InputFramesCase(CaseContext& c)
+{
+	using namespace vr::IVRInput_010;
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* in = (IVRInput*)c.core->GetGenericInterface("IVRInput_010", &le);
+	if (!in) {
+		c.Record("no IVRInput_010", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	in->SetActionManifestPath(c.manifest.c_str());
+	vr::VRActionSetHandle_t set = vr::k_ulInvalidActionSetHandle;
+	vr::VRActionHandle_t toggle = 0, move3 = 0;
+	in->GetActionSetHandle("/actions/main", &set);
+	in->GetActionHandle("/actions/main/in/toggle", &toggle);
+	in->GetActionHandle("/actions/main/in/move3", &move3);
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	std::vector<int> changes; // the frames the state changed on
+	std::vector<int> changedFlags; // the frames bChanged was true on
+	int activeFrames = 0, originFrames = 0;
+	bool last = false;
+	InputAnalogActionData_t analog{};
+	vr::EVRInputError analogErr = vr::VRInputError_None;
+	for (int frame = 1; frame <= 70; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		VRActiveActionSet_t active{};
+		active.ulActionSet = set;
+		in->UpdateActionState(&active, sizeof(active), 1);
+		InputDigitalActionData_t d{};
+		in->GetDigitalActionData(toggle, &d, sizeof(d), vr::k_ulInvalidInputValueHandle);
+		activeFrames += d.bActive ? 1 : 0;
+		originFrames += d.activeOrigin != vr::k_ulInvalidInputValueHandle ? 1 : 0;
+		if ((bool)d.bState != last)
+			changes.push_back(frame);
+		if (d.bChanged)
+			changedFlags.push_back(frame);
+		last = d.bState;
+		if (frame == 70)
+			analogErr = in->GetAnalogActionData(move3, &analog, sizeof(analog), vr::k_ulInvalidInputValueHandle);
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+	}
+	Json::Value out;
+	Json::Value list(Json::arrayValue);
+	for (int frame : changes)
+		list.append(frame);
+	out["changes"] = list;
+	Json::Value toggle3;
+	toggle3["on_off_on"] = changes.size() == 3;
+	toggle3["first_on_in_10_to_16"] = !changes.empty() && changes[0] >= 10 && changes[0] <= 16;
+	toggle3["twenty_frames_apart"] = changes.size() == 3 && changes[1] - changes[0] == 20 && changes[2] - changes[1] == 20;
+	toggle3["changed_only_on_changes"] = changedFlags == changes;
+	toggle3["active_every_frame"] = activeFrames == 70;
+	toggle3["origin_every_frame"] = originFrames == 70;
+	out["checks"] = toggle3;
+	// The checks at the top for --expect; all of it as "out", which --expected compares (baseline/input-direct.json)
+	Json::Value record = toggle3;
+	record["out"] = out;
+	c.Record("toggle", record);
+	Json::Value v3;
+	v3["err"] = (int)analogErr;
+	v3["active"] = (bool)analog.bActive;
+	v3["x"] = analog.x;
+	v3["y"] = analog.y;
+	v3["z"] = analog.z;
+	c.Record("vector3", v3);
+	c.core->Cleanup();
+}
+
 // Events between programs (expect/events.json): run at the same time (run.py --jobs 2), "events-commit"
 // commits the room setup 1.5 s in, and "events-listen", polling for 5 s, gets its two events; the committing program
 // gets each once, not again back from the store. Scene apps, each with its own session on the stand-in: OpenComposite
@@ -1221,6 +1299,7 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "chaperone", ChaperoneCase },
 		{ "chaperone-read", ChaperoneReadCase },
 		{ "events", EventsCase },
+		{ "input-frames", InputFramesCase },
 		{ "events-listen", EventsListenCase },
 		{ "events-commit", EventsCommitCase },
 		{ "submit-edges", SubmitEdges },

@@ -1,0 +1,34 @@
+{
+ "#": "input-frames under inputEvaluator=direct, recorded before the binding evaluator (stand-in, scripts/input_toggle.json, manifest_toggle.json): today's path follows the click. run.py --expected compares each record's out.",
+ "records": [
+  {
+   "active_every_frame": true,
+   "case": "input-frames",
+   "changed_only_on_changes": true,
+   "first_on_in_10_to_16": true,
+   "method": "toggle",
+   "on_off_on": false,
+   "origin_every_frame": true,
+   "out": {
+    "changes": [
+     10,
+     15,
+     30,
+     35,
+     50,
+     55
+    ],
+    "checks": {
+     "active_every_frame": true,
+     "changed_only_on_changes": true,
+     "first_on_in_10_to_16": true,
+     "on_off_on": false,
+     "origin_every_frame": true,
+     "twenty_frames_apart": false
+    }
+   },
+   "twenty_frames_apart": false,
+   "status": "ok"
+  }
+ ]
+}

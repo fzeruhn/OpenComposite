@@ -4,6 +4,9 @@
 
 #include "stdafx.h"
 
+#include <algorithm>
+#include <cstring>
+#include <set>
 #include <utility>
 
 #include "HolographicInteractionProfile.h"
@@ -36,6 +39,31 @@ std::string InteractionProfile::TranslateAction(const std::string& inputPath) co
 	}
 	// either this path is already valid or it's invalid and not translatable
 	return inputPath;
+}
+
+std::vector<std::pair<std::string, std::string>> InteractionProfile::RawComponents() const
+{
+	// Every /user/hand/<hand>/input/<source>/<component> path: a parent (/input/thumbstick) or a pose isn't a raw input
+	static const std::set<std::string> components = { "click", "touch", "value", "force", "x", "y" };
+	std::vector<std::pair<std::string, std::string>> raw;
+	for (const std::string& path : validInputPaths) {
+		size_t input = path.find("/input/");
+		if (input == std::string::npos || !path.starts_with("/user/hand/"))
+			continue;
+		size_t sourceStart = input + strlen("/input/");
+		size_t slash = path.find('/', sourceStart);
+		if (slash == std::string::npos || path.find('/', slash + 1) != std::string::npos)
+			continue;
+		std::string source = path.substr(sourceStart, slash - sourceStart);
+		std::string component = path.substr(slash + 1);
+		if (!components.count(component))
+			continue;
+		auto renamed = rawSourceNames.find(source);
+		const std::string& steamvrSource = renamed == rawSourceNames.end() ? source : renamed->second;
+		raw.emplace_back(path, path.substr(0, sourceStart) + steamvrSource + "/" + component);
+	}
+	std::sort(raw.begin(), raw.end());
+	return raw;
 }
 
 const std::unordered_set<std::string>& InteractionProfile::GetValidInputPaths() const

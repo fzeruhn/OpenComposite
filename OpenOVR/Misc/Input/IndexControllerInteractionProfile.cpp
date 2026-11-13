@@ -42,6 +42,9 @@ IndexControllerInteractionProfile::IndexControllerInteractionProfile()
 
 	// These are substring replacements which translate from OpenVR paths to OpenXR paths.
 	// I found the necessary examples of OpenVR paths in ./steamapps/common/NeosVR/Neos_Data/StreamingAssets/SteamVR/bindings_knuckles.json
+	// SteamVR's names for the raw inputs the binding evaluator reads (RawComponents)
+	this->rawSourceNames = { { "squeeze", "grip" } };
+
 	this->pathTranslationMap = {
 		{ "thumbstick/position", "thumbstick" },
 		{ "trackpad/position", "trackpad" },

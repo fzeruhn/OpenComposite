@@ -55,6 +55,9 @@ OculusTouchInteractionProfile::OculusTouchInteractionProfile()
 		this->validInputPaths.insert("/user/hand/right" + std::string(str));
 	}
 
+	// SteamVR's names for the raw inputs the binding evaluator reads (RawComponents)
+	this->rawSourceNames = { { "squeeze", "grip" }, { "thumbstick", "joystick" }, { "menu", "application_menu" } };
+
 	this->pathTranslationMap = {
 		{ "grip", "squeeze" },
 		{ "joystick", "thumbstick" },
