@@ -21,7 +21,9 @@ param(
     [Parameter(Mandatory)] [ValidateSet('x64', 'x86')] [string]$Arch,
     [Parameter(Mandatory)] [string]$Vulkan,
     [string]$Out,
-    [string]$Version
+    [string]$Version,
+    # Also build the tests (OC_BUILD_TESTS) and run the unit tests
+    [switch]$Tests
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,11 +87,16 @@ else {
 if (Test-Path -LiteralPath $Out) {
     Remove-Item -LiteralPath $Out -Recurse -Force
 }
+$testsFlag = $Tests ? 'ON' : 'OFF'
 Invoke-Checked {
     cmake -S $root -B $Out -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
-        -DERROR_ON_WARNING=ON "-DOC_VERSION=$Version"
+        -DERROR_ON_WARNING=ON "-DOC_VERSION=$Version" "-DOC_BUILD_TESTS=$testsFlag"
 } 'Configuring OpenComposite'
 Invoke-Checked { cmake --build $Out --target OCOVR } 'Building OpenComposite'
+if ($Tests) {
+    Invoke-Checked { cmake --build $Out } 'Building the tests'
+    Invoke-Checked { ctest --test-dir $Out -L unit --output-on-failure } 'Running the unit tests'
+}
 
 # 4. The DLL is of -Arch and needs no C runtime DLL.
 $dll = Join-Path $Out ($Arch -eq 'x64' ? 'bin\vrclient_x64.dll' : 'bin\vrclient.dll')

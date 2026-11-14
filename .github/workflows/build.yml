@@ -32,6 +32,7 @@ jobs:
         include:
           - arch: x64
             dll: vrclient_x64.dll
+            tests: true
           - arch: x86
             dll: vrclient.dll
     steps:
@@ -56,6 +57,21 @@ jobs:
           scripts/ci/build-windows.ps1 -Arch ${{ matrix.arch }}
           -Vulkan (Join-Path $env:RUNNER_TEMP 'vcpkg\installed\${{ matrix.arch }}-windows')
           -Out build -Version "$env:GITHUB_SHA ($env:GITHUB_REF_NAME)"
+          ${{ matrix.tests && '-Tests' || '' }}
+
+      # For now these only report; the summaries are kept as artifacts
+      - name: Conformance
+        if: matrix.tests
+        shell: pwsh
+        run: |
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime none --ci --allow-failures --out conformance/none
+          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --allow-failures --out conformance/stand-in
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.tests
+        with:
+          name: conformance-windows
+          path: conformance/*/summary.txt
 
       - uses: actions/upload-artifact@v7
         with:
@@ -74,6 +90,7 @@ jobs:
         include:
           - arch: x64
             lib: linux64/vrclient.so
+            tests: true
           - arch: x86
             lib: vrclient.so
     steps:
@@ -91,7 +108,17 @@ jobs:
           submodules: recursive
 
       - name: Build
-        run: sh scripts/ci/build-linux.sh ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"
+        run: sh scripts/ci/build-linux.sh ${{ matrix.tests && '--tests' || '' }} ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"
+
+      - name: Conformance
+        if: matrix.tests
+        run: python3 tests/conformance/run.py --runtime build/bin/linux64/vrclient.so --conformance build/tests/oc_conformance --xr-runtime none --allow-failures --out conformance/none
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.tests
+        with:
+          name: conformance-linux
+          path: conformance/*/summary.txt
 
       - uses: actions/upload-artifact@v7
         with:

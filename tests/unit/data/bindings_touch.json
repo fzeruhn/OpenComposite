@@ -1,0 +1,13 @@
+{
+  "controller_type": "oculus_touch",
+  "bindings": {
+    "/actions/main": {
+      "sources": [
+        { "path": "/user/hand/right/input/trigger", "mode": "trigger", "inputs": { "pull": { "output": "/actions/main/in/trigger" } } },
+        { "path": "/user/hand/right/input/grip", "mode": "button", "inputs": { "click": { "output": "/actions/main/in/grab" } } }
+      ],
+      "poses": [{ "output": "/actions/main/in/pose", "path": "/user/hand/right/pose/raw" }],
+      "haptics": [{ "output": "/actions/main/out/haptic", "path": "/user/hand/right/output/haptic" }]
+    }
+  }
+}

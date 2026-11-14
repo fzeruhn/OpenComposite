@@ -21,6 +21,7 @@ option(USE_SYSTEM_OPENXR "Try using system installation of OpenXR if available" 
 option(USE_SYSTEM_GLM "Try using system installation of glm if available" OFF)
 option(OC_BACKTRACE "Print the backtrace on crash" OFF)
 option(ERROR_ON_WARNING "Set all warnings to be errors" OFF)
+option(OC_BUILD_TESTS "Build OpenComposite's tests" OFF)
 
 # Directory for generated files, those being split headers and stubs
 set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
@@ -664,3 +665,9 @@ install(FILES ${CMAKE_BINARY_DIR}/openvrpaths.vrpath DESTINATION ${PROJECT_NAME}
 install(FILES ${CMAKE_BINARY_DIR}/bin/version.txt
 	DESTINATION "${PROJECT_NAME}/bin"
 )
+
+# === Tests ===
+if (OC_BUILD_TESTS)
+	enable_testing()
+	add_subdirectory(tests)
+endif ()

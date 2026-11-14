@@ -1,0 +1,5 @@
+{
+  "extensions": ["XR_KHR_D3D11_enable", "XR_EXT_hand_tracking"],
+  "interaction_profile": "/interaction_profiles/valve/index_controller",
+  "inputs": [{ "frame": 5, "path": "/user/hand/right/input/trigger/value", "value": 1.0 }]
+}

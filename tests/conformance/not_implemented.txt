@@ -1,0 +1,4 @@
+# Versions answered "not found" on purpose: <version> <reason>
+IVRIPCResourceManagerClient_001 SteamVR-internal
+IVRIPCResourceManagerClient_002 SteamVR-internal
+IVRIPCResourceManagerClient_003 SteamVR-internal

@@ -4,6 +4,7 @@
 #include "Misc/Config.h"
 #include "logging.h"
 #include <atomic>
+#include <cstdlib>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -166,10 +167,14 @@ static std::ofstream init_stream()
 
 	// Try and write to standard location
 	// fall back to exe dir if can't create dir
+	// OC_LOG_DIR (used by the tests) replaces the standard location
+	string overrideFolder = GetEnv("OC_LOG_DIR");
 #ifdef _WIN32
 	string outputFolder = GetEnv("LOCALAPPDATA");
 	if (!outputFolder.empty())
 		outputFolder = outputFolder + "\\OpenComposite\\logs";
+	if (!overrideFolder.empty())
+		outputFolder = overrideFolder;
 	if (!outputFolder.empty() && makePath(outputFolder))
 		outputFilePath = outputFolder + "\\" + outputFilePath;
 #else
@@ -181,6 +186,8 @@ static std::ofstream init_stream()
 	}
 	if (!outputFolder.empty())
 		outputFolder = outputFolder + "/OpenComposite/logs";
+	if (!overrideFolder.empty())
+		outputFolder = overrideFolder;
 	if (!outputFolder.empty() && makePath(outputFolder))
 		outputFilePath = outputFolder + "/" + outputFilePath;
 #endif
@@ -263,8 +270,27 @@ void oovr_flush_safe()
 
 OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func, const char* msg, const char* title, va_list args);
 
+static std::atomic<void (*)(const char*)> log_test_sink{ nullptr };
+
+void oovr_log_set_test_sink(void (*sink)(const char* line))
+{
+	log_test_sink.store(sink);
+}
+
+// OC_NO_MESSAGE_BOX=1 (used by the tests): no message box, and a stop ends the process with exit code 70
+static bool no_message_box()
+{
+	static const bool value = GetEnv("OC_NO_MESSAGE_BOX") == "1";
+	return value;
+}
+
 void oovr_log_raw(const char* file, long line, const char* func, const char* msg)
 {
+	if (auto sink = log_test_sink.load()) {
+		std::string text = std::string(func ? func : "") + ":" + std::to_string(line) + "\t- " + (msg ? msg : "NULL");
+		sink(text.c_str());
+	}
+
 #ifdef ANDROID
 	__android_log_print(ANDROID_LOG_INFO, "OpenComposite", "%s:%d \t %s", func, line, msg);
 #else
@@ -323,6 +349,10 @@ OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func
 	stream() << std::flush;
 #endif
 
+	if (no_message_box()) {
+		std::_Exit(70);
+	}
+
 	OOVR_MESSAGE(buff, title);
 	DebugBreak();
 	oovr_dump_backtrace();
@@ -360,6 +390,9 @@ void oovr_soft_abort_raw(const char* file, long line, const char* func, int* cou
 void oovr_message_raw(const char* message, const char* title)
 {
 	// No need to log this, it will have already been done by the caller
+	if (no_message_box()) {
+		return;
+	}
 
 #ifdef WIN32
 	// Display a message box on Windows

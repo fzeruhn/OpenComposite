@@ -1,0 +1,7 @@
+{
+    "file_format_version": "1.0.0",
+    "runtime": {
+        "name": "OpenComposite test runtime",
+        "library_path": "@OC_TEST_RUNTIME_PATH@"
+    }
+}
