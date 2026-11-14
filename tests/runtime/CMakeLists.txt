@@ -8,6 +8,7 @@ add_library(oc_test_runtime SHARED
 	swapchain_d3d11.cpp
 	script.cpp
 	script.h
+	oc_test_runtime.def
 )
 target_include_directories(oc_test_runtime PRIVATE
 	${CMAKE_SOURCE_DIR}/libs/openxr-sdk/include

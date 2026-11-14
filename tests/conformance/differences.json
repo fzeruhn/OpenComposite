@@ -194,5 +194,8 @@
  {"interface": "IVRSystem_\\d+", "method": "GetAppContainerFilePaths", "field": "out", "reason": "the system interface: device and system properties are OpenComposite's own"},
  {"interface": "IVRSystem_\\d+", "method": "SetSDKVersion", "field": "ret", "reason": "the system interface: device and system properties are OpenComposite's own"},
  {"interface": "init-matrix", "method": "Init\\((6|7)\\)", "field": "init_error", "reason": "SteamVR answers AlreadyRunning (143) for SteamWatchdog and Bootstrapper because it is; OpenComposite has nothing running and answers InvalidApplicationType (130)"},
- {"interface": "lookup-before-init", "method": "before Init: .*", "field": "lookup_error", "reason": "before Init OpenComposite answers NotInitialized (109); SteamVR hands interfaces out"}
+ {"interface": "lookup-before-init", "method": "before Init: .*", "field": "lookup_error", "reason": "before Init OpenComposite answers NotInitialized (109); SteamVR hands interfaces out"},
+ {"interface": "IVRCompositor_\\d+", "method": "GetMirrorTextureGL|GetSubmitTexture", "field": "out", "arch": "x86", "reason": "pointer-sized outputs (a shared texture handle, a texture pointer), compared as raw bytes: 4 bytes in a 32-bit run, 8 in SteamVR's 64-bit recording. The 32-bit regression baseline pins their values"},
+ {"interface": "IVROverlayView_\\d+", "method": "AcquireOverlayView", "field": "out", "arch": "x86", "reason": "the native device pointer, 4 bytes in a 32-bit run (see above)"},
+ {"interface": "IVRRenderModels_\\d+", "method": "FreeRenderModel|FreeTexture", "field": "out", "arch": "x86", "reason": "RenderModel_t and RenderModel_TextureMap_t hold pointers, so they are smaller in a 32-bit run (see above)"}
 ]

@@ -35,6 +35,9 @@ jobs:
             tests: true
           - arch: x86
             dll: vrclient.dll
+            tests: true
+            # The answers that differ from 64-bit (pointer-sized ones), over stand-in.json
+            baseline: --baseline tests/conformance/baseline/stand-in-x86.json
     steps:
       - uses: actions/checkout@v7
         with:
@@ -62,7 +65,7 @@ jobs:
       # Every OpenVR interface version Valve has shipped is offered or set aside with a reason (offline: it compares
       # interfaces.txt with the source)
       - name: Interface inventory
-        if: matrix.tests
+        if: matrix.tests && matrix.arch == 'x64'
         run: python scripts/openvr_inventory.py --check
 
       # Nothing may end, crash or hang; every run is checked, and the summaries kept
@@ -71,64 +74,64 @@ jobs:
         shell: pwsh
         run: |
           $failed = 0
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime none --ci --out conformance/none
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime none --ci --out conformance/none
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --out conformance/stand-in --expected tests/conformance/expected/steamvr-1792185270.json --differences tests/conformance/differences.json
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --out conformance/stand-in --expected tests/conformance/expected/steamvr-1792185270.json --differences tests/conformance/differences.json
           if ($LASTEXITCODE) { $failed++ }
           # The regression run against a recorded baseline: nothing that was ok when it was recorded breaks, and no answer changes
           python tests/conformance/regress.py --results conformance/none/results.json --baseline tests/conformance/baseline/none.json
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/regress.py --results conformance/stand-in/results.json --baseline tests/conformance/baseline/stand-in.json
+          python tests/conformance/regress.py --results conformance/stand-in/results.json --baseline tests/conformance/baseline/stand-in.json ${{ matrix.baseline }}
           if ($LASTEXITCODE) { $failed++ }
           # What OpenComposite does when OpenXR calls fail (expect/xr_failures.json)
-          python tests/conformance/xr_failures.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --ci --out conformance/xr-failures
+          python tests/conformance/xr_failures.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --ci --out conformance/xr-failures
           if ($LASTEXITCODE) { $failed++ }
           # Exact answers for chosen cases (expect/)
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases submit-edges --expect tests/conformance/expect/submit.json --out conformance/submit-edges
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases submit-edges --expect tests/conformance/expect/submit.json --out conformance/submit-edges
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-calls --expect tests/conformance/expect/old_calls.json --out conformance/old-calls
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-calls --expect tests/conformance/expect/old_calls.json --out conformance/old-calls
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-submit --expect tests/conformance/expect/old_submit.json --out conformance/old-submit
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-submit --expect tests/conformance/expect/old_submit.json --out conformance/old-submit
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-overlay --expect tests/conformance/expect/old_overlay.json --out conformance/old-overlay
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-overlay --expect tests/conformance/expect/old_overlay.json --out conformance/old-overlay
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-misc --expect tests/conformance/expect/old_misc.json --out conformance/old-misc
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-misc --expect tests/conformance/expect/old_misc.json --out conformance/old-misc
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases new-interfaces --expect tests/conformance/expect/new_interfaces.json --out conformance/new-interfaces
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases new-interfaces --expect tests/conformance/expect/new_interfaces.json --out conformance/new-interfaces
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases device-identity --expect tests/conformance/expect/device_identity.json --out conformance/device-identity
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases device-identity --expect tests/conformance/expect/device_identity.json --out conformance/device-identity
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases applications --expect tests/conformance/expect/applications.json --out conformance/applications
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases applications --expect tests/conformance/expect/applications.json --out conformance/applications
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases chaperone,chaperone-read --jobs 1 --script tests/conformance/scripts/stage_2x3.json --expect tests/conformance/expect/chaperone.json --out conformance/chaperone
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases chaperone,chaperone-read --jobs 1 --script tests/conformance/scripts/stage_2x3.json --expect tests/conformance/expect/chaperone.json --out conformance/chaperone
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events --script tests/conformance/scripts/legacy_click.json --expect tests/conformance/expect/events.json --out conformance/events
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events --script tests/conformance/scripts/legacy_click.json --expect tests/conformance/expect/events.json --out conformance/events
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events-listen,events-commit --jobs 2 --expect tests/conformance/expect/events_two_processes.json --out conformance/events-two-processes
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events-listen,events-commit --jobs 2 --expect tests/conformance/expect/events_two_processes.json --out conformance/events-two-processes
           if ($LASTEXITCODE) { $failed++ }
           # The old input as SteamVR's legacy binding files map it, under inputEvaluator=steamvr
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events --script tests/conformance/scripts/legacy_click.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/events_steamvr.json --out conformance/events-steamvr
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events --script tests/conformance/scripts/legacy_click.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/events_steamvr.json --out conformance/events-steamvr
           if ($LASTEXITCODE) { $failed++ }
           # The binding evaluator: inputEvaluator=steamvr evaluates a toggle_button; direct stays as it was; both read vector3
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-frames --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/input_evaluator.json --out conformance/input-steamvr
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-frames --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/input_evaluator.json --out conformance/input-steamvr
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-frames --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --expected tests/conformance/baseline/input-direct.json --expect tests/conformance/expect/input_direct.json --out conformance/input-direct
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-frames --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --expected tests/conformance/baseline/input-direct.json --expect tests/conformance/expect/input_direct.json --out conformance/input-direct
           if ($LASTEXITCODE) { $failed++ }
           # Input from two threads at once, under both evaluators
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-threads --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/input_threads.json --out conformance/input-threads-steamvr
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-threads --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/input_threads.json --out conformance/input-threads-steamvr
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-threads --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --expect tests/conformance/expect/input_threads.json --out conformance/input-threads-direct
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-threads --script tests/conformance/scripts/input_toggle.json --manifest tests/unit/data/manifest_toggle.json --expect tests/conformance/expect/input_threads.json --out conformance/input-threads-direct
           if ($LASTEXITCODE) { $failed++ }
           # inputEvaluator=steamvr suggests bindings for the same profiles as direct
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --out conformance/profiles-direct
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --ini tests/conformance/ini/steamvr_evaluator.ini --out conformance/profiles-steamvr
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --out conformance/profiles-direct
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --ini tests/conformance/ini/steamvr_evaluator.ini --out conformance/profiles-steamvr
           python tests/conformance/check_suggested_profiles.py conformance/profiles-direct/raw/case-input-manifest.dump.json conformance/profiles-steamvr/raw/case-input-manifest.dump.json
           if ($LASTEXITCODE) { $failed++ }
           # Converting bindings to other controllers only adds: everything bound without it is bound with it
           $env:OC_NO_BINDING_CONVERSION = '1'
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-unconverted
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-unconverted
           Remove-Item Env:OC_NO_BINDING_CONVERSION
-          python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-converted
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-converted
           python tests/conformance/check_bindings_superset.py conformance/bindings-unconverted/raw/case-input-manifest.dump.json conformance/bindings-converted/raw/case-input-manifest.dump.json
           if ($LASTEXITCODE) { $failed++ }
           exit $failed
@@ -136,10 +139,11 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always() && matrix.tests
         with:
-          name: conformance-windows
+          name: conformance-windows-${{ matrix.arch }}
           path: |
             conformance/*/summary.txt
             conformance/*/results.json
+            conformance/**/logs/
 
       - uses: actions/upload-artifact@v7
         with:
@@ -266,7 +270,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
-          pattern: '*-x*'
+          pattern: '{windows,linux}-x*'
 
       - uses: actions/download-artifact@v8
         with:
