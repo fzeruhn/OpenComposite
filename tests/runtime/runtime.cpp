@@ -841,7 +841,7 @@ XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, P
 
 } // namespace
 
-extern "C" __declspec(dllexport) XrResult XRAPI_CALL xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo* loaderInfo, XrNegotiateRuntimeRequest* request)
+extern "C" XrResult XRAPI_CALL xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo* loaderInfo, XrNegotiateRuntimeRequest* request)
 {
 	if (!loaderInfo || !request || loaderInfo->structType != XR_LOADER_INTERFACE_STRUCT_LOADER_INFO
 	    || request->structType != XR_LOADER_INTERFACE_STRUCT_RUNTIME_REQUEST)

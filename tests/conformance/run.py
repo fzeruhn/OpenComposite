@@ -21,8 +21,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+sys.path[:0] = [str(HERE), str(HERE.parent)]
 import unelevated  # noqa: E402
+from list_games import pe_machine  # noqa: E402
 
 ARGSETS = ["valid", "edge", "null", "invalid"]
 APPTYPES_VALID_ONLY = [2, 3, 4, 0]  # Overlay, Background, Utility, Other
@@ -102,9 +103,11 @@ class Runner:
         if unelevated.integrity_above_medium() and self.manifest:
             if not self.args.ci:
                 return  # children run at medium integrity (unelevated.run_medium)
-            # CI's VM is elevated: the loader ignores XR_RUNTIME_JSON, so make the runtime the active one
-            subprocess.run(["reg", "add", r"HKLM\SOFTWARE\Khronos\OpenXR\1", "/v", "ActiveRuntime", "/t", "REG_SZ",
-                            "/d", self.manifest, "/f"], check=True, capture_output=True)
+            # CI's VM is elevated: the loader ignores XR_RUNTIME_JSON, so make the runtime the active one. In both
+            # registry views: a 32-bit loader reads the 32-bit one (WOW6432Node)
+            for view in ("/reg:64", "/reg:32"):
+                subprocess.run(["reg", "add", r"HKLM\SOFTWARE\Khronos\OpenXR\1", "/v", "ActiveRuntime", "/t", "REG_SZ",
+                                "/d", self.manifest, "/f", view], check=True, capture_output=True)
 
     def child(self, extra, raw, timeout=TIMEOUT, env_extra=None):
         cmd = [self.conformance, "--runtime", self.runtime, "--out", str(raw)] + extra
@@ -218,9 +221,10 @@ class Runner:
         return results
 
 
-def compare(results, expected_path, differences_path):
+def compare(results, expected_path, differences_path, arch):
     expected = {key_of(r): r for r in json.loads(Path(expected_path).read_text(encoding="utf-8"))["records"]}
     allowed = json.loads(Path(differences_path).read_text(encoding="utf-8")) if differences_path else []
+    allowed = [d for d in allowed if d.get("arch", arch) == arch]
     diffs = []
     for r in results:
         e = expected.get(key_of(r))
@@ -300,7 +304,7 @@ def main():
               + (f' - {r["crash"].splitlines()[0]}' if r.get("crash") else "") for r in bad]
     problems = len(bad)
     if args.expected:
-        diffs = compare(results, args.expected, args.differences)
+        diffs = compare(results, args.expected, args.differences, pe_machine(args.runtime))
         lines += ["", f"differences from {args.expected}: {len(diffs)}"] + diffs
         problems += len(diffs)
     if args.expect:

@@ -43,8 +43,21 @@ OpenComposite doesn't support yet), each with its reason. Every other difference
 An entry matches `interface` and `method` (regexes) and `field`, and, if it has one, `apptype` (a regex of the app type
 numbers). Records SteamVR answered while restarting between children (init errors 115, 117, 119) aren't compared.
 
+An entry with `"arch": "x86"` applies only when `--runtime` is a 32-bit DLL: the reference was recorded by 64-bit
+SteamVR, and answers that hold a pointer are compared as raw bytes, so they are shorter in a 32-bit run.
+
 `scripts/openvr_inventory.py --check` (run by CI) fails unless every version in `interfaces.txt` (every one Valve has
 shipped, app-facing or C API only) has a `GEN_INTERFACE` line or a reason in `not_implemented.txt`.
+
+## Regression baselines
+
+`regress.py --results <dir>/results.json --baseline baseline/<file>` fails when a record that was ok in the baseline
+isn't any more, or when an answer changes (except the run-to-run fields in `volatile.json`); `--accept` writes a new
+baseline. CI keeps `none.json` (no runtime) and `stand-in.json`. A later `--baseline` overrides the earlier ones per
+record: `stand-in-x86.json` holds only the records a 32-bit run answers differently (the pointer-sized ones), and CI
+passes it after `stand-in.json`. With several, `--accept` writes the last one, so after accepting `stand-in.json` from a
+64-bit run, accept the 32-bit one with `--baseline baseline/stand-in.json --baseline baseline/stand-in-x86.json` from
+a 32-bit build's run (or from `stand-in/results.json` in CI's `conformance-windows-x86` artifact).
 
 ## Failed OpenXR calls
 
@@ -60,7 +73,8 @@ format is described at the top of `tests/runtime/script.h`.
 
 An elevated process's OpenXR loader ignores `XR_RUNTIME_JSON`. From an elevated shell `run.py` starts every child at
 medium integrity (`tests/unelevated.py`). On CI, where everything is elevated, `--ci` makes the chosen runtime the
-machine's active OpenXR runtime instead.
+machine's active OpenXR runtime instead, in both registry views (a 32-bit loader reads the 32-bit one), and doesn't
+put the old one back: use `--ci` only on a throwaway machine.
 
 ## Methods not called against SteamVR
 

@@ -1,0 +1,4 @@
+; The loader looks the entry point up by its plain name; on 32-bit Windows a __stdcall export would otherwise be
+; decorated (_xrNegotiateLoaderRuntimeInterface@8)
+EXPORTS
+	xrNegotiateLoaderRuntimeInterface

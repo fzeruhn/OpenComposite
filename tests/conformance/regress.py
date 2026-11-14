@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The regression run: a conformance run's records against a recorded baseline.
 
-  regress.py --results <dir>/results.json --baseline <file> [--volatile volatile.json] [--accept]
+  regress.py --results <dir>/results.json --baseline <file> [--baseline <overlay>]... [--volatile volatile.json]
+             [--accept]
 
 Fails (exit 1) on any record that was ok in the baseline and is something else now (ended, crashed, timed out, or
 gone), and on any change of an answer (every field but the record's identity and run bookkeeping: ret, out, the errors
@@ -12,6 +13,10 @@ not failed. --accept writes the results as the new baseline.
 
 The baseline keeps, per record, its status and a short hash of each compared field (not the values): one record per
 line, so a re-accepted baseline diffs readably.
+
+A later --baseline overrides the earlier ones per record (null: no such record), so a build whose answers differ in
+a few records (32-bit, where pointers are shorter) keeps only those. With several, --accept writes the last one: the
+records that differ from the earlier files.
 """
 
 import argparse
@@ -61,8 +66,9 @@ def summarise(results, rules):
     return base
 
 
-def write_baseline(path, base, source):
-    lines = ["{", f' "#": "Baseline (regress.py --accept) from {source}: per record its status and a hash of each '
+def write_baseline(path, base, source, over=()):
+    what = f"the records that differ from {', '.join(Path(p).name for p in over)}, each with" if over else "per record"
+    lines = ["{", f' "#": "Baseline (regress.py --accept) from {source}: {what} its status and a hash of each '
                   'compared field",', ' "records": {']
     keys = sorted(base)
     for i, k in enumerate(keys):
@@ -74,7 +80,7 @@ def write_baseline(path, base, source):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results", required=True)
-    ap.add_argument("--baseline", required=True)
+    ap.add_argument("--baseline", required=True, action="append")
     ap.add_argument("--volatile", default=str(HERE / "volatile.json"))
     ap.add_argument("--accept", action="store_true")
     args = ap.parse_args()
@@ -86,12 +92,21 @@ def main():
                  if isinstance(d, dict) and {"interface", "method", "field"} <= d.keys()]
     now = summarise(results, rules)
 
+    def merged(paths):
+        base = {}
+        for p in paths:
+            base.update(json.loads(Path(p).read_text(encoding="utf-8"))["records"])
+        return {k: v for k, v in base.items() if v is not None}
+
     if args.accept:
-        write_baseline(args.baseline, now, Path(args.results).parent.name + "/results.json")
-        print(f"baseline written: {len(now)} records to {args.baseline}")
+        target, earlier = args.baseline[-1], merged(args.baseline[:-1])
+        records = {k: v for k, v in now.items() if earlier.get(k) != v}
+        records.update({k: None for k in earlier if k not in now})
+        write_baseline(target, records, Path(args.results).parent.name + "/results.json", args.baseline[:-1])
+        print(f"baseline written: {len(records)} records to {target}")
         return 0
 
-    base = json.loads(Path(args.baseline).read_text(encoding="utf-8"))["records"]
+    base = merged(args.baseline)
     problems, new = [], []
     for k, b in base.items():
         n = now.get(k)
