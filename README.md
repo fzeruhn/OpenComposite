@@ -17,6 +17,19 @@ upstream's GitLab or Discord as they can't help with changes they haven't made.
 
 Upstream merge requests are linked as !*n* with their authors. Everything else was written for this fork.
 
+**Games keep running**
+- Nothing OpenComposite does ends a game any more. A call it can't answer properly gets SteamVR's error or an empty
+  answer, is logged once, and is listed in a compatibility summary at the end of the log. Failed OpenXR calls, a lost
+  session and swapchains that can't be made are recovered from. A broken `opencomposite.ini`, action manifest or
+  binding file costs only the entries that are wrong. CI checks that no new hard stop gets in.
+- Every OpenVR interface version Valve has shipped, from SDK 0.9.0 on, is offered (or set aside with a reason in
+  `tests/conformance/not_implemented.txt`). Old versions get the old struct layouts.
+- Settings, the application registry, room setup and their events are kept for real and shared by every program using
+  OpenComposite, as SteamVR shares them.
+- SteamVR's binding files can be evaluated by OpenComposite itself, behind `inputEvaluator=steamvr` (see
+  [the configuration file](#configuration-file)).
+- A conformance test program runs every method of every interface version and compares the answers with SteamVR's.
+
 **Newer games**
 - The interfaces of OpenVR SDK 2.12 and 2.15: `IVRSystem_023` and `_026`, `IVRCompositor_029`, `IVRInput_011`,
   `IVROverlay_028`, `IVRApplications_008` and `IVRNotifications_002`. Games built with those SDKs (Half-Life: Alyx,
@@ -238,6 +251,10 @@ The available options are:
 	* The scaling factor used for the hidden area mesh if supported by the application. The hidden area mesh is a region that the game doesn't render to. If you set this lower e.g. `0.8` then less will be drawn at the very top and very bottom of the image improving performance. Suggested range is `0.5` to `1.0`.
 * `logAllOpenVRCalls` - boolean, default `false`
 	* Log every OpenVR call a game makes. Similar to `logGetTrackedProperty`, this clutters logs and should not be enabled unless necessary.
+* `inputEvaluator` - `direct` or `steamvr`, default `direct`.
+	* How a game's SteamVR bindings become input. `direct` turns each binding into OpenXR bindings, as before. `steamvr` has OpenComposite run SteamVR's binding modes (toggles, dpads, chords and the rest) on the controller's raw inputs, and maps legacy input as SteamVR does. `steamvr` hasn't been tried in many games yet; try it when a game's controls don't work under `direct`.
+* `bindingEditor` - string, default empty.
+	* The program a game's "open binding UI" request starts.
 
 The possible types are as follows:
 
