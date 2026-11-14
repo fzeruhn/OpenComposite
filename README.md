@@ -1,128 +1,227 @@
-# OpenComposite (OpenXR) - Play SteamVR games without SteamVR!
-[![Discord](https://img.shields.io/discord/499733750209314816.svg?style=for-the-badge&logo=discord&label=discord)](https://discord.gg/zYA6Tzs)
+# OpenComposite (fzeruhn's fork)
+
 [![Build](https://img.shields.io/github/actions/workflow/status/fzeruhn/OpenComposite/build.yml?branch=openxr&style=for-the-badge&logo=github&label=build)](https://github.com/fzeruhn/OpenComposite/actions/workflows/build.yml)
-# [>>>Join the Discord here for support<<<](https://discord.gg/zYA6Tzs)
-# [Frequently Asked Questions](https://mbucchia.github.io/OpenXR-Toolkit/opencomposite.html)
-See the **Tips for using OpenComposite** section for solutions to common issues. Thanks to mbucchia for providing this FAQ.
+[![Release](https://img.shields.io/github/v/release/fzeruhn/OpenComposite?include_prereleases&style=for-the-badge&label=release)](https://github.com/fzeruhn/OpenComposite/releases)
 
-# [GAME COMPATIBILITY SPREADSHEET](https://docs.google.com/spreadsheets/d/1s2SSuRt0oHm91RUZB-R-ef5BrfOtvP_jwDwb6FuMF9Q/edit#gid=2068512515)
+Play SteamVR (OpenVR) games on any OpenXR runtime, without SteamVR.
 
-Feel free to comment on the spreadsheet for us to modify its information.
+This is a fork of [OpenComposite](https://gitlab.com/znixian/OpenOVR) by ZNix and its contributors. Upstream hasn't
+merged anything since July 2025, and its open merge requests, some of them needed by newer games such as Half-Life:
+Alyx, have waited without review. This fork takes them, fixes what review found in them, adds fixes of its own, and
+publishes Windows and Linux builds.
 
-<details><summary>Table of Contents</summary>
+**Bugs and questions about this fork go to [its issues](https://github.com/fzeruhn/OpenComposite/issues)**, not to
+upstream's GitLab or Discord as they can't help with changes they haven't made.
 
-[TOC]
-</details>
+## What this fork has that upstream doesn't
 
-OpenComposite OpenXR (previously known as OpenOVR - OpenVR for OculusVR - but renamed due to confusion with OpenVR) is
-an implementation of SteamVR's API - OpenVR, forwarding calls directly
-to the OpenXR runtime. Think of it as a backwards version of ReVive, for the OpenXR compatible headsets.
+Upstream merge requests are linked as !*n* with their authors. Everything else was written for this fork.
 
-This allows you to play SteamVR-based games on an OpenXR compatible headset as though they were native titles, without
-the use of SteamVR!
+**Games keep running**
+- Nothing OpenComposite does ends a game any more. A call it can't answer properly gets SteamVR's error or an empty
+  answer, is logged once, and is listed in a compatibility summary at the end of the log. Failed OpenXR calls, a lost
+  session and swapchains that can't be made are recovered from. A broken `opencomposite.ini`, action manifest or
+  binding file costs only the entries that are wrong. CI checks that no new hard stop gets in.
+- Every OpenVR interface version Valve has shipped, from SDK 0.9.0 on, is offered (or set aside with a reason in
+  `tests/conformance/not_implemented.txt`). Old versions get the old struct layouts.
+- Settings, the application registry, room setup and their events are kept for real and shared by every program using
+  OpenComposite, as SteamVR shares them.
+- SteamVR's binding files can be evaluated by OpenComposite itself, behind `inputEvaluator=steamvr` (see
+  [the configuration file](#configuration-file)).
+- A conformance test program runs every method of every interface version and compares the answers with SteamVR's.
 
-Why would you want to do this? There are several good reasons:
+**Newer games**
+- The interfaces of OpenVR SDK 2.12 and 2.15: `IVRSystem_023` and `_026`, `IVRCompositor_029`, `IVRInput_011`,
+  `IVROverlay_028`, `IVRApplications_008` and `IVRNotifications_002`. Games built with those SDKs (Half-Life: Alyx,
+  No Man's Sky, Batman: Arkham VR, Portal 2: Community Edition and others) no longer stop at "Missing interface".
+  ([!189](https://gitlab.com/znixian/OpenOVR/-/merge_requests/189), Faye Salwin)
+- Half-Life: Alyx: `IVRIPCResourceManagerClient` is answered as not found instead of stopping the game, and
+  `VRControlPanel()` is exported. ([!190](https://gitlab.com/znixian/OpenOVR/-/merge_requests/190), arealjim)
+- Action manifests with eye-tracking actions are read, skipping those actions, instead of aborting. So are long action
+  names a game uses before it has asked for their handle.
 
-* Some users have trouble running SteamVR on their machines
-* While more work needs to be done on OpenComposite's side for this, it can potentially get slightly better
-performance due to several design decisions, due to not having to support the Vive
-* OpenXR is less susceptible to the stuttering that has plagued SteamVR
-* Again a problem for some people but not others, SteamVR can take some time to start up
-* SteamVR is several gigabytes in side - that might be a problem for some people
+**Input**
+- Dpad bindings work in every action set, not only the first one synced (No Man's Sky's snap turning), and a
+  double-click binding counts one press. ([!186](https://gitlab.com/znixian/OpenOVR/-/merge_requests/186), Faye Salwin)
+- Valve Index trackpad dpad clicks: several click bindings on one trackpad no longer abort, and their thresholds no
+  longer overwrite the action's own.
+- Index controller bindings on controllers without a force-sensing trackpad (Vive, WMR) no longer abort.
+- Index grip actions are cleared when a game reloads its action manifest.
+- Generic trackers work on runtimes without the full `XR_MNDX_xdev_space` extension, which is now checked before use.
+  ([!184](https://gitlab.com/znixian/OpenOVR/-/merge_requests/184), KaiErikNiermann)
 
-It currently implements most interfaces, and can play many SteamVR games. However, there are many more games
-that use versions of interfaces that I have yet to implement - this will result in a popup followed by a crash. If
-you find a game that does this, please let me know (see below).
+**Frame timing**
+- `GetFrameTiming` reports measured frame times and dropped frames instead of constants, so games that adjust their
+  resolution to the load (Half-Life: Alyx's auto-fidelity and others) can.
+  ([!191](https://gitlab.com/znixian/OpenOVR/-/merge_requests/191), arealjim)
+- F1 23 no longer crashes in `GetFrameTiming`; each game's frame timing struct is filled within its own size, including
+  Proton's padded one. ([!114](https://gitlab.com/znixian/OpenOVR/-/merge_requests/114), Manuel Kraus)
+- Older `IVRCompositor` versions (`_009` to `_016`) get a struct of their own size; Proton 9 and later overran
+  `_016`'s by 4 bytes.
 
-There are several things missing though:
-- Hand controller models are not present. Some games (eg, *Skyrim*) will use their own models in this case. For other games, you
-might not see a controller model at all. Most games use their own hand models though, rather than displaying a model
-of your controller.
-- The virtual keyboard does not yet.
+**Vulkan and Direct3D 11**
+- Vulkan starts on devices without external memory, and accepts one GPU seen through several Vulkan instances by
+  passing the runtime's own device. ([!187](https://gitlab.com/znixian/OpenOVR/-/merge_requests/187), Faye Salwin)
+- Vulkan games whose queue isn't in family 0 get a command pool of their queue's family.
+- `invertUsingShaders` handles typeless and array textures, and falls back to a copy for textures the shader can't
+  read. ([!96](https://gitlab.com/znixian/OpenOVR/-/merge_requests/96), Zak Ahmed)
+- The D3D11 copy uses the right subresource, and resolves multisampled (MSAA) textures.
 
-\** Some Oculus headsets seem to be incompatible with OpenXR initialising with Vulkan for some games. If you have issues with AC or other games try putting initUsingVulkan=false in the opencomposite.ini (see [Configuration](https://gitlab.com/znixian/OpenOVR/-/tree/openxr#configuration-file) section for details.)
+**Overlays**
+- Overlays get the right position, rotation, size and sort order, follow the device they are attached to (a wrist
+  menu), hide when that device isn't tracked, and laser pointers hit them where they are drawn.
+  ([!150](https://gitlab.com/znixian/OpenOVR/-/merge_requests/150), mittorn)
+- Curved overlays, through `XR_KHR_composition_layer_cylinder`, drawn flat where the runtime lacks it.
+  ([!130](https://gitlab.com/znixian/OpenOVR/-/merge_requests/130), galister)
 
-# Downloading and installation
+**Stability and building**
+- The log opens before anything writes to it (upstream issue #479), and a log that can't be opened no longer crashes
+  the game. ([!185](https://gitlab.com/znixian/OpenOVR/-/merge_requests/185), Patrick Nicolas)
+- Null pointers, zero frame counts and buffer sizes are checked where games can pass them.
+- Builds with current MSVC (`<chrono>`: [!188](https://gitlab.com/znixian/OpenOVR/-/merge_requests/188), Faye
+  Salwin), with clang, with optimised gcc and with Python 3.12 and later. Linux arm64, Android and macOS builds go to
+  their own output folders. ([!179](https://gitlab.com/znixian/OpenOVR/-/merge_requests/179), Kitlith)
 
-**This fork's builds** are on its [releases page](https://github.com/fzeruhn/OpenComposite/releases/latest):
-`OpenComposite-windows.zip` and `OpenComposite-linux.tar.gz`, 64- and 32-bit, with install notes. The links below are
-upstream's.
+**Releases**
+- [Windows and Linux builds](https://github.com/fzeruhn/OpenComposite/releases), 64- and 32-bit, built by GitHub
+  Actions from the tagged commit, with checksums, the licences and the full source. Upstream's download links and
+  launcher fetch upstream's builds.
 
-OpenComposite can either be installed system-wide (all SteamVR-based games will use it automatically) or per-game (replace a DLL
-file for each game, this usually must be done each time said game is updated).
+Every change was reviewed, and all four builds are made with warnings as errors on every change. Not every change has
+been tried yet in the game it is for. If something works upstream and not here, please
+[open an issue](https://github.com/fzeruhn/OpenComposite/issues/new).
 
-(Note that these instructions are intended for Windows, Linux users can scroll down to the [Linux specific](#linux-specific-info) section)
+Not here yet: overlay apps (upstream !101), controller models and the virtual keyboard.
 
-## System-wide installation
+## What OpenComposite is
 
-Download the [OpenComposite Launcher](https://znix.xyz/OpenComposite/runtimeswitcher.php?branch=openxr). Unzip it to a folder of your choosing,
-and run `OpenComposite.exe`. Click 'Switch to OpenComposite', and wait while the DLLs are downloaded. Games will now run via OpenComposite
-rather than SteamVR.
+OpenComposite is an implementation of OpenVR, SteamVR's API, that forwards a game's calls straight to the OpenXR
+runtime: Meta's, Monado, Windows Mixed Reality, Pimax's, Varjo's and others. Think of it as a backwards
+[ReVive](https://github.com/LibreVR/Revive). Games run on your headset as though they were native OpenXR games,
+without SteamVR in between. Reasons to use it:
 
-To update OpenComposite, run `OpenComposite.exe` again. The text at the bottom of the window will indicate if an update is available, and
-if so an update button will appear. Click it and OpenComposite will be updated.
+* Some machines have trouble running SteamVR.
+* SteamVR can take a while to start, and is several gigabytes.
+* OpenXR runtimes can be less prone to the stutter some people get in SteamVR.
 
-## Per-game installation
+It used to be called OpenOVR ("OpenVR for OculusVR") and was renamed to avoid confusion with OpenVR.
 
-Download the DLLs:
-[32-bit](https://znix.xyz/OpenComposite/download.php?arch=x86&branch=openxr)
-[64-bit](https://znix.xyz/OpenComposite/download.php?arch=x64&branch=openxr)
+Two community resources written for upstream mostly apply here too: mbucchia's
+[FAQ](https://mbucchia.github.io/OpenXR-Toolkit/opencomposite.html) and the
+[game compatibility spreadsheet](https://docs.google.com/spreadsheets/d/1s2SSuRt0oHm91RUZB-R-ef5BrfOtvP_jwDwb6FuMF9Q/edit#gid=2068512515).
+A game listed there as broken by a missing interface will likely work with this fork, make an issue if not!
 
-These come from [AppVeyor](https://ci.appveyor.com/project/ZNix/openovr) - whenever I push some new code, it will be compiled
-and uploaded to those links automatically.
+## Installing
 
-Find your game's `openvr_api.dll` file, and replace it (though I highly recommend keeping a copy of the old file if you want to
-switch back) with one of the DLLs available above. Be sure to get the matching platform - if the game is a 32-bit game you need
-the 32-bit DLL, even though you're probably running a 64-bit computer. Simple solution: if one doesn't work, try the other.
+Your headset's OpenXR runtime must be the active one: OpenComposite runs OpenVR games on it. Everything is on the
+[releases page](https://github.com/fzeruhn/OpenComposite/releases).
 
-Some time in the near future I plan to release a system-wide install - run an EXE and all your games will open via OpenComposite, and
-you'll be able to switch back by starting SteamVR. This will make updating much easier.
+### Windows
 
-If you have any questions, feel free to jump on our Discord server:
-[![Discord](https://img.shields.io/discord/499733750209314816.svg)](https://discord.gg/zYA6Tzs)
+1. Download `OpenComposite-Setup.exe` and run it. It installs for your user only, without an administrator, in
+   `%LOCALAPPDATA%\Programs\OpenComposite`. It isn't signed yet, so Windows may say it "protected your PC": choose
+   *More info*, then *Run anyway*. It needs the .NET Framework 4.8, which Windows 10 (1903 or later) and 11 come with.
+2. Leave *Use OpenComposite for OpenVR games now* ticked on its last page. OpenVR games then load OpenComposite.
 
-## Linux-specific info
+The **OpenComposite** app (Start menu) shows what OpenVR games use and the active OpenXR runtime, and has:
 
-Linux builds are available from [GitLab CI](https://gitlab.com/znixian/OpenOVR/pipelines).
-[32-bit](https://gitlab.com/api/v4/projects/znixian%2Fopenovr/jobs/artifacts/openxr/download?job=ubuntu-32build)
-[64-bit](https://gitlab.com/api/v4/projects/znixian%2Fopenovr/jobs/artifacts/openxr/download?job=ubuntu-build)
+- **Use OpenComposite** and **Use SteamVR**. Starting SteamVR from Steam also switches back to SteamVR, so after
+  using SteamVR, open the app and press *Use OpenComposite* again.
+- **Per-app settings**: send one program to SteamVR (or to OpenComposite) whatever the switch says. Programs appear in
+  the list once they have tried to start VR with OpenComposite.
+- **Updates**: when opened, it looks for a newer release here and offers *Update to …*, which downloads the new
+  installer, checks its SHA-256 against the one GitHub lists, and runs it. Nothing updates by itself. *Include
+  pre-releases* offers those too.
 
-There is no switcher for Linux yet.
-As the vast majority of VR games are Windows-only and hence running through Proton, you'll have to essentially do a system wide install,
-but there is an environment variable available that allows you to set it up per game.
-(Using the Windows DLLs for a per-game install instead may work, but is untested.)
+To uninstall, use Windows' *Installed apps*. The uninstaller first takes OpenComposite out of
+`openvrpaths.vrpath`, putting SteamVR first again if OpenComposite was. It won't run while a game uses OpenComposite.
 
-After downloading and extracting the zip, you should get an OpenComposite folder. Here are some steps you'll have to follow to set it up:
-1. Get the runtime in place. This can be accomplished through one of the following methods:
-	- Set the VR_OVERRIDE variable to the OpenComposite directory (in Steam launch options: `VR_OVERRIDE=/path/to/OpenComposite %command%`)
-	- Edit the OpenVR config file - typically located at `~/.config/openvr/openvrpaths.vrpath` - and in the "runtime" section, put the path to the OpenComposite directory. Note that Steam likes to overwrite this file so you may need to set it to read only.
-	- For the elusive native Linux title, you can copy the `vrclient.so` over the game's `libopenvr_api.so`
-2. For games utilizing the Steam Runtime (most of them): you will need to work around the Steam Runtime. Here are some general tips for working around, as setups can differ:
-	- Any files located in your home directory will exist with no problems in the runtime. There is nothing to take into consideration with these paths, they will work fine.
-	- Any path located under `/usr` can be found under `/run/host/usr` in the runtime. For example, if you installed Monado system wide, the runtime json would be located at `/run/host/usr/share/openxr/1/openxr_monado.json`.
-	- Any other paths can be added using the `PRESSURE_VESSEL_FILESYSTEMS_RW` environment variable.
+For scripts: `OpenComposite-Setup.exe /VERYSILENT /SWITCH` installs and switches without asking anything (leave out
+`/SWITCH` to only install). `OpenComposite.exe --use-opencomposite`, `--use-steamvr` and `--remove` switch without
+opening the window.
 
-As an example, here is what your Steam launch options might look like if you downloaded OpenComposite to your home directory, used the VR_OVERRIDE environment variable, and installed Monado system wide:
+### Linux
+
+```bash
+tar -xzf OpenComposite-linux.tar.gz
+OpenComposite/install.sh
+```
+
+`install.sh` copies OpenComposite to `~/.local/share/OpenComposite`, then puts that folder first in `"runtime"` of
+`~/.config/openvr/openvrpaths.vrpath`, keeping the other entries after it (the old file is kept as
+`openvrpaths.vrpath.bak`). It doesn't need root, but it needs `python3`. At the end it prints the Steam launch options
+your OpenXR runtime needs inside the Steam Runtime (see [Linux-specific info](#linux-specific-info)). Afterwards, run
+the installed copy:
+
+```bash
+~/.local/share/OpenComposite/install.sh --status          # what OpenVR games use, what's installed
+~/.local/share/OpenComposite/install.sh --steamvr         # back to SteamVR (starting SteamVR from Steam does it too)
+~/.local/share/OpenComposite/install.sh --opencomposite   # and to OpenComposite again
+~/.local/share/OpenComposite/install.sh --update          # the newest release, if newer (--pre: pre-releases too)
+~/.local/share/OpenComposite/install.sh --launch-options  # the Steam launch options again
+~/.local/share/OpenComposite/install.sh --uninstall
+```
+
+`--update` downloads the release's archive and checks its SHA-256 against the one GitHub lists before installing it.
+Files you put in `bin/` (`opencomposite.ini`, `apps-config.json`) survive updates.
+
+**Flatpak Steam** has its own `openvrpaths.vrpath` and can't see `~/.local/share`. With only Flatpak Steam installed,
+`install.sh` uses its folders by itself (`~/.var/app/com.valvesoftware.Steam/.local/share/OpenComposite` and
+`.../.config/openvr/openvrpaths.vrpath`); with both kinds, add `--flatpak` to every command for Flatpak Steam.
+
+### By hand
+
+Unpack `OpenComposite-windows.zip` or `OpenComposite-linux.tar.gz` somewhere it can stay. Each holds an
+`OpenComposite` folder with the 64- and 32-bit libraries in `bin`. Put that folder first in `"runtime"` of
+`openvrpaths.vrpath` (`%LOCALAPPDATA%\openvr\openvrpaths.vrpath` on Windows, `~/.config/openvr/openvrpaths.vrpath` on
+Linux), keeping the other entries after it. To switch back, put SteamVR's folder first again.
+
+**One game only, on Windows:** back up the game's `openvr_api.dll`, then put `vrclient_x64.dll` (or `vrclient.dll` for a
+32-bit game) in its place, renamed to `openvr_api.dll`. Steam's *Verify integrity of game files* undoes this. The
+installer never changes game folders.
+
+### Linux-specific info
+
+As most VR games are Windows games run through Proton, you'll usually install system-wide, which `install.sh` does
+(above). An environment variable lets you choose per game instead. By hand, unpack the tarball, which gives an
+`OpenComposite` folder, and then:
+
+1. Get the runtime in place, by one of these:
+	- Set `VR_OVERRIDE` to the `OpenComposite` folder, in the game's Steam launch options:
+	  `VR_OVERRIDE=/path/to/OpenComposite %command%`
+	- Edit `~/.config/openvr/openvrpaths.vrpath`, and put the `OpenComposite` folder first in `"runtime"`. Steam likes
+	  to rewrite this file, so you may need to make it read-only.
+	- For the rare native Linux game, copy `bin/linux64/vrclient.so` over the game's `libopenvr_api.so`.
+2. Games in the Steam Runtime (most of them) need a few paths made visible inside it:
+	- Files in your home directory are there as they are.
+	- Paths under `/usr` are under `/run/host/usr`. For example, a system-wide Monado's runtime JSON is
+	  `/run/host/usr/share/openxr/1/openxr_monado.json`.
+	- Other paths can be added with the `PRESSURE_VESSEL_FILESYSTEMS_RW` environment variable.
+
+For example, with OpenComposite in your home directory, `VR_OVERRIDE`, and Monado installed system-wide, the launch
+options might be:
 
 ```
 VR_OVERRIDE=~/OpenComposite XR_RUNTIME_JSON=/run/host/usr/share/openxr/1/openxr_monado.json PRESSURE_VESSEL_FILESYSTEMS_RW=$XDG_RUNTIME_DIR/monado_comp_ipc %command%
 ```
 
-Note that `$XDG_RUNTIME_DIR/monado_comp_ipc` is a socket used by Monado and required to be present for it to properly detect that Monado is running.
+`$XDG_RUNTIME_DIR/monado_comp_ipc` is Monado's socket: the game needs to see it to find Monado running. More on
+`PRESSURE_VESSEL_FILESYSTEMS_RW` and the Steam Runtime's other variables is in
+[its documentation](https://gitlab.steamos.cloud/steamrt/steam-runtime-tools/-/blob/master/pressure-vessel/wrap.1.md).
 
-You can read more about the `PRESSURE_VESSEL_FILESYSTEM_RW` variable and other environment variables utilized by the Steam Runtime [here](https://gitlab.steamos.cloud/steamrt/steam-runtime-tools/-/blob/master/pressure-vessel/wrap.1.md).
+The Linux builds need glibc 2.38 or later (Ubuntu 24.04, Debian 13, Fedora 39 or newer).
 
-# Configuration file
+## Configuration file
 
 On startup, OpenComposite searches for a file named `opencomposite.ini`, first next to the `openvr_api.dll` file, and if it can't find
 that, then it looks in the working directory (usually in the same folder as the EXE). If no file is found, that's fine and all
 the default values are used.
 
-This is it's configuration file, where you can specify a number of options. These are listed in `name=value` format, and you
+This is its configuration file, where you can specify a number of options. These are listed in `name=value` format, and you
 can define a comment by starting a line with `;` or a `#`. Note the option names **are** case sensitive. An option OpenComposite
 doesn't know, or a value it can't read, is logged as a warning (in `opencomposite.log`) and that option keeps its default; the game
 starts either way. Any whitespace between the name, equals sign, and value is ignored, as is whitespace on the end of the line.
-Ensure your lines do not being with whitespace however.
+Ensure your lines do not begin with whitespace however.
 
 The available options are:
 
@@ -140,18 +239,22 @@ The available options are:
 	* Print logging information when the app requests information about tracked devices, such as the HMD or the Touch controllers. On some games, this causes a log entry to be generated every frame, which isn't great for performance and clutters up the log. This is potentially useful for troubleshooting, and was enabled by default before the config option existed. In general, unless you've been told to enable this (or you know what you're doing while troubleshooting) you don't need to enable this.
 * `stopOnSoftAbort` - boolean, default `disabled`.
     * Ends the game at the first call OpenComposite can't answer properly, as it used to. By default such a call gets an error or an empty answer and the game goes on; each one is logged the first time, and when the game shuts OpenVR down the log ends with a compatibility summary (`OpenComposite compatibility summary: <n> unsupported calls in <m> places`, then each place with how often it was hit). That list is what's worth reporting when a game misbehaves. Only enable this to find where a game first goes wrong.
-* `dx10Mode` - booelan, default `disabled`.
+* `dx10Mode` - boolean, default `disabled`.
     * Use DX10 instead of DX11 for games submitting DirectX textures.
 * `enableHiddenMeshFix` - boolean, default `enabled`. 
 	* Alter the coordinates of the hidden area mesh mask to fit within the view's projection. The hidden area mesh mask defines a region to which the game will not draw and is used to mask off areas of the display that you typically cannot see in the headset. If you see odd black regions around the view then try disabling this fix.
 * `invertUsingShaders` - boolean, default `disabled`. 
-	* Invert the image for display using shaders rather than replying on XR runtime and inverted FOV values. Some games render the image inverted and rely on the runtime to display correctly. In OpenXR some runtimes don't do the inversion correctly. If so enable this option for OpenComposite to do the inversion when copying the image using shaders. This might have a minor cost in performance.
+	* Invert the image for display using shaders rather than relying on the XR runtime and inverted FOV values. Some games render the image inverted and rely on the runtime to display correctly. In OpenXR some runtimes don't do the inversion correctly. If so enable this option for OpenComposite to do the inversion when copying the image using shaders. This might have a minor cost in performance.
 * `initUsingVulkan` - boolean, default `true`. 
 	* If available the temporary graphics adapter at start up will use Vulkan by default. This may be incompatible with some games. This will mostly affect Oculus headsets. 
 * `hiddenMeshVerticalScale` - float, default `1.0`. 
 	* The scaling factor used for the hidden area mesh if supported by the application. The hidden area mesh is a region that the game doesn't render to. If you set this lower e.g. `0.8` then less will be drawn at the very top and very bottom of the image improving performance. Suggested range is `0.5` to `1.0`.
 * `logAllOpenVRCalls` - boolean, default `false`
 	* Log every OpenVR call a game makes. Similar to `logGetTrackedProperty`, this clutters logs and should not be enabled unless necessary.
+* `inputEvaluator` - `direct` or `steamvr`, default `direct`.
+	* How a game's SteamVR bindings become input. `direct` turns each binding into OpenXR bindings, as before. `steamvr` has OpenComposite run SteamVR's binding modes (toggles, dpads, chords and the rest) on the controller's raw inputs, and maps legacy input as SteamVR does. `steamvr` hasn't been tried in many games yet; try it when a game's controls don't work under `direct`.
+* `bindingEditor` - string, default empty.
+	* The program a game's "open binding UI" request starts.
 
 The possible types are as follows:
 
@@ -170,89 +273,84 @@ handColour=#ffff00
 haptics = off
 ```
 
-# Reporting a bug
+## Reporting a bug
 
-If you find an issue, missing interface, crash etc then *please* let me know about it.
-([Opening a GitLab issue](https://gitlab.com/znixian/OpenOVR/issues/new) is the preferred
-way of doing this and you'll automatically get an email when it's fixed (if you let me know
-via a different method I'll probably make an issue and send you the link to help keep track of them).
+If a game crashes, shows a missing interface, or behaves differently than under SteamVR, please
+[open an issue here](https://github.com/fzeruhn/OpenComposite/issues/new). Say:
 
-If you do not or cannot create or use a GitLab account for whatever reason, you can join the [Discord server](https://discord.gg/zYA6Tzs) and report the issue in #bugs.
+- the game, your headset and OpenXR runtime, and which release of this fork (or commit) you use;
+- what happened and when: at start, after loading a level, on pressing a button;
+- whether it also happens with upstream's build, if you know.
 
-In any case, please include the contents your `opencomposite.log` file which contains potentially
-invaluable debugging information. This log file can be found here:
+And attach `opencomposite.log`, which has most of what's needed to find the cause. It is in:
 
-Windows - %localappdata%\\OpenComposite\\logs (Copy and paste that into explorer)
-Linux - $XDG_STATE_HOME/OpenComposite/logs (If XDG_STATE_HOME is not defined then check ~/.local/state/OpenComposite/logs)
+- Windows: `%LOCALAPPDATA%\OpenComposite\logs` (paste that into Explorer's address bar)
+- Linux: `$XDG_STATE_HOME/OpenComposite/logs`, or `~/.local/state/OpenComposite/logs` if `XDG_STATE_HOME` isn't set
 
-If those locations do not exist this may be due to some odd security restrictions, check the exe folder for opencomposite.log
+If neither exists, look for `opencomposite.log` next to the game's EXE.
 
-Please also say what caused the crash - did it crash on startup, or maybe after clicking
-load on the main menu, for example?
+## Building
 
-# Compiling (**for developers**)
+The source is GPL-3.0-or-later. Clone with its submodules:
 
-Download the Source Code from [GitLab](https://gitlab.com/znixian/OpenOVR/-/tree/openxr) - it's under the GPLv3 licence.
-This project is built with CMake and follows a standard build process, so tools like CLion can be used to build it.
-The resulting library will be placed at `build/bin/linux64/vrclient.so` on Linux (`build/bin/linuxarm64/vrclient.so` on 64-bit ARM), `build/bin/vrclient_x64.dll` on Windows.
-If you are building with the intent of contributing upstream, you should build with the cmake flag `-DERROR_ON_WARNING=ON`,
-as the CI is also using this flag, which turns on treating warnings as errors.
-
-## Windows specific
-
-If you want to use Vulkan support (enabled by default, remove `SUPPORT_VK` from the preprocessor definitions to compile without it), then
-download a [slimmed down copy of the Vulkan SDK with only `.lib` files and the headers](http://znix.xyz/random/vulkan-1.1.85.0-minisdk.7z),
-and extract it to your `libs` directory (you can copy in the full SDK if you want, but it's far larger and probably better to install it
-by itself).
-
-This is how the resulting file structure should look:
-
-```
-OpenOVR: (or whatever folder you cloned/downloaded the repo into)
-	libs:
-		vulkan:
-			Include:
-			Lib:
-			Lib32:
-			LICENSE.txt
-			SDK_LICENSE.rtf
-			Vulkan.ico
-		openxr-sdk:
-	... etc
-```
-
-## Linux specific
-
-OpenComposite will search for Vulkan installed via your package manager. Cloning the Vulkan SDK is not necessary. 
-If not using an IDE with CMake support, a set of commands to successfully compile might look like this after navigating to the source directory:
 ```bash
-mkdir build
-cd build
-cmake ..
-cmake --build .
+git clone --recursive https://github.com/fzeruhn/OpenComposite.git
 ```
-The build directory will be set up in a way that you can simply set `VR_OVERRIDE` to its path.
 
-## Miscellaneous
+It's a standard CMake project, so IDEs such as CLion and Visual Studio can build it too. The scripts below build it
+the way the releases are built: Release, warnings as errors (`-DERROR_ON_WARNING=ON`). Pull requests are built the same
+way on all four targets, so please make sure yours builds without warnings.
 
-OpenComposite relies fairly heavily on scripts that generate code, and this has *vastly* simplified things - 
-I expect the repo would contain roughly three to four times more code otherwise.
+**Windows:** Visual Studio 2022 or newer, or its Build Tools, with the C++ x64/x86 tools and "C++ ATL"; Python 3; and
+the Vulkan headers and loader, for example from vcpkg (`vcpkg install vulkan-headers vulkan-loader --triplet
+x64-windows`). Then, in PowerShell 7:
 
-There are two main scripts at work:
+```powershell
+scripts\ci\build-windows.ps1 -Arch x64 -Vulkan C:\vcpkg\installed\x64-windows
+```
 
-1. A script to take various OpenVR header files, and split them into one header file for each
-version of each interface. This allows the project to reference many versions of the same interface.
-2. A script to generate the interface stubs - in LibOVR, there is one implementation of each interface,
-which are the base interfaces (eg `BaseSystem`, `BaseCompositor`, etc). There are then autogenerated 'stub'
-classes, which implement a binary-compatible version of one version of that interface (eg `GVRSystem_017`,
-`GVRSystem_015`, `GVRCompositor_022`), along with C-like `FnTable`s for them (which allow compatibility
-with other languages, very notably C#).
+This makes `build\windows-x64\bin\vrclient_x64.dll` (`-Arch x86` makes `vrclient.dll`). The script copies the Vulkan
+files to `libs\vulkan`, where `CMakeLists.txt` looks for them; to build without Vulkan, remove `SUPPORT_VK` from the
+preprocessor definitions.
 
-These scripts are automatically run when buildling the project. If you have added or removed OpenVR headers this will cause CMake to rebuild
-the project, otherwise it will only rebuild a couple of files which is very quick.
-You can read more about why these scripts exist and how they work in the `doc/` folder of this repository.
+**Linux:** the packages in `scripts/ci/ubuntu.dockerfile` (gcc with multilib, CMake, the autotools, Python 3, and the
+GL and Vulkan development files), then:
 
-## Adding a new OpenVR SDK
+```bash
+scripts/ci/build-linux.sh x64
+```
+
+This makes `build/linux-x64/bin/linux64/vrclient.so` (`x86` makes `bin/vrclient.so`). A plain `cmake -B build && cmake
+--build build` works too, and the build folder can then be used directly as `VR_OVERRIDE`.
+
+**The installers:** `RuntimeSwitcher/` is the Windows app (`OpenComposite.exe`, C# on the .NET Framework 4.8, built
+with the .NET SDK on any OS), revived from upstream's switcher and pointed at this fork's releases.
+`installer/OpenComposite.iss` is the Windows installer and `installer/install.sh` the Linux one. With the two Windows
+DLLs in `artifacts\windows-x64` and `artifacts\windows-x86`, the .NET SDK 8 or later and Inno Setup 6:
+
+```powershell
+scripts\ci\build-installer.ps1 -Artifacts artifacts -Version 2026.11.06
+```
+
+This runs `RuntimeSwitcher/Tests` (`dotnet test RuntimeSwitcher/Tests` alone works on Linux too) and makes
+`build\installer\OpenComposite-Setup.exe`. `scripts/ci/test-install.sh OpenComposite-linux.tar.gz` tries `install.sh`
+on a scratch home folder.
+
+### How the code is generated
+
+OpenComposite relies heavily on scripts that generate code; without them the repository would have roughly three to four
+times as much. There are two:
+
+1. One splits OpenVR's headers into one header per version of each interface, so the project can use many versions of
+   the same interface.
+2. One generates the interface stubs. Each interface has one implementation (`BaseSystem`, `BaseCompositor` and so
+   on), and generated stub classes implement a binary-compatible version of each version of it (`GVRSystem_017`,
+   `GVRSystem_015`, `GVRCompositor_022`), with C-like `FnTable`s for them (for other languages, notably C#).
+
+Both run as part of the build. Adding or removing an OpenVR header makes CMake rebuild the project; otherwise only a
+couple of files are rebuilt. The `doc/` folder says more about why the scripts exist and how they work.
+
+### Adding a new OpenVR SDK
 
 `tests/conformance/interfaces.txt` lists every interface version Valve has shipped, and `scripts/openvr_inventory.py`
 keeps it up to date. When Valve tags a new SDK:
@@ -265,7 +363,7 @@ keeps it up to date. When Valve tags a new SDK:
 5. Check: `python scripts/openvr_inventory.py --check` lists every version that isn't offered yet. A version answered
    "not found" on purpose goes in `tests/conformance/not_implemented.txt` with its reason.
 
-# Licence
+## Licence
 
 OpenComposite itself is Free Software under the GPLv3:
 
@@ -285,16 +383,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 ```
 
 [GPL Full Text](https://www.gnu.org/licenses/gpl-3.0-standalone.html). This also can be found in
-the `LICENCE.txt` file supplied with the source code.
+the `LICENSE.txt` file supplied with the source code.
 
-## OpenXR SDK
+This fork is a modified version of [upstream OpenComposite](https://gitlab.com/znixian/OpenOVR): its changes since
+upstream's commit `cff07db` are listed above and in this repository's history.
+
+### OpenXR SDK
 
 The OpenXR SDK is included as a git submodule. It's under the Apache 2 licence, the full text of
 which can be found under `libs/openxr-sdk/LICENSE`.
 
-## OpenVR
+### OpenVR
 
-This program (and it's source code) includes several versions of the
+This program (and its source code) includes several versions of the
 [OpenVR](https://github.com/ValveSoftware/openvr) headers. These are under the
 [MIT Licence](https://github.com/ValveSoftware/openvr/blob/master/LICENSE). This also can be
 found in the `LICENSE_OPENVR.txt` file supplied with the source code.
@@ -304,18 +405,18 @@ Copyright (c) 2015, Valve Corporation
 All rights reserved.
 ```
 
-## INIH
+### INIH
 
 This program uses the [inih](https://github.com/benhoyt/inih) INI parsing library by Ben Hoyt. This is available under
-the MIT licence, a copy of which can be found in the `LICENSE_INIH` file of this repository.
+the MIT licence, a copy of which can be found in the `LICENSE_INIH.txt` file of this repository.
 
-## Microblink Build
+### Microblink Build
 
 This program uses a part of Psiha's and Microblink's [build](https://github.com/microblink/build) CMake utilities
 library. This is available under the two-clause BSD licence, a copy of which can be found in the `LICENCE_BUILD_UTIL.txt`
 file of this repository.
 
-## DebugBreak
+### DebugBreak
 
-This programme uses Scott Tsai's [DebugBreak](https://github.com/scottt/debugbreak) library when built on Linux. It's full
+This program uses Scott Tsai's [DebugBreak](https://github.com/scottt/debugbreak) library when built on Linux. Its full
 text can be found in `LICENCE_DEBUG_BREAK.txt`.
