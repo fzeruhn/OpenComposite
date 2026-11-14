@@ -729,10 +729,11 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		{ "generic", 1 }
 	};
 
-	// The user's own bindings first: their folder, then the game's working folder's OpenComposite folder, then
+	// The user's own bindings first: their folder, the OpenComposite one it replaced, then the game's working folder's OpenLamina and OpenComposite folders, then
 	// the game's default
 	const std::string appKey = CurrentProcessAppKey();
 	const std::filesystem::path userBindings = UserBindingsDir();
+	const std::filesystem::path legacyUserBindings = LegacyUserBindingsDir();
 	std::error_code cwdError;
 	const std::filesystem::path workingDir = std::filesystem::current_path(cwdError);
 	const std::filesystem::path manifestDir = PathFromUtf8(dirnameOf(pchActionManifestPath));
@@ -746,7 +747,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		std::string path = dirnameOf(pchActionManifestPath) + "/" + item["binding_url"].asString();
 
 		std::optional<std::filesystem::path> found = FindBindingFile(appKey, controller_type, userBindings, workingDir, manifestDir,
-		    item["binding_url"].asString());
+		    item["binding_url"].asString(), legacyUserBindings);
 		if (found && found->lexically_normal() != (manifestDir / PathFromUtf8(item["binding_url"].asString())).lexically_normal()) {
 			OOVR_LOGF("Loading the user's own bindings for controller type %s: %s", controller_type.c_str(), PathToUtf8(*found).c_str());
 			path = PathToUtf8(*found);
@@ -778,7 +779,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 
 	// remaining profiles: the user's own bindings for them if there are any, else our backup path
 	for (auto& [name, profile_ptr] : OpenVRNameToProfile) {
-		std::optional<std::filesystem::path> own = FindBindingFile(appKey, name, userBindings, workingDir, {}, "");
+		std::optional<std::filesystem::path> own = FindBindingFile(appKey, name, userBindings, workingDir, {}, "", legacyUserBindings);
 		if (own)
 			OOVR_LOGF("Loading the user's own bindings for controller type %s: %s", name.c_str(), PathToUtf8(*own).c_str());
 		LoadBindingsSet(*profile_ptr, own ? PathToUtf8(*own) : backupPath);
@@ -1386,8 +1387,8 @@ void BaseInput::CreateLegacyActions()
 	// is always active with a lower priority than the game's one.
 
 	XrActionSetCreateInfo setInfo = { XR_TYPE_ACTION_SET_CREATE_INFO };
-	strcpy_arr(setInfo.actionSetName, "opencomposite-actions");
-	strcpy_arr(setInfo.localizedActionSetName, "OpenComposite Actions");
+	strcpy_arr(setInfo.actionSetName, "openlamina-actions");
+	strcpy_arr(setInfo.localizedActionSetName, "OpenLamina Actions");
 	setInfo.priority = 0;
 
 	OC_XR_LOG(xrCreateActionSet(xr_instance, &setInfo, &legacyInputsSet));
@@ -1464,8 +1465,8 @@ void BaseInput::CreateRawActions()
 		return;
 
 	XrActionSetCreateInfo setInfo = { XR_TYPE_ACTION_SET_CREATE_INFO };
-	strcpy_arr(setInfo.actionSetName, "opencomposite-raw-inputs");
-	strcpy_arr(setInfo.localizedActionSetName, "OpenComposite Raw Inputs");
+	strcpy_arr(setInfo.actionSetName, "openlamina-raw-inputs");
+	strcpy_arr(setInfo.localizedActionSetName, "OpenLamina Raw Inputs");
 	setInfo.priority = 0;
 	OC_XR_LOG(xrCreateActionSet(xr_instance, &setInfo, &rawInputsSet));
 	if (rawInputsSet == XR_NULL_HANDLE)
@@ -3217,10 +3218,10 @@ bool BaseInput::IsUsingLegacyInput()
 EVRInputError BaseInput::OpenBindingUI(const char* pchAppKey, VRActionSetHandle_t ulActionSetHandle,
     VRInputValueHandle_t ulDeviceHandle, bool bShowOnDesktop)
 {
-	// The binding editor set in opencomposite.ini, if any; SteamVR answers NoSteam without Steam
+	// The binding editor set in openlamina.ini, if any; SteamVR answers NoSteam without Steam
 	std::string editor = oovr_global_configuration.BindingEditor();
 	if (editor.empty())
-		OC_UNSUPPORTED(VRInputError_NoSteam, "OpenBindingUI: no bindingEditor in opencomposite.ini");
+		OC_UNSUPPORTED(VRInputError_NoSteam, "OpenBindingUI: no bindingEditor in openlamina.ini");
 
 	std::string key = pchAppKey && pchAppKey[0] ? std::string(pchAppKey) : CurrentProcessAppKey();
 	ActionSet* set = ulActionSetHandle != vr::k_ulInvalidActionSetHandle ? cast_ASH(ulActionSetHandle) : nullptr;

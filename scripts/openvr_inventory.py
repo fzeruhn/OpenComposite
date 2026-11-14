@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory of the OpenVR interface versions Valve has shipped, against the ones OpenComposite offers.
+"""Inventory of the OpenVR interface versions Valve has shipped, against the ones OpenLamina offers.
 
   openvr_inventory.py --valve-repo <clone of github.com/ValveSoftware/openvr> --write tests/conformance/interfaces.txt
   openvr_inventory.py --check        # every listed version is offered (a GEN_INTERFACE line) or in not_implemented.txt

@@ -3,7 +3,7 @@
 //
 // Each use site is a function-local static OcSoftSite. Its first hit logs one line, every hit is counted, and
 // oc_soft_log_summary() (called at shutdown) lists every site with its count, so a user's log says what the program
-// needed that OpenComposite doesn't do. With stopOnSoftAbort=true in opencomposite.ini, the first hit of a site ends
+// needed that OpenComposite doesn't do. With stopOnSoftAbort=true in openlamina.ini, the first hit of a site ends
 // the program (for debugging).
 //
 //   OC_UNSUPPORTED(value, "fmt", ...)      log once, count, return value
@@ -48,7 +48,7 @@ struct OcSoftSite {
 // the program
 void oc_soft_fail(OcSoftSite* site, const char* fmt, ...) OC_SOFT_PRINTF(2, 3);
 
-// "OpenComposite compatibility summary: <n> unsupported calls in <m> places", then one line per site
+// "OpenLamina compatibility summary: <n> unsupported calls in <m> places", then one line per site
 void oc_soft_log_summary();
 
 // Every site hit so far, in the order of their first hit

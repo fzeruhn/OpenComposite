@@ -1,13 +1,13 @@
 #Requires -Version 7.2
 <#
 .SYNOPSIS
-    Builds OpenComposite's Windows DLL (bin\vrclient_x64.dll or bin\vrclient.dll) the way the release workflow
+    Builds OpenLamina's Windows DLL (bin\vrclient_x64.dll or bin\vrclient.dll) the way the release workflow
     (.github/workflows/build.yml) does.
 .DESCRIPTION
     A clean Release build with Ninja. Warnings are errors, and the C runtime is linked in (/MT): the DLL is loaded into
     games, and a game's folder needn't have the Visual C++ runtime the DLL would otherwise need.
 
-    Needs Visual Studio or its Build Tools with the C++ x64/x86 tools and "C++ ATL" (OpenComposite includes
+    Needs Visual Studio or its Build Tools with the C++ x64/x86 tools and "C++ ATL" (OpenLamina includes
     atlbase.h), and Python. -Vulkan is a folder with include\vulkan and lib\vulkan-1.lib of the same architecture, such
     as vcpkg's installed\x64-windows or installed\x86-windows of vulkan-headers and vulkan-loader. They are copied to
     libs\vulkan, where CMakeLists.txt looks (Lib for x64, Lib32 for x86).
@@ -77,13 +77,13 @@ else {
         & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.VC.ATL -property installationPath
     }
     if (-not $vs) {
-        throw 'OpenComposite needs Visual Studio (or its Build Tools) with the C++ x64/x86 tools and "C++ ATL".'
+        throw 'OpenLamina needs Visual Studio (or its Build Tools) with the C++ x64/x86 tools and "C++ ATL".'
     }
     Import-Module (Join-Path $vs 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
     Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=$Arch -host_arch=x64" | Out-Null
 }
 
-# 3. A clean build of the DLL only (OpenComposite.exe and the installer are build-installer.ps1's).
+# 3. A clean build of the DLL only (OpenLamina.exe and the installer are build-installer.ps1's).
 if (Test-Path -LiteralPath $Out) {
     Remove-Item -LiteralPath $Out -Recurse -Force
 }
@@ -91,8 +91,8 @@ $testsFlag = $Tests ? 'ON' : 'OFF'
 Invoke-Checked {
     cmake -S $root -B $Out -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
         -DERROR_ON_WARNING=ON "-DOC_VERSION=$Version" "-DOC_BUILD_TESTS=$testsFlag"
-} 'Configuring OpenComposite'
-Invoke-Checked { cmake --build $Out --target OCOVR } 'Building OpenComposite'
+} 'Configuring OpenLamina'
+Invoke-Checked { cmake --build $Out --target OCOVR } 'Building OpenLamina'
 if ($Tests) {
     Invoke-Checked { cmake --build $Out } 'Building the tests'
     Invoke-Checked { ctest --test-dir $Out -L unit --output-on-failure } 'Running the unit tests'
@@ -121,5 +121,5 @@ foreach ($name in 'VRClientCoreFactory', 'VR_InitInternal2') {
     }
 }
 
-Write-Host "OpenComposite $Version, $Arch"
+Write-Host "OpenLamina $Version, $Arch"
 Write-Host "  $dll ($([math]::Round((Get-Item -LiteralPath $dll).Length / 1KB)) KB)"

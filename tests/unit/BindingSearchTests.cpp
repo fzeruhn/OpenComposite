@@ -88,3 +88,32 @@ TEST_CASE("App_key_with_dots_is_one_folder")
 	CHECK_FALSE(FindBindingFile("..", "knuckles", t.root / "user", {}, {}, "").has_value());
 	CHECK_FALSE(FindBindingFile("../x", "knuckles", t.root / "user", {}, {}, "").has_value());
 }
+
+TEST_CASE("Old_user_folder_is_read_where_it_is")
+{
+	TempDir t;
+	fs::path old = t.Touch("oldUser/steam.app.42/knuckles.json");
+	// the OpenLamina user folder wins over the OpenComposite one when both have the file
+	auto found = FindBindingFile("steam.app.42", "knuckles", t.root / "user", {}, {}, "", t.root / "oldUser");
+	REQUIRE(found.has_value());
+	CHECK(*found == old);
+	fs::path fresh = t.Touch("user/steam.app.42/knuckles.json");
+	found = FindBindingFile("steam.app.42", "knuckles", t.root / "user", {}, {}, "", t.root / "oldUser");
+	REQUIRE(found.has_value());
+	CHECK(*found == fresh);
+	CHECK(fs::exists(old)); // nothing was copied or moved
+}
+
+TEST_CASE("Working_folders_OpenLamina_folder_before_OpenComposite")
+{
+	TempDir t;
+	fs::path old = t.Touch("game/OpenComposite/knuckles.json");
+	fs::path fresh = t.Touch("game/OpenLamina/knuckles.json");
+	auto found = FindBindingFile("steam.app.42", "knuckles", t.root / "user", t.root / "game", {}, "");
+	REQUIRE(found.has_value());
+	CHECK(*found == fresh);
+	fs::remove(fresh);
+	found = FindBindingFile("steam.app.42", "knuckles", t.root / "user", t.root / "game", {}, "");
+	REQUIRE(found.has_value());
+	CHECK(*found == old);
+}

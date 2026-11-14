@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds OpenComposite's Linux library the way the release workflow (.github/workflows/build.yml) does: a clean Release
+# Builds OpenLamina's Linux library the way the release workflow (.github/workflows/build.yml) does: a clean Release
 # build, warnings as errors, with the crash backtrace (libunwind, built in). Needs the packages of
 # scripts/ci/ubuntu.dockerfile.
 #
@@ -66,6 +66,6 @@ for symbol in VRClientCoreFactory VR_InitInternal2; do
 	fi
 done
 
-echo "OpenComposite $version, $arch"
+echo "OpenLamina $version, $arch"
 echo "  $out/$lib ($(($(wc -c <"$out/$lib") / 1024)) KB)"
 echo "  needs $(objdump -T "$out/$lib" | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -n 1) or later"

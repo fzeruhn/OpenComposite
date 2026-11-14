@@ -23,7 +23,7 @@ public:
 	/** The program OpenBindingUI starts; empty for none */
 	const std::string& BindingEditor() const { return bindingEditor; }
 	/** How IVRInput evaluates a game's binding files: "direct" (default, each binding turned into OpenXR
-	 * bindings) or "steamvr" (OpenComposite evaluates SteamVR's modes on the controller's raw inputs) */
+	 * bindings) or "steamvr" (OpenLamina evaluates SteamVR's modes on the controller's raw inputs) */
 	std::string InputEvaluator() const { return inputEvaluator; }
 
 private:

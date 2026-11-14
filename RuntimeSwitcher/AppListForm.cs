@@ -28,7 +28,7 @@ namespace RuntimeSwitcher
         private readonly Dictionary<string, JObject> _config;
         private readonly JObject _globalConfig;
 
-        private const string LblOpenComposite = "OpenComposite";
+        private const string LblOpenComposite = "OpenLamina";
         private const string LblSteamVr = "SteamVR";
         private const string KeyGlobalConfig = "***GlobalConfig";
         private const string KeyDefaultRuntime = "default_runtime";
@@ -51,7 +51,7 @@ namespace RuntimeSwitcher
                 Apps.Add(new VRApp(item.Key, item.Value, _config[item.Key]));
             }
 
-            _groupOpenComposite = new ListViewGroup("OpenComposite", HorizontalAlignment.Left);
+            _groupOpenComposite = new ListViewGroup("OpenLamina", HorizontalAlignment.Left);
             _groupSteamVr = new ListViewGroup("SteamVR", HorizontalAlignment.Left);
 
             appsList.Groups.AddRange(new[] {_groupOpenComposite, _groupSteamVr});

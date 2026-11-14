@@ -250,7 +250,7 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal(EVRInitError* peError, EVRAppl
 
 VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApplicationType eApplicationType, const char* pStartupInfo)
 {
-	OOVR_LOG_ONCEF("Initializing OpenComposite (github.com/fzeruhn/OpenComposite) - revision %s", OC_VERSION);
+	OOVR_LOG_ONCEF("Initializing OpenLamina, a fork of OpenComposite (github.com/fzeruhn/OpenLamina) - revision %s", OC_VERSION);
 	if (peError) {
 		*peError = VRInitError_None;
 	}
@@ -298,7 +298,7 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 		{
 			// Overlays and background apps aren't games, so refuse them with an init error rather than ending
 			// the program: it can then carry on as if VR weren't there.
-			OOVR_LOGF("Refusing application type %d: OpenComposite runs games only", (int)eApplicationType);
+			OOVR_LOGF("Refusing application type %d: OpenLamina runs games only", (int)eApplicationType);
 			if (peError) {
 				*peError = eApplicationType == VRApplication_Background ? VRInitError_Init_NoServerForBackgroundApp : VRInitError_Init_InvalidApplicationType;
 			}
@@ -438,7 +438,7 @@ VR_INTERFACE void VR_CALLTYPE VR_ShutdownInternal()
 	scene_init_count = 0;
 	utility_init = false;
 
-	OOVR_LOG("OpenComposite shutdown");
+	OOVR_LOG("OpenLamina shutdown");
 
 	// What the app asked for that OpenComposite doesn't do, with counts
 	oc_soft_log_summary();
@@ -471,7 +471,7 @@ VR_INTERFACE void* VRClientCoreFactory(const char* pInterfaceName, int* pReturnC
 		if (alternativeCoreFactory)
 			goto use_alt;
 		// The app was set to SteamVR, which couldn't be loaded (logged): the game still starts, on OpenComposite
-		OOVR_LOG("SteamVR was chosen for this program but couldn't be loaded; using OpenComposite instead");
+		OOVR_LOG("SteamVR was chosen for this program but couldn't be loaded; using OpenLamina instead");
 	}
 
 	if (pReturnCode)

@@ -1,16 +1,17 @@
-# OpenComposite (fzeruhn's fork)
+# OpenLamina
 
-[![Build](https://img.shields.io/github/actions/workflow/status/fzeruhn/OpenComposite/build.yml?branch=openxr&style=for-the-badge&logo=github&label=build)](https://github.com/fzeruhn/OpenComposite/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/fzeruhn/OpenComposite?include_prereleases&style=for-the-badge&label=release)](https://github.com/fzeruhn/OpenComposite/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/fzeruhn/OpenLamina/build.yml?branch=openxr&style=for-the-badge&logo=github&label=build)](https://github.com/fzeruhn/OpenLamina/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/fzeruhn/OpenLamina?include_prereleases&style=for-the-badge&label=release)](https://github.com/fzeruhn/OpenLamina/releases)
 
 Play SteamVR (OpenVR) games on any OpenXR runtime, without SteamVR.
 
-This is a fork of [OpenComposite](https://gitlab.com/znixian/OpenOVR) by ZNix and its contributors. Upstream hasn't
+OpenLamina is a fork of [OpenComposite](https://gitlab.com/znixian/OpenOVR) by ZNix and its contributors. It has a name
+of its own because it has grown well past it, and its code isn't kept in step with upstream's any more. Upstream hasn't
 merged anything since July 2025, and its open merge requests, some of them needed by newer games such as Half-Life:
-Alyx, have waited without review. This fork takes them, fixes what review found in them, adds fixes of its own, and
+Alyx, have waited without review. OpenLamina takes them, fixes what review found in them, adds fixes of its own, and
 publishes Windows and Linux builds.
 
-**Bugs and questions about this fork go to [its issues](https://github.com/fzeruhn/OpenComposite/issues)**, not to
+**Bugs and questions about this fork go to [its issues](https://github.com/fzeruhn/OpenLamina/issues)**, not to
 upstream's GitLab or Discord as they can't help with changes they haven't made.
 
 ## What this fork has that upstream doesn't
@@ -18,15 +19,15 @@ upstream's GitLab or Discord as they can't help with changes they haven't made.
 Upstream merge requests are linked as !*n* with their authors. Everything else was written for this fork.
 
 **Games keep running**
-- Nothing OpenComposite does ends a game any more. A call it can't answer properly gets SteamVR's error or an empty
+- Nothing OpenLamina does ends a game any more. A call it can't answer properly gets SteamVR's error or an empty
   answer, is logged once, and is listed in a compatibility summary at the end of the log. Failed OpenXR calls, a lost
-  session and swapchains that can't be made are recovered from. A broken `opencomposite.ini`, action manifest or
+  session and swapchains that can't be made are recovered from. A broken `openlamina.ini`, action manifest or
   binding file costs only the entries that are wrong. CI checks that no new hard stop gets in.
 - Every OpenVR interface version Valve has shipped, from SDK 0.9.0 on, is offered (or set aside with a reason in
   `tests/conformance/not_implemented.txt`). Old versions get the old struct layouts.
 - Settings, the application registry, room setup and their events are kept for real and shared by every program using
-  OpenComposite, as SteamVR shares them.
-- SteamVR's binding files can be evaluated by OpenComposite itself, behind `inputEvaluator=steamvr` (see
+  OpenLamina, as SteamVR shares them.
+- SteamVR's binding files can be evaluated by OpenLamina itself, behind `inputEvaluator=steamvr` (see
   [the configuration file](#configuration-file)).
 - A conformance test program runs every method of every interface version and compares the answers with SteamVR's.
 
@@ -83,19 +84,19 @@ Upstream merge requests are linked as !*n* with their authors. Everything else w
   their own output folders. ([!179](https://gitlab.com/znixian/OpenOVR/-/merge_requests/179), Kitlith)
 
 **Releases**
-- [Windows and Linux builds](https://github.com/fzeruhn/OpenComposite/releases), 64- and 32-bit, built by GitHub
+- [Windows and Linux builds](https://github.com/fzeruhn/OpenLamina/releases), 64- and 32-bit, built by GitHub
   Actions from the tagged commit, with checksums, the licences and the full source. Upstream's download links and
   launcher fetch upstream's builds.
 
 Every change was reviewed, and all four builds are made with warnings as errors on every change. Not every change has
 been tried yet in the game it is for. If something works upstream and not here, please
-[open an issue](https://github.com/fzeruhn/OpenComposite/issues/new).
+[open an issue](https://github.com/fzeruhn/OpenLamina/issues/new).
 
 Not here yet: overlay apps (upstream !101), controller models and the virtual keyboard.
 
-## What OpenComposite is
+## What OpenLamina is
 
-OpenComposite is an implementation of OpenVR, SteamVR's API, that forwards a game's calls straight to the OpenXR
+OpenLamina is an implementation of OpenVR, SteamVR's API, that forwards a game's calls straight to the OpenXR
 runtime: Meta's, Monado, Windows Mixed Reality, Pimax's, Varjo's and others. Think of it as a backwards
 [ReVive](https://github.com/LibreVR/Revive). Games run on your headset as though they were native OpenXR games,
 without SteamVR in between. Reasons to use it:
@@ -104,7 +105,8 @@ without SteamVR in between. Reasons to use it:
 * SteamVR can take a while to start, and is several gigabytes.
 * OpenXR runtimes can be less prone to the stutter some people get in SteamVR.
 
-It used to be called OpenOVR ("OpenVR for OculusVR") and was renamed to avoid confusion with OpenVR.
+OpenComposite, which this was forked from, used to be called OpenOVR ("OpenVR for OculusVR") and was renamed to avoid
+confusion with OpenVR; the source folders here still carry that name.
 
 Two community resources written for upstream mostly apply here too: mbucchia's
 [FAQ](https://mbucchia.github.io/OpenXR-Toolkit/opencomposite.html) and the
@@ -113,66 +115,66 @@ A game listed there as broken by a missing interface will likely work with this 
 
 ## Installing
 
-Your headset's OpenXR runtime must be the active one: OpenComposite runs OpenVR games on it. Everything is on the
-[releases page](https://github.com/fzeruhn/OpenComposite/releases).
+Your headset's OpenXR runtime must be the active one: OpenLamina runs OpenVR games on it. Everything is on the
+[releases page](https://github.com/fzeruhn/OpenLamina/releases).
 
 ### Windows
 
-1. Download `OpenComposite-Setup.exe` and run it. It installs for your user only, without an administrator, in
-   `%LOCALAPPDATA%\Programs\OpenComposite`. It isn't signed yet, so Windows may say it "protected your PC": choose
+1. Download `OpenLamina-Setup.exe` and run it. It installs for your user only, without an administrator, in
+   `%LOCALAPPDATA%\Programs\OpenLamina`. It isn't signed yet, so Windows may say it "protected your PC": choose
    *More info*, then *Run anyway*. It needs the .NET Framework 4.8, which Windows 10 (1903 or later) and 11 come with.
-2. Leave *Use OpenComposite for OpenVR games now* ticked on its last page. OpenVR games then load OpenComposite.
+2. Leave *Use OpenLamina for OpenVR games now* ticked on its last page. OpenVR games then load OpenLamina.
 
-The **OpenComposite** app (Start menu) shows what OpenVR games use and the active OpenXR runtime, and has:
+The **OpenLamina** app (Start menu) shows what OpenVR games use and the active OpenXR runtime, and has:
 
-- **Use OpenComposite** and **Use SteamVR**. Starting SteamVR from Steam also switches back to SteamVR, so after
-  using SteamVR, open the app and press *Use OpenComposite* again.
-- **Per-app settings**: send one program to SteamVR (or to OpenComposite) whatever the switch says. Programs appear in
-  the list once they have tried to start VR with OpenComposite.
+- **Use OpenLamina** and **Use SteamVR**. Starting SteamVR from Steam also switches back to SteamVR, so after
+  using SteamVR, open the app and press *Use OpenLamina* again.
+- **Per-app settings**: send one program to SteamVR (or to OpenLamina) whatever the switch says. Programs appear in
+  the list once they have tried to start VR with OpenLamina.
 - **Updates**: when opened, it looks for a newer release here and offers *Update to …*, which downloads the new
   installer, checks its SHA-256 against the one GitHub lists, and runs it. Nothing updates by itself. *Include
   pre-releases* offers those too.
 
-To uninstall, use Windows' *Installed apps*. The uninstaller first takes OpenComposite out of
-`openvrpaths.vrpath`, putting SteamVR first again if OpenComposite was. It won't run while a game uses OpenComposite.
+To uninstall, use Windows' *Installed apps*. The uninstaller first takes OpenLamina out of
+`openvrpaths.vrpath`, putting SteamVR first again if OpenLamina was. It won't run while a game uses OpenLamina.
 
-For scripts: `OpenComposite-Setup.exe /VERYSILENT /SWITCH` installs and switches without asking anything (leave out
-`/SWITCH` to only install). `OpenComposite.exe --use-opencomposite`, `--use-steamvr` and `--remove` switch without
+For scripts: `OpenLamina-Setup.exe /VERYSILENT /SWITCH` installs and switches without asking anything (leave out
+`/SWITCH` to only install). `OpenLamina.exe --use-openlamina`, `--use-steamvr` and `--remove` switch without
 opening the window.
 
 ### Linux
 
 ```bash
-tar -xzf OpenComposite-linux.tar.gz
-OpenComposite/install.sh
+tar -xzf OpenLamina-linux.tar.gz
+OpenLamina/install.sh
 ```
 
-`install.sh` copies OpenComposite to `~/.local/share/OpenComposite`, then puts that folder first in `"runtime"` of
+`install.sh` copies OpenLamina to `~/.local/share/OpenLamina`, then puts that folder first in `"runtime"` of
 `~/.config/openvr/openvrpaths.vrpath`, keeping the other entries after it (the old file is kept as
 `openvrpaths.vrpath.bak`). It doesn't need root, but it needs `python3`. At the end it prints the Steam launch options
 your OpenXR runtime needs inside the Steam Runtime (see [Linux-specific info](#linux-specific-info)). Afterwards, run
 the installed copy:
 
 ```bash
-~/.local/share/OpenComposite/install.sh --status          # what OpenVR games use, what's installed
-~/.local/share/OpenComposite/install.sh --steamvr         # back to SteamVR (starting SteamVR from Steam does it too)
-~/.local/share/OpenComposite/install.sh --opencomposite   # and to OpenComposite again
-~/.local/share/OpenComposite/install.sh --update          # the newest release, if newer (--pre: pre-releases too)
-~/.local/share/OpenComposite/install.sh --launch-options  # the Steam launch options again
-~/.local/share/OpenComposite/install.sh --uninstall
+~/.local/share/OpenLamina/install.sh --status          # what OpenVR games use, what's installed
+~/.local/share/OpenLamina/install.sh --steamvr         # back to SteamVR (starting SteamVR from Steam does it too)
+~/.local/share/OpenLamina/install.sh --openlamina   # and to OpenLamina again
+~/.local/share/OpenLamina/install.sh --update          # the newest release, if newer (--pre: pre-releases too)
+~/.local/share/OpenLamina/install.sh --launch-options  # the Steam launch options again
+~/.local/share/OpenLamina/install.sh --uninstall
 ```
 
 `--update` downloads the release's archive and checks its SHA-256 against the one GitHub lists before installing it.
-Files you put in `bin/` (`opencomposite.ini`, `apps-config.json`) survive updates.
+Files you put in `bin/` (`openlamina.ini`, `apps-config.json`) survive updates.
 
 **Flatpak Steam** has its own `openvrpaths.vrpath` and can't see `~/.local/share`. With only Flatpak Steam installed,
-`install.sh` uses its folders by itself (`~/.var/app/com.valvesoftware.Steam/.local/share/OpenComposite` and
+`install.sh` uses its folders by itself (`~/.var/app/com.valvesoftware.Steam/.local/share/OpenLamina` and
 `.../.config/openvr/openvrpaths.vrpath`); with both kinds, add `--flatpak` to every command for Flatpak Steam.
 
 ### By hand
 
-Unpack `OpenComposite-windows.zip` or `OpenComposite-linux.tar.gz` somewhere it can stay. Each holds an
-`OpenComposite` folder with the 64- and 32-bit libraries in `bin`. Put that folder first in `"runtime"` of
+Unpack `OpenLamina-windows.zip` or `OpenLamina-linux.tar.gz` somewhere it can stay. Each holds an
+`OpenLamina` folder with the 64- and 32-bit libraries in `bin`. Put that folder first in `"runtime"` of
 `openvrpaths.vrpath` (`%LOCALAPPDATA%\openvr\openvrpaths.vrpath` on Windows, `~/.config/openvr/openvrpaths.vrpath` on
 Linux), keeping the other entries after it. To switch back, put SteamVR's folder first again.
 
@@ -184,12 +186,12 @@ installer never changes game folders.
 
 As most VR games are Windows games run through Proton, you'll usually install system-wide, which `install.sh` does
 (above). An environment variable lets you choose per game instead. By hand, unpack the tarball, which gives an
-`OpenComposite` folder, and then:
+`OpenLamina` folder, and then:
 
 1. Get the runtime in place, by one of these:
-	- Set `VR_OVERRIDE` to the `OpenComposite` folder, in the game's Steam launch options:
-	  `VR_OVERRIDE=/path/to/OpenComposite %command%`
-	- Edit `~/.config/openvr/openvrpaths.vrpath`, and put the `OpenComposite` folder first in `"runtime"`. Steam likes
+	- Set `VR_OVERRIDE` to the `OpenLamina` folder, in the game's Steam launch options:
+	  `VR_OVERRIDE=/path/to/OpenLamina %command%`
+	- Edit `~/.config/openvr/openvrpaths.vrpath`, and put the `OpenLamina` folder first in `"runtime"`. Steam likes
 	  to rewrite this file, so you may need to make it read-only.
 	- For the rare native Linux game, copy `bin/linux64/vrclient.so` over the game's `libopenvr_api.so`.
 2. Games in the Steam Runtime (most of them) need a few paths made visible inside it:
@@ -198,11 +200,11 @@ As most VR games are Windows games run through Proton, you'll usually install sy
 	  `/run/host/usr/share/openxr/1/openxr_monado.json`.
 	- Other paths can be added with the `PRESSURE_VESSEL_FILESYSTEMS_RW` environment variable.
 
-For example, with OpenComposite in your home directory, `VR_OVERRIDE`, and Monado installed system-wide, the launch
+For example, with OpenLamina in your home directory, `VR_OVERRIDE`, and Monado installed system-wide, the launch
 options might be:
 
 ```
-VR_OVERRIDE=~/OpenComposite XR_RUNTIME_JSON=/run/host/usr/share/openxr/1/openxr_monado.json PRESSURE_VESSEL_FILESYSTEMS_RW=$XDG_RUNTIME_DIR/monado_comp_ipc %command%
+VR_OVERRIDE=~/OpenLamina XR_RUNTIME_JSON=/run/host/usr/share/openxr/1/openxr_monado.json PRESSURE_VESSEL_FILESYSTEMS_RW=$XDG_RUNTIME_DIR/monado_comp_ipc %command%
 ```
 
 `$XDG_RUNTIME_DIR/monado_comp_ipc` is Monado's socket: the game needs to see it to find Monado running. More on
@@ -211,40 +213,55 @@ VR_OVERRIDE=~/OpenComposite XR_RUNTIME_JSON=/run/host/usr/share/openxr/1/openxr_
 
 The Linux builds need glibc 2.38 or later (Ubuntu 24.04, Debian 13, Fedora 39 or newer).
 
+## Coming from OpenComposite
+
+What you set up for OpenComposite keeps working, and nothing of it is changed or deleted:
+
+- `opencomposite.ini` is read wherever `openlamina.ini` would be. If a folder has both, only `openlamina.ini` is read.
+- Binding files in `%LOCALAPPDATA%\OpenComposite\bindings` (Linux: `~/.local/state/OpenComposite/bindings`) and in a game's
+  `OpenComposite` folder are found where they are, after the `OpenLamina` ones.
+- The shared settings, room setup and application list (`%LOCALAPPDATA%\OpenComposite\store`) are copied once to
+  `%LOCALAPPDATA%\OpenLamina\store` the first time OpenLamina runs, and OpenLamina uses its own copy from then on.
+- `OPENCOMPOSITE_DEBUG_BREAK` and `OPENCOMPOSITE_TRACKER_SERIALS` are read when the `OPENLAMINA_` ones aren't set.
+- `install.sh --opencomposite` still works.
+
+The Windows installer is a different app from OpenComposite's and installs next to it, in
+`%LOCALAPPDATA%\Programs\OpenLamina`. Uninstall OpenComposite from Windows' *Installed apps* when you no longer want it.
+
 ## Configuration file
 
-On startup, OpenComposite searches for a file named `opencomposite.ini`, first next to the `openvr_api.dll` file, and if it can't find
+On startup, OpenLamina searches for a file named `openlamina.ini` (or `opencomposite.ini`, as it was called), first next to the `openvr_api.dll` file, and if it can't find
 that, then it looks in the working directory (usually in the same folder as the EXE). If no file is found, that's fine and all
 the default values are used.
 
 This is its configuration file, where you can specify a number of options. These are listed in `name=value` format, and you
-can define a comment by starting a line with `;` or a `#`. Note the option names **are** case sensitive. An option OpenComposite
-doesn't know, or a value it can't read, is logged as a warning (in `opencomposite.log`) and that option keeps its default; the game
+can define a comment by starting a line with `;` or a `#`. Note the option names **are** case sensitive. An option OpenLamina
+doesn't know, or a value it can't read, is logged as a warning (in `openlamina.log`) and that option keeps its default; the game
 starts either way. Any whitespace between the name, equals sign, and value is ignored, as is whitespace on the end of the line.
 Ensure your lines do not begin with whitespace however.
 
 The available options are:
 
 * `renderCustomHands` - boolean, default `enabled`. 
-	* Should OpenComposite render custom hands. Disable this if you *really* dislike the hand models, and some games (like Skyrim) come with backup models that will be used instead.
+	* Should OpenLamina render custom hands. Disable this if you *really* dislike the hand models, and some games (like Skyrim) come with backup models that will be used instead.
 * `handColour` - colour, default `#4c4c4c`. 
-	* The colour of the hands OpenComposite draws, as they currently lack proper textures.
+	* The colour of the hands OpenLamina draws, as they currently lack proper textures.
 * `supersampleRatio` - float, default `1.0`. 
 	* The supersample ratio in use - this is similar to what you would enter into SteamVR, a value of `145%` in SteamVR is a value of `1.45` here. A value of `80%` in SteamVR is `0.8` here, and so on. Higher numbers improve graphics, at a major performance cost.
 * `haptics` - boolean, default `enabled`. 
 	* Should haptic feedback to the controllers be enabled.
 * `admitUnknownProps` - boolean, default `disabled`. 
-	* If asked for a tracked device property it does not understand, should OpenComposite ignore it.
+	* If asked for a tracked device property it does not understand, should OpenLamina ignore it.
 * `logGetTrackedProperty` - boolean, default `disabled`. 
 	* Print logging information when the app requests information about tracked devices, such as the HMD or the Touch controllers. On some games, this causes a log entry to be generated every frame, which isn't great for performance and clutters up the log. This is potentially useful for troubleshooting, and was enabled by default before the config option existed. In general, unless you've been told to enable this (or you know what you're doing while troubleshooting) you don't need to enable this.
 * `stopOnSoftAbort` - boolean, default `disabled`.
-    * Ends the game at the first call OpenComposite can't answer properly, as it used to. By default such a call gets an error or an empty answer and the game goes on; each one is logged the first time, and when the game shuts OpenVR down the log ends with a compatibility summary (`OpenComposite compatibility summary: <n> unsupported calls in <m> places`, then each place with how often it was hit). That list is what's worth reporting when a game misbehaves. Only enable this to find where a game first goes wrong.
+    * Ends the game at the first call OpenLamina can't answer properly, as it used to. By default such a call gets an error or an empty answer and the game goes on; each one is logged the first time, and when the game shuts OpenVR down the log ends with a compatibility summary (`OpenLamina compatibility summary: <n> unsupported calls in <m> places`, then each place with how often it was hit). That list is what's worth reporting when a game misbehaves. Only enable this to find where a game first goes wrong.
 * `dx10Mode` - boolean, default `disabled`.
     * Use DX10 instead of DX11 for games submitting DirectX textures.
 * `enableHiddenMeshFix` - boolean, default `enabled`. 
 	* Alter the coordinates of the hidden area mesh mask to fit within the view's projection. The hidden area mesh mask defines a region to which the game will not draw and is used to mask off areas of the display that you typically cannot see in the headset. If you see odd black regions around the view then try disabling this fix.
 * `invertUsingShaders` - boolean, default `disabled`. 
-	* Invert the image for display using shaders rather than relying on the XR runtime and inverted FOV values. Some games render the image inverted and rely on the runtime to display correctly. In OpenXR some runtimes don't do the inversion correctly. If so enable this option for OpenComposite to do the inversion when copying the image using shaders. This might have a minor cost in performance.
+	* Invert the image for display using shaders rather than relying on the XR runtime and inverted FOV values. Some games render the image inverted and rely on the runtime to display correctly. In OpenXR some runtimes don't do the inversion correctly. If so enable this option for OpenLamina to do the inversion when copying the image using shaders. This might have a minor cost in performance.
 * `initUsingVulkan` - boolean, default `true`. 
 	* If available the temporary graphics adapter at start up will use Vulkan by default. This may be incompatible with some games. This will mostly affect Oculus headsets. 
 * `hiddenMeshVerticalScale` - float, default `1.0`. 
@@ -252,7 +269,7 @@ The available options are:
 * `logAllOpenVRCalls` - boolean, default `false`
 	* Log every OpenVR call a game makes. Similar to `logGetTrackedProperty`, this clutters logs and should not be enabled unless necessary.
 * `inputEvaluator` - `direct` or `steamvr`, default `direct`.
-	* How a game's SteamVR bindings become input. `direct` turns each binding into OpenXR bindings, as before. `steamvr` has OpenComposite run SteamVR's binding modes (toggles, dpads, chords and the rest) on the controller's raw inputs, and maps legacy input as SteamVR does. `steamvr` hasn't been tried in many games yet; try it when a game's controls don't work under `direct`.
+	* How a game's SteamVR bindings become input. `direct` turns each binding into OpenXR bindings, as before. `steamvr` has OpenLamina run SteamVR's binding modes (toggles, dpads, chords and the rest) on the controller's raw inputs, and maps legacy input as SteamVR does. `steamvr` hasn't been tried in many games yet; try it when a game's controls don't work under `direct`.
 * `bindingEditor` - string, default empty.
 	* The program a game's "open binding UI" request starts.
 
@@ -276,25 +293,25 @@ haptics = off
 ## Reporting a bug
 
 If a game crashes, shows a missing interface, or behaves differently than under SteamVR, please
-[open an issue here](https://github.com/fzeruhn/OpenComposite/issues/new). Say:
+[open an issue here](https://github.com/fzeruhn/OpenLamina/issues/new). Say:
 
 - the game, your headset and OpenXR runtime, and which release of this fork (or commit) you use;
 - what happened and when: at start, after loading a level, on pressing a button;
 - whether it also happens with upstream's build, if you know.
 
-And attach `opencomposite.log`, which has most of what's needed to find the cause. It is in:
+And attach `openlamina.log`, which has most of what's needed to find the cause. It is in:
 
-- Windows: `%LOCALAPPDATA%\OpenComposite\logs` (paste that into Explorer's address bar)
-- Linux: `$XDG_STATE_HOME/OpenComposite/logs`, or `~/.local/state/OpenComposite/logs` if `XDG_STATE_HOME` isn't set
+- Windows: `%LOCALAPPDATA%\OpenLamina\logs` (paste that into Explorer's address bar)
+- Linux: `$XDG_STATE_HOME/OpenLamina/logs`, or `~/.local/state/OpenLamina/logs` if `XDG_STATE_HOME` isn't set
 
-If neither exists, look for `opencomposite.log` next to the game's EXE.
+If neither exists, look for `openlamina.log` next to the game's EXE.
 
 ## Building
 
 The source is GPL-3.0-or-later. Clone with its submodules:
 
 ```bash
-git clone --recursive https://github.com/fzeruhn/OpenComposite.git
+git clone --recursive https://github.com/fzeruhn/OpenLamina.git
 ```
 
 It's a standard CMake project, so IDEs such as CLion and Visual Studio can build it too. The scripts below build it
@@ -323,9 +340,9 @@ scripts/ci/build-linux.sh x64
 This makes `build/linux-x64/bin/linux64/vrclient.so` (`x86` makes `bin/vrclient.so`). A plain `cmake -B build && cmake
 --build build` works too, and the build folder can then be used directly as `VR_OVERRIDE`.
 
-**The installers:** `RuntimeSwitcher/` is the Windows app (`OpenComposite.exe`, C# on the .NET Framework 4.8, built
+**The installers:** `RuntimeSwitcher/` is the Windows app (`OpenLamina.exe`, C# on the .NET Framework 4.8, built
 with the .NET SDK on any OS), revived from upstream's switcher and pointed at this fork's releases.
-`installer/OpenComposite.iss` is the Windows installer and `installer/install.sh` the Linux one. With the two Windows
+`installer/OpenLamina.iss` is the Windows installer and `installer/install.sh` the Linux one. With the two Windows
 DLLs in `artifacts\windows-x64` and `artifacts\windows-x86`, the .NET SDK 8 or later and Inno Setup 6:
 
 ```powershell
@@ -333,12 +350,12 @@ scripts\ci\build-installer.ps1 -Artifacts artifacts -Version 2026.11.06
 ```
 
 This runs `RuntimeSwitcher/Tests` (`dotnet test RuntimeSwitcher/Tests` alone works on Linux too) and makes
-`build\installer\OpenComposite-Setup.exe`. `scripts/ci/test-install.sh OpenComposite-linux.tar.gz` tries `install.sh`
+`build\installer\OpenLamina-Setup.exe`. `scripts/ci/test-install.sh OpenLamina-linux.tar.gz` tries `install.sh`
 on a scratch home folder.
 
 ### How the code is generated
 
-OpenComposite relies heavily on scripts that generate code; without them the repository would have roughly three to four
+OpenLamina relies heavily on scripts that generate code; without them the repository would have roughly three to four
 times as much. There are two:
 
 1. One splits OpenVR's headers into one header per version of each interface, so the project can use many versions of
@@ -365,7 +382,7 @@ keeps it up to date. When Valve tags a new SDK:
 
 ## Licence
 
-OpenComposite itself is Free Software under the GPLv3:
+OpenLamina itself is Free Software under the GPLv3:
 
 ```
 This program is free software: you can redistribute it and/or modify

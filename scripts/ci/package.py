@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Packs OpenComposite's release archives from the release workflow's build artifacts.
+"""Packs OpenLamina's release archives from the release workflow's build artifacts.
 
     scripts/ci/package.py --version VERSION --artifacts DIR --out DIR [--os windows linux] [--repository OWNER/NAME]
-                          [--installer OpenComposite-Setup.exe]
+                          [--installer OpenLamina-Setup.exe]
     scripts/ci/package.py --version VERSION --artifacts DIR --windows-folder DIR [--repository OWNER/NAME]
 
 DIR of --artifacts has a folder per build, named as the workflow's artifacts: windows-x64 (vrclient_x64.dll),
 windows-x86 (vrclient.dll), linux-x64 and linux-x86 (vrclient.so each). Made in --out:
 
-    OpenComposite-windows.zip    OpenComposite/bin/vrclient_x64.dll and bin/vrclient.dll
-    OpenComposite-linux.tar.gz   OpenComposite/bin/linux64/vrclient.so and bin/vrclient.so, and install.sh
-    OpenComposite-source.tar.gz  this commit's source, submodules included
-    OpenComposite-Setup.exe      with --installer: that file (scripts/ci/build-installer.ps1 builds it)
+    OpenLamina-windows.zip    OpenLamina/bin/vrclient_x64.dll and bin/vrclient.dll
+    OpenLamina-linux.tar.gz   OpenLamina/bin/linux64/vrclient.so and bin/vrclient.so, and install.sh
+    OpenLamina-source.tar.gz  this commit's source, submodules included
+    OpenLamina-Setup.exe      with --installer: that file (scripts/ci/build-installer.ps1 builds it)
     SHA256SUMS.txt               of the others
     RELEASE_NOTES.md             the release's description
 
---windows-folder writes the Windows archive's OpenComposite folder into DIR instead, unpacked, for the installer.
+--windows-folder writes the Windows archive's OpenLamina folder into DIR instead, unpacked, for the installer.
 
 Both binary archives also have an empty bin/version.txt (it keeps Steam from rewriting openvrpaths.vrpath while that
-names the folder), the licences of OpenComposite and of what is built into it, and SOURCE.txt. Each archive's entries
+names the folder), the licences of OpenLamina and of what is built into it, and SOURCE.txt. Each archive's entries
 carry the commit's time, so the same commit packs the same bytes.
 """
 
@@ -35,7 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# OpenComposite's licence and those of what is built into the library (the hand models, glm, the OpenXR loader and its
+# OpenLamina's licence and those of what is built into the library (the hand models, glm, the OpenXR loader and its
 # jsoncpp): source path -> name in the archive.
 LICENCES = {
     "LICENSE.txt": "LICENSE.txt",
@@ -72,10 +72,10 @@ def git(*args: str) -> str:
 
 def source_text(version: str, commit: str, repository: str) -> str:
     return (
-        f"OpenComposite {version}, commit {commit}\n"
-        f"From https://github.com/{repository}, a fork of https://gitlab.com/znixian/OpenOVR.\n"
+        f"OpenLamina {version}, commit {commit}\n"
+        f"From https://github.com/{repository}, a fork of OpenComposite (https://gitlab.com/znixian/OpenOVR).\n"
         "GPL-3.0-or-later (LICENSE.txt); the other licence files are those of what is built into it.\n"
-        "Its source, submodules included, is OpenComposite-source.tar.gz, which comes with this archive,\n"
+        "Its source, submodules included, is OpenLamina-source.tar.gz, which comes with this archive,\n"
         f"and https://github.com/{repository}/tree/{commit}\n"
         "Built by .github/workflows/build.yml: Release, warnings as errors; Windows with the C runtime linked in,\n"
         "Linux with the crash backtrace.\n"
@@ -185,31 +185,31 @@ def write_source_tar(out: Path, prefix: str, mtime: int) -> None:
 
 def notes(version: str, commit: str, repository: str, sums: str, installer: bool) -> str:
     setup_row = (
-        "| `OpenComposite-Setup.exe` | Windows installer: OpenComposite and its app to switch OpenVR games between it and SteamVR |\n"
+        "| `OpenLamina-Setup.exe` | Windows installer: OpenLamina and its app to switch OpenVR games between it and SteamVR |\n"
         if installer
         else ""
     )
     windows = (
-        "**Windows:** run `OpenComposite-Setup.exe` (for your user, no administrator needed). It isn't signed, so Windows "
+        "**Windows:** run `OpenLamina-Setup.exe` (for your user, no administrator needed). It isn't signed, so Windows "
         "may say it protected your PC: choose *More info*, then *Run anyway*. Its last page switches OpenVR games to "
-        "OpenComposite; the OpenComposite app in the Start menu switches them back, and updates OpenComposite.\n\n"
+        "OpenLamina; the OpenLamina app in the Start menu switches them back, and updates OpenLamina.\n\n"
         if installer
         else ""
     )
-    return f"""OpenComposite {version}, built from [{commit[:12]}](https://github.com/{repository}/commit/{commit}).
+    return f"""OpenLamina {version}, built from [{commit[:12]}](https://github.com/{repository}/commit/{commit}).
 
 | File | What |
 |---|---|
-{setup_row}| `OpenComposite-windows.zip` | `bin\\vrclient_x64.dll` (64-bit games) and `bin\\vrclient.dll` (32-bit) |
-| `OpenComposite-linux.tar.gz` | `bin/linux64/vrclient.so` (64-bit games), `bin/vrclient.so` (32-bit) and `install.sh` |
-| `OpenComposite-source.tar.gz` | the source of this build, submodules included |
+{setup_row}| `OpenLamina-windows.zip` | `bin\\vrclient_x64.dll` (64-bit games) and `bin\\vrclient.dll` (32-bit) |
+| `OpenLamina-linux.tar.gz` | `bin/linux64/vrclient.so` (64-bit games), `bin/vrclient.so` (32-bit) and `install.sh` |
+| `OpenLamina-source.tar.gz` | the source of this build, submodules included |
 | `SHA256SUMS.txt` | checksums of the others |
 
-{windows}**Linux:** unpack the archive and run `OpenComposite/install.sh`: it copies OpenComposite to `~/.local/share/OpenComposite` (or Flatpak Steam's folder) and switches OpenVR games to it. `install.sh --help` lists the rest: switching back, updating, uninstalling, and Steam launch options for games in the Steam Runtime.
+{windows}**Linux:** unpack the archive and run `OpenLamina/install.sh`: it copies OpenLamina to `~/.local/share/OpenLamina` (or Flatpak Steam's folder) and switches OpenVR games to it. `install.sh --help` lists the rest: switching back, updating, uninstalling, and Steam launch options for games in the Steam Runtime.
 
 **By hand, and for one game only:** see the README's [Installing](https://github.com/{repository}#installing) section.
 
-OpenComposite is GPL-3.0-or-later; each archive has its licences and a `SOURCE.txt`.
+OpenLamina is a fork of [OpenComposite](https://gitlab.com/znixian/OpenOVR), GPL-3.0-or-later like it; each archive has its licences and a `SOURCE.txt`.
 
 ```
 {sums}```
@@ -224,8 +224,8 @@ def main() -> None:
     output.add_argument("--out", type=Path)
     output.add_argument("--windows-folder", type=Path)
     parser.add_argument("--os", nargs="+", choices=["windows", "linux"], default=["windows", "linux"])
-    parser.add_argument("--repository", default="fzeruhn/OpenComposite")
-    parser.add_argument("--installer", type=Path, help="OpenComposite-Setup.exe, to put with the archives")
+    parser.add_argument("--repository", default="fzeruhn/OpenLamina")
+    parser.add_argument("--installer", type=Path, help="OpenLamina-Setup.exe, to put with the archives")
     args = parser.parse_args()
 
     commit = git("rev-parse", "HEAD").strip()
@@ -238,18 +238,18 @@ def main() -> None:
 
     made = []
     if "windows" in args.os:
-        out = args.out / "OpenComposite-windows.zip"
-        write_zip(out, "OpenComposite", binary_files("windows", args.artifacts, args.version, commit, args.repository), mtime)
+        out = args.out / "OpenLamina-windows.zip"
+        write_zip(out, "OpenLamina", binary_files("windows", args.artifacts, args.version, commit, args.repository), mtime)
         made.append(out)
     if "linux" in args.os:
-        out = args.out / "OpenComposite-linux.tar.gz"
-        write_binary_tar(out, "OpenComposite", binary_files("linux", args.artifacts, args.version, commit, args.repository), mtime)
+        out = args.out / "OpenLamina-linux.tar.gz"
+        write_binary_tar(out, "OpenLamina", binary_files("linux", args.artifacts, args.version, commit, args.repository), mtime)
         made.append(out)
-    out = args.out / "OpenComposite-source.tar.gz"
-    write_source_tar(out, f"OpenComposite-{args.version}", mtime)
+    out = args.out / "OpenLamina-source.tar.gz"
+    write_source_tar(out, f"OpenLamina-{args.version}", mtime)
     made.append(out)
     if args.installer:
-        out = args.out / "OpenComposite-Setup.exe"
+        out = args.out / "OpenLamina-Setup.exe"
         out.write_bytes(args.installer.read_bytes())
         made.append(out)
 

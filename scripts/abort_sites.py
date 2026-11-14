@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The places where OpenComposite can end a program (hard stops), and the check that no new one comes in.
+"""The places where OpenLamina can end a program (hard stops), and the check that no new one comes in.
 
   abort_sites.py --list               write tests/abort_sites.csv: file, line, function, macro, message, return_type
   abort_sites.py --write-allowlist    write scripts/fatal_sites.txt from what's there now (reason "to convert")

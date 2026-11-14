@@ -4,9 +4,9 @@ records. See README.md.
 
   run.py --runtime <vrclient dll> --conformance <oc_conformance> --xr-runtime none|stand-in|<manifest> --out <dir>
          [--script <json>] [--expected <json>] [--differences <json>] [--expect <json>] [--only <regex>]
-         [--cases <a,b,...>] [--jobs N] [--ci] [--allow-failures] [--real-runtime] [--ini <opencomposite.ini>]
+         [--cases <a,b,...>] [--jobs N] [--ci] [--allow-failures] [--real-runtime] [--ini <openlamina.ini>]
 
-Exit code 0 only if no child was ended by OpenComposite (exit 70), crashed or timed out, and nothing differed from
+Exit code 0 only if no child was ended by OpenLamina (exit 70), crashed or timed out, and nothing differed from
 --expected (beyond --differences) or --expect.
 """
 
@@ -30,7 +30,7 @@ APPTYPES_VALID_ONLY = [2, 3, 4, 0]  # Overlay, Background, Utility, Other
 CASES = ["init-matrix", "init-repeat", "init-other-thread", "lookup-before-init", "unknown-interface",
          "overlay-lifecycle", "input-manifest", "frame-loop", "submit-edges", "applications"]
 TIMEOUT = 60
-CASE_TIMEOUT = 600  # init-repeat starts OpenComposite 200 times
+CASE_TIMEOUT = 600  # init-repeat starts OpenLamina 200 times
 # SteamVR's answers while vrserver was starting or stopping between children (Retry, AnotherAppLaunching,
 # ShuttingDown): a recording keeps them, a comparison skips them
 STEAMVR_TRANSIENT = {115, 117, 119}
@@ -67,7 +67,7 @@ class Runner:
     def __init__(self, args):
         self.args = args
         self.out = Path(args.out)
-        # OC_TEST_NO_STEAMVR: OpenComposite finds no SteamVR or Steam config (its settings, resources and legacy
+        # OC_TEST_NO_STEAMVR: OpenLamina finds no SteamVR or Steam config (its settings, resources and legacy
         # binding files), so a run here answers as on CI's runner, which has none
         self.env = {"OC_NO_MESSAGE_BOX": "1", "OC_LOG_DIR": str(self.out / "logs"),
                     "OC_STORE_DIR": str(self.out / "store"), "OC_TEST_NO_STEAMVR": "1"}
@@ -97,7 +97,7 @@ class Runner:
         (self.out / "raw").mkdir(exist_ok=True)
         if self.args.ini:
             # Taken out again when the run ends (Runner.cleanup), with any file that was there put back
-            target = Path(self.runtime).parent / "opencomposite.ini"
+            target = Path(self.runtime).parent / "openlamina.ini"
             self.ini_backup = target.read_bytes() if target.exists() else None
             shutil.copy(self.args.ini, target)
         if unelevated.integrity_above_medium() and self.manifest:
@@ -191,7 +191,7 @@ class Runner:
 
     def cleanup(self):
         if self.args.ini:
-            target = Path(self.runtime).parent / "opencomposite.ini"
+            target = Path(self.runtime).parent / "openlamina.ini"
             if getattr(self, "ini_backup", None) is not None:
                 target.write_bytes(self.ini_backup)
             else:
@@ -278,7 +278,7 @@ def main():
     ap.add_argument("--cases")
     ap.add_argument("--cases-only", action="store_true", help="only the cases of --cases, no interfaces")
     ap.add_argument("--manifest", help="the action manifest for the input-manifest case")
-    ap.add_argument("--ini", help="an opencomposite.ini to put next to the DLL")
+    ap.add_argument("--ini", help="an openlamina.ini to put next to the DLL")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--ci", action="store_true")
     ap.add_argument("--allow-failures", action="store_true")

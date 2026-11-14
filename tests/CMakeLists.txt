@@ -1,4 +1,4 @@
-# OpenComposite's tests (OC_BUILD_TESTS). See tests/conformance/README.md for the conformance runs.
+# OpenLamina's tests (OC_BUILD_TESTS). See tests/conformance/README.md for the conformance runs.
 enable_testing()
 
 # Unit tests: linked against the static libraries the DLL is made from

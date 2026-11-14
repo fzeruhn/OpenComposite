@@ -14,7 +14,7 @@ namespace RuntimeSwitcher.Core
         {
             var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             // GitHub's API refuses requests without a User-Agent.
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenComposite-updater");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenLamina-updater");
             client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
             return client;
         });

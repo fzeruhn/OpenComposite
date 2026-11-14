@@ -1,4 +1,4 @@
-// oc_conformance: loads a vrclient DLL (OpenComposite's or SteamVR's) and calls every method of one interface version
+// oc_conformance: loads a vrclient DLL (OpenLamina's or SteamVR's) and calls every method of one interface version
 // with one argument set, or runs one named case (cases.cpp), writing a JSON line per call. See README.md.
 //
 //   oc_conformance --runtime <vrclient dll> --interface <IVRName_NNN> --apptype <n> --argset valid|edge|null|invalid

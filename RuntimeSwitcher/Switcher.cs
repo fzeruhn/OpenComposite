@@ -5,7 +5,7 @@ using RuntimeSwitcher.Core;
 
 namespace RuntimeSwitcher
 {
-    /// <summary>A change refused on purpose (a game uses OpenComposite, or the paths file is read-only), not a failure.</summary>
+    /// <summary>A change refused on purpose (a game uses OpenLamina, or the paths file is read-only), not a failure.</summary>
     internal sealed class RefusedException : InvalidOperationException
     {
         public RefusedException(string message) : base(message)
@@ -34,7 +34,7 @@ namespace RuntimeSwitcher
         {
             if (!Install.IsComplete)
                 throw new InvalidOperationException(
-                    $"{Install.Bin} doesn't have vrclient_x64.dll and vrclient.dll. Install OpenComposite again.");
+                    $"{Install.Bin} doesn't have vrclient_x64.dll and vrclient.dll. Install OpenLamina again.");
             OpenVRPaths paths = Load();
             paths.SetRuntimes(RuntimeList.UseOpenComposite(paths.Runtimes, Install.Folder, IgnoreCase));
             paths.Save();
@@ -58,12 +58,12 @@ namespace RuntimeSwitcher
         public static void CheckRemovable()
         {
             if (Install.InUse())
-                throw new RefusedException("A game is using OpenComposite. Close it, then uninstall.");
+                throw new RefusedException("A game is using OpenLamina. Close it, then uninstall.");
             OpenVRPaths paths = Load();
             if (paths.Existed && Lists(paths, Install.Folder) &&
                 (File.GetAttributes(paths.FilePath) & FileAttributes.ReadOnly) != 0)
                 throw new RefusedException(
-                    $"{paths.FilePath} is read-only, so OpenComposite can't take itself out of it. Clear its " +
+                    $"{paths.FilePath} is read-only, so OpenLamina can't take itself out of it. Clear its " +
                     "read-only attribute, then uninstall.");
         }
 

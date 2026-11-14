@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs OpenComposite against the stand-in OpenXR runtime with each failure script (scripts/<name>.json) and checks
+"""Runs OpenLamina against the stand-in OpenXR runtime with each failure script (scripts/<name>.json) and checks
 what expect/xr_failures.json says it should do: start-up errors, dropped frames, session loss, failed swapchains
 and binding suggestions. Nothing may end or crash in any of them.
 

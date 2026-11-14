@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Records SteamVR's own answers to every conformance call, with SteamVR's null driver (no headset needed), as the
-    reference OpenComposite is compared with (expected\steamvr-<version>.json).
+    reference OpenLamina is compared with (expected\steamvr-<version>.json).
 .DESCRIPTION
     1. Finds SteamVR: the paths file's runtime entry ending in \SteamVR, else Steam's steamapps\common\SteamVR.
     2. Refuses while SteamVR, Monado, Pimax's service or OVR Lighthouse Manager runs.
@@ -91,7 +91,7 @@ try {
     $settings | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $settingsPath -Encoding utf8
 
     # SteamVR first in the paths file, as SteamVR puts itself when started from Steam: its own processes (vrmonitor
-    # and the like) find the runtime there, and would otherwise load whatever is first (OpenComposite, say)
+    # and the like) find the runtime there, and would otherwise load whatever is first (OpenLamina, say)
     if (Test-Path -LiteralPath $pathsFile) {
         $pathsJson = Get-Content -LiteralPath $pathsFile -Raw | ConvertFrom-Json -AsHashtable
         $others = @($pathsJson['runtime'] | Where-Object { $_ -ne $steamvr })

@@ -8,7 +8,7 @@ Fails (exit 1) on any record that was ok in the baseline and is something else n
 gone), and on any change of an answer (every field but the record's identity and run bookkeeping: ret, out, the errors
 and what cases record), except where volatile.json covers that field (values that change from run to run: process
 ids, handles, timing). Every other answer is pinned, also those that differ from
-SteamVR's (differences.json): they're OpenComposite's own, and mustn't change unnoticed. New records are reported,
+SteamVR's (differences.json): they're OpenLamina's own, and mustn't change unnoticed. New records are reported,
 not failed. --accept writes the results as the new baseline.
 
 The baseline keeps, per record, its status and a short hash of each compared field (not the values): one record per

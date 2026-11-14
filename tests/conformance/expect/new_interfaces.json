@@ -1,5 +1,5 @@
 {
- "#": "The interfaces the fork never had, on the stand-in (run.py --cases new-interfaces --expect expect/new_interfaces.json). An anchor given back as created and through its descriptor; one driver named by the runtime's first word (the stand-in is 'OpenComposite test runtime'); no camera. IVRPaths through FnTable:IVRPaths_002: paths kept, every batch entry UnknownProperty (4).",
+ "#": "The interfaces the fork never had, on the stand-in (run.py --cases new-interfaces --expect expect/new_interfaces.json). An anchor given back as created and through its descriptor; one driver named by the runtime's first word (the stand-in is 'OpenLamina test runtime'); no camera. IVRPaths through FnTable:IVRPaths_002: paths kept, every batch entry UnknownProperty (4).",
  "new-interfaces/IVRSpatialAnchors_001 round trip/-/-": {
   "create": 0,
   "get": 0,

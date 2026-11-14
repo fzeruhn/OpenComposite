@@ -278,7 +278,7 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 #ifdef __linux__
 			OOVR_LOG("Application is trying to submit a D3D11 texture, this is likely a Steam Proton bug, please report it");
 #else
-			OOVR_LOG("Application is trying to submit a D3D11 texture, which OpenComposite supports but is disabled in this build");
+			OOVR_LOG("Application is trying to submit a D3D11 texture, which OpenLamina supports but is disabled in this build");
 #endif
 			appGraphicsUnusable = true;
 			return false;
@@ -289,7 +289,7 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 #ifdef __linux__
 			OOVR_LOG("Application is trying to submit a D3D12 texture, this is likely a Steam Proton bug, please report it");
 #else
-			OOVR_LOG("Application is trying to submit a D3D12 texture, which OpenComposite supports but is disabled in this build");
+			OOVR_LOG("Application is trying to submit a D3D12 texture, which OpenLamina supports but is disabled in this build");
 #endif
 			appGraphicsUnusable = true;
 			return false;
@@ -333,7 +333,7 @@ bool XrBackend::CheckOrInitCompositors(const vr::Texture_t* tex)
 				return false;
 			}
 #else
-			OOVR_LOG("Application is trying to submit an OpenGL texture, which OpenComposite supports but is disabled in this build");
+			OOVR_LOG("Application is trying to submit an OpenGL texture, which OpenLamina supports but is disabled in this build");
 			appGraphicsUnusable = true;
 			return false;
 #endif
@@ -1436,7 +1436,9 @@ void XrBackend::CreateGenericTrackers()
 
 	std::vector<std::string> forced_tracker_serials{};
 	{
-		auto forced_tracker_serials_str = GetEnv("OPENCOMPOSITE_TRACKER_SERIALS");
+		auto forced_tracker_serials_str = GetEnv("OPENLAMINA_TRACKER_SERIALS");
+		if (forced_tracker_serials_str.empty())
+			forced_tracker_serials_str = GetEnv("OPENCOMPOSITE_TRACKER_SERIALS"); // its name before OpenLamina
 		if (!forced_tracker_serials_str.empty()) {
 			size_t separator_pos{ std::string::npos };
 			while ((separator_pos = forced_tracker_serials_str.find(';')) != std::string::npos) {
@@ -1580,13 +1582,13 @@ void XrBackend::QueryForInteractionProfile()
 void XrBackend::CreateInfoSet()
 {
 	XrActionSetCreateInfo set_info{ XR_TYPE_ACTION_SET_CREATE_INFO };
-	strcpy_s(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "opencomposite-internal-info-set");
-	strcpy_s(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "OpenComposite internal info set");
+	strcpy_s(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "openlamina-internal-info-set");
+	strcpy_s(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "OpenLamina internal info set");
 	OC_XR_LOG(xrCreateActionSet(xr_instance, &set_info, &infoSet));
 
 	XrActionCreateInfo act_info{ XR_TYPE_ACTION_CREATE_INFO };
-	strcpy_s(act_info.actionName, XR_MAX_ACTION_NAME_SIZE, "opencomposite-internal-info-act");
-	strcpy_s(act_info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "OpenComposite internal info action");
+	strcpy_s(act_info.actionName, XR_MAX_ACTION_NAME_SIZE, "openlamina-internal-info-act");
+	strcpy_s(act_info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "OpenLamina internal info action");
 	act_info.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
 	act_info.countSubactionPaths = std::size(subactionPaths);
 	act_info.subactionPaths = subactionPaths;

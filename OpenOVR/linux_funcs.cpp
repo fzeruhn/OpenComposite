@@ -40,7 +40,9 @@ void strcpy_s(char* dest, size_t dest_size, char const* src)
 void DebugBreak()
 {
 	// This will cause a crash if we're not being debugged, so require an environment variable to be set and non-empty.
-	const char* debug_break_env = getenv("OPENCOMPOSITE_DEBUG_BREAK");
+	const char* debug_break_env = getenv("OPENLAMINA_DEBUG_BREAK");
+	if (!debug_break_env || !debug_break_env[0])
+		debug_break_env = getenv("OPENCOMPOSITE_DEBUG_BREAK"); // its name before OpenLamina
 	if (debug_break_env && debug_break_env[0] != 0)
 		debug_break();
 }

@@ -3,7 +3,7 @@
 # The OpenVR Interface and Versioning System
 
 This describes how OpenVR's interfaces work. This is from the application's point of view, and mostly ignores what's
-happening on the runtime (SteamVR or OpenComposite) side to make it happen. This also assumes the per-game (replace
+happening on the runtime (SteamVR or OpenLamina) side to make it happen. This also assumes the per-game (replace
 the DLL/SO) installation method is used; the system-wide method (involving the `openvrpaths.vrpath` JSON file) is very
 similar, and basically has an abstraction layer in the middle.
 
@@ -124,7 +124,7 @@ application)
 
 The C# bindings work in largely the same way, with structs of function pointers retrieved with the `FnTable:` prefix.
 
-# The OpenComposite implementation
+# The OpenLamina implementation
 
 After the interface splitting documented in [SplitAndGen.md] runs, we're left with a bunch of headers for every version
 of `IVRSystem` (and any other interface) that we support, like this somewhat highly edited example:

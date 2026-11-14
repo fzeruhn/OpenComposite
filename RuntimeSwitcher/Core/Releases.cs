@@ -38,7 +38,7 @@ namespace RuntimeSwitcher.Core
     /// <summary>The fork's releases, from GitHub's API (GET /repos/{owner}/{repo}/releases).</summary>
     public static class Releases
     {
-        public const string Repository = "fzeruhn/OpenComposite";
+        public const string Repository = "fzeruhn/OpenLamina";
         public static readonly string ApiUrl = $"https://api.github.com/repos/{Repository}/releases?per_page=30";
         public static readonly string PageUrl = $"https://github.com/{Repository}/releases";
 
@@ -179,17 +179,17 @@ namespace RuntimeSwitcher.Core
             m.Groups[1].Value.Split('.').Select(s => long.TryParse(s, out long x) ? x : long.MaxValue).ToArray();
     }
 
-    /// <summary>The release an OpenComposite folder holds, from its SOURCE.txt (written by scripts/ci/package.py).</summary>
+    /// <summary>The release an OpenLamina folder holds, from its SOURCE.txt (written by scripts/ci/package.py).</summary>
     public static class InstalledVersion
     {
         /// <summary>
-        /// "2026.11.06" from a first line "OpenComposite 2026.11.06, commit …"; null for a build of no release
+        /// "2026.11.06" from a first line "OpenLamina 2026.11.06, commit …" (or "OpenComposite …", as releases before OpenLamina wrote it); null for a build of no release
         /// (dev-…), a missing file or another first line.
         /// </summary>
         public static string FromSourceText(string text)
         {
             string first = text?.Split('\n').FirstOrDefault()?.Trim() ?? "";
-            Match m = Regex.Match(first, @"^OpenComposite (\S+), commit [0-9a-f]+$");
+            Match m = Regex.Match(first, @"^(?:OpenLamina|OpenComposite) (\S+), commit [0-9a-f]+$");
             return m.Success && ReleaseVersion.IsValid(m.Groups[1].Value) ? m.Groups[1].Value : null;
         }
 
