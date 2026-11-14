@@ -47,6 +47,7 @@
 #include <chrono>
 #include <cinttypes>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 using namespace vr;
@@ -92,7 +93,12 @@ XrBackend::~XrBackend()
 {
 	// The whole teardown under the session lock, as every other change to the session is. VR_Shutdown waits for it
 	// as long as it takes; process exit without VR_Shutdown waits at most a second (see lock_for_teardown).
-	auto lock = BackendManager::IsResetting() ? xr_session.lock() : xr_session.lock_for_teardown(std::chrono::seconds(1));
+	// Emplaced, as SessionLock can't be copied or moved (a conditional of two of them needs a copy on some compilers)
+	std::optional<SessionLock> lock;
+	if (BackendManager::IsResetting())
+		lock.emplace(xr_session, true);
+	else
+		lock.emplace(xr_session, std::chrono::milliseconds(std::chrono::seconds(1)));
 
 	// First clear out the compositors, since they might try and access the OpenXR instance
 	// in their destructor.
