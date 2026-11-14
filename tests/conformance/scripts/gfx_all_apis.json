@@ -1,0 +1,4 @@
+{
+ "#": "The frame cases (gfx-*): every graphics API the stand-in has",
+ "extensions": ["XR_KHR_D3D11_enable", "XR_KHR_D3D12_enable", "XR_KHR_vulkan_enable", "XR_KHR_vulkan_enable2", "XR_KHR_opengl_enable"]
+}

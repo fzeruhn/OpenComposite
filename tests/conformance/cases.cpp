@@ -1419,5 +1419,10 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "events-commit", EventsCommitCase },
 		{ "submit-edges", SubmitEdges },
 	};
-	return cases;
+	static const std::map<std::string, CaseFn> all = [] {
+		std::map<std::string, CaseFn> m = cases;
+		m.insert(GfxCases().begin(), GfxCases().end());
+		return m;
+	}();
+	return all;
 }

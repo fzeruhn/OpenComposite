@@ -1,0 +1,4 @@
+{
+ "#": "The frame cases' records that fail today, with why (run.py --known-failures: these may fail, any other failure fails the run, and one that passes is listed so it can come off).",
+ "gfx-vk-basic/frame/-/-": "OpenComposite makes its session on the game's Vulkan device without calling xrGetVulkanGraphicsRequirementsKHR first; the runtime refuses it (XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING), Submit answers 102 (TextureIsOnWrongDevice) and nothing is shown"
+}
