@@ -311,6 +311,7 @@ add_library(OCCore STATIC
 	OpenOVR/linux_funcs.cpp
 	OpenOVR/Misc/backtrace.cpp
 	OpenOVR/Misc/Config.cpp
+	OpenOVR/Misc/Numbers.cpp
 	OpenOVR/Misc/JsonFile.cpp
 	OpenOVR/Misc/SteamVRPaths.cpp
 	OpenOVR/Misc/SharedStore.cpp

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Modes.h"
+#include "Misc/Numbers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -93,10 +94,8 @@ protected:
 	{
 		auto it = binding.parameters.find(name);
 		if (it != binding.parameters.end()) {
-			char* end = nullptr;
-			float v = strtof(it->second.c_str(), &end);
-			if (end != it->second.c_str())
-				return v;
+			if (std::optional<float> v = Numbers::ParseFloat(it->second))
+				return *v;
 		}
 		return ModeParameterDefault(binding.mode, name);
 	}

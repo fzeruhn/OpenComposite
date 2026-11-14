@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Config.h"
+#include "Numbers.h"
 #include "ini.h"
 
 #include <algorithm>
@@ -96,11 +97,12 @@ static float parse_float(string orig, string name, int line)
 {
 	string val = str_tolower(orig);
 
-	const char* str = orig.c_str();
-	char* end = NULL;
-	float result = strtof(str, &end);
+	// The whole value a number, in any locale; an empty one is 0
+	size_t used = 0;
+	std::optional<float> parsed = Numbers::ParseFloat(orig, &used);
+	float result = parsed.value_or(0.0f);
 
-	if (end != str + orig.length()) {
+	if (!orig.empty() && (!parsed || used != orig.length())) {
 		string err = "Value " + orig + " for in config file for " + name + " on line "
 		    + to_string(line) + " is not a decimal number (eg 12.34)";
 		BAD_VALUE(err);

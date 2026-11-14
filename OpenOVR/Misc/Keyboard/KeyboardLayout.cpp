@@ -3,6 +3,7 @@
 
 #include "KeyboardLayout.h"
 #include "VRKeyboard.h"
+#include "Misc/Numbers.h"
 
 #include <algorithm>
 #include <cwctype>
@@ -185,7 +186,7 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 		if (wx.empty()) {
 			addNextKey(ch, shift);
 		} else {
-			Key& key = addKey(ch, shift, std::stof(wx), std::stof(wy));
+			Key& key = addKey(ch, shift, Numbers::ToFloat(wx, 0), Numbers::ToFloat(wy, 0));
 
 			wstring ww = pullstring(line);
 			wstring wh = pullstring(line);
@@ -195,8 +196,8 @@ KeyboardLayout::KeyboardLayout(std::vector<char> data)
 					{ OOVR_LOGF("word width/height mismatch for keyboard char '%c'", ch); return; } // the built-in layout is broken: no keyboard
 				}
 
-				key.w = std::stof(ww);
-				key.h = std::stof(wh);
+				key.w = Numbers::ToFloat(ww, key.w);
+				key.h = Numbers::ToFloat(wh, key.h);
 			}
 		}
 	}

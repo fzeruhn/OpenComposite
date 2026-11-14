@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Evaluator.h"
+#include "Misc/Numbers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -264,10 +265,8 @@ std::vector<BindingEvaluator::HapticTarget> BindingEvaluator::HapticsFor(const s
 				if (amp == h.parameters.end())
 					amp = h.parameters.find("haptic_amplitude");
 				if (amp != h.parameters.end()) {
-					char* end = nullptr;
-					float v = strtof(amp->second.c_str(), &end);
-					if (end != amp->second.c_str())
-						t.amplitudeScale = v;
+					if (std::optional<float> v = Numbers::ParseFloat(amp->second))
+						t.amplitudeScale = *v;
 				}
 				targets.push_back(std::move(t));
 			}

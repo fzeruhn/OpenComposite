@@ -10,6 +10,7 @@
 #include "Misc/Input/Bindings/LegacyBindings.h"
 #include "Misc/ProgramEvents.h"
 #include "Misc/Config.h"
+#include "Misc/Numbers.h"
 #include <string>
 
 #include <convert.h>
@@ -1025,10 +1026,10 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 					float releaseValue = 0.65f; // These are SteamVR defaults
 
 					if (!srcJson["parameters"]["value_hold_threshold"].empty())
-						activateValue = std::stof(srcJson["parameters"]["value_hold_threshold"].asString().c_str());
+						activateValue = Numbers::ToFloat(srcJson["parameters"]["value_hold_threshold"].asString(), activateValue);
 
 					if (!srcJson["parameters"]["value_release_threshold"].empty())
-						releaseValue = std::stof(srcJson["parameters"]["value_release_threshold"].asString().c_str());
+						releaseValue = Numbers::ToFloat(srcJson["parameters"]["value_release_threshold"].asString(), releaseValue);
 
 					action->perProfileData[&profile].click_activate_threshold = activateValue;
 					action->perProfileData[&profile].click_deactivate_threshold = releaseValue;
@@ -1070,16 +1071,16 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 				for (auto& parameter_name : srcJson["parameters"].getMemberNames()) {
 					OOVR_LOGF("Parameter: %s=%s", parameter_name.c_str(), srcJson["parameters"][parameter_name].asString().c_str());
 					if (parameter_name == "click_activate_threshold") {
-						action->perProfileData[&profile].click_activate_threshold = std::stof(srcJson["parameters"][parameter_name].asString().c_str());
+						action->perProfileData[&profile].click_activate_threshold = Numbers::ToFloat(srcJson["parameters"][parameter_name].asString(), action->perProfileData[&profile].click_activate_threshold);
 					}
 					if (parameter_name == "click_deactivate_threshold") {
-						action->perProfileData[&profile].click_deactivate_threshold = std::stof(srcJson["parameters"][parameter_name].asString().c_str());
+						action->perProfileData[&profile].click_deactivate_threshold = Numbers::ToFloat(srcJson["parameters"][parameter_name].asString(), action->perProfileData[&profile].click_deactivate_threshold);
 					}
 					if (parameter_name == "deadzone_pct") {
-						action->perProfileData[&profile].deadzone = std::stof(srcJson["parameters"][parameter_name].asString().c_str()) / 100.f;
+						action->perProfileData[&profile].deadzone = Numbers::ToFloat(srcJson["parameters"][parameter_name].asString(), action->perProfileData[&profile].deadzone * 100.f) / 100.f;
 					}
 					if (parameter_name == "maxzone_pct") {
-						action->perProfileData[&profile].maxzone = std::stof(srcJson["parameters"][parameter_name].asString().c_str()) / 100.f;
+						action->perProfileData[&profile].maxzone = Numbers::ToFloat(srcJson["parameters"][parameter_name].asString(), action->perProfileData[&profile].maxzone * 100.f) / 100.f;
 					}
 				}
 
