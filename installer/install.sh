@@ -1,35 +1,36 @@
 #!/bin/sh
-# OpenComposite's Linux installer, in the OpenComposite folder of OpenComposite-linux.tar.gz and in the installed copy.
+# OpenLamina's Linux installer, in the OpenLamina folder of OpenLamina-linux.tar.gz and in the installed copy.
 # It installs for the current user only: no root. ./install.sh --help says what it does.
 set -eu
 
-REPOSITORY=fzeruhn/OpenComposite
+REPOSITORY=fzeruhn/OpenLamina
 FLATPAK_STEAM=com.valvesoftware.Steam
-ARCHIVE=OpenComposite-linux.tar.gz
+ARCHIVE=OpenLamina-linux.tar.gz
 
 usage() {
 	cat <<'EOF'
 Usage: install.sh [command] [--flatpak | --native]
 
 Commands (one; with none, install):
-  (none)            Copy OpenComposite to ~/.local/share/OpenComposite and make OpenVR games use it: it goes first in
+  (none)            Copy OpenLamina to ~/.local/share/OpenLamina and make OpenVR games use it: it goes first in
                     the "runtime" list of ~/.config/openvr/openvrpaths.vrpath, other entries kept after it. The file
-                    is backed up to openvrpaths.vrpath.bak first. Files you put in bin/ (opencomposite.ini,
+                    is backed up to openvrpaths.vrpath.bak first. Files you put in bin/ (openlamina.ini,
                     apps-config.json) are kept.
   --no-switch       Install or update the copy, but leave openvrpaths.vrpath as it is.
-  --opencomposite   Make OpenVR games use the installed copy.
+  --openlamina      Make OpenVR games use the installed copy (--opencomposite, its name before, does the same).
+                    Files you put in bin/ named openlamina.ini or, from before, opencomposite.ini both work.
   --steamvr         Make OpenVR games use SteamVR again: the copy is taken out of the list and SteamVR's folder put
                     first. Starting SteamVR from Steam does that too.
   --uninstall       --steamvr, then delete the installed copy.
   --status          Say what OpenVR games use, what is installed, and the OpenXR runtime.
-  --update [--pre]  Download the newest release from github.com/fzeruhn/OpenComposite (--pre: pre-releases too),
+  --update [--pre]  Download the newest release from github.com/fzeruhn/OpenLamina (--pre: pre-releases too),
                     check its SHA-256, and install it if it is newer. The switch is left as it is.
   --launch-options  Print the Steam launch options games in the Steam Runtime (most Proton games) need to reach your
                     OpenXR runtime.
   -h, --help        This.
 
 Steam installed as a Flatpak (com.valvesoftware.Steam) has its own openvrpaths.vrpath and can't see
-~/.local/share, so for it the copy goes in ~/.var/app/com.valvesoftware.Steam/.local/share/OpenComposite. That is
+~/.local/share, so for it the copy goes in ~/.var/app/com.valvesoftware.Steam/.local/share/OpenLamina. That is
 chosen by itself when only Flatpak Steam is found; --flatpak or --native chooses.
 
 Needs python3 (to edit the JSON file); --update also needs curl or wget, and sha256sum.
@@ -48,7 +49,7 @@ pre=0
 while [ $# -gt 0 ]; do
 	case $1 in
 	--no-switch) command=copy ;;
-	--opencomposite) command=use ;;
+	--openlamina | --opencomposite) command=use ;;
 	--steamvr) command=steamvr ;;
 	--uninstall) command=uninstall ;;
 	--status) command=status ;;
@@ -86,10 +87,10 @@ fi
 if [ $target = flatpak ]; then
 	# The Flatpak keeps its home in ~/.var/app/<id>, which it also sees at that path.
 	paths_file=$flatpak_home/.config/openvr/openvrpaths.vrpath
-	copy=$flatpak_home/.local/share/OpenComposite
+	copy=$flatpak_home/.local/share/OpenLamina
 else
 	paths_file=${XDG_CONFIG_HOME:-$home/.config}/openvr/openvrpaths.vrpath
-	copy=${XDG_DATA_HOME:-$home/.local/share}/OpenComposite
+	copy=${XDG_DATA_HOME:-$home/.local/share}/OpenLamina
 fi
 target_flag=--$target
 
@@ -170,7 +171,7 @@ def main(command, *args):
         data = load(file)
         runtimes = (data or {}).get("runtime") or []
         first = runtimes[0] if runtimes else ""
-        kind = "none" if not first else "opencomposite" if same(first, ours) else "steamvr" if steamvr(first) else "other"
+        kind = "none" if not first else "openlamina" if same(first, ours) else "steamvr" if steamvr(first) else "other"
         listed = any(same(r, ours) for r in runtimes)
         # "-" for no first runtime: the shell's read would merge an empty field with its tab neighbours
         print(f"{kind}\t{first or '-'}\t{'listed' if listed else 'unlisted'}\t{'exists' if data is not None else 'missing'}")
@@ -199,7 +200,7 @@ def main(command, *args):
         (file,) = args
         try:
             with open(file, encoding="utf-8") as f:
-                m = re.fullmatch(r"OpenComposite (\S+), commit [0-9a-f]+", f.readline().strip())
+                m = re.fullmatch(r"(?:OpenLamina|OpenComposite) (\S+), commit [0-9a-f]+", f.readline().strip())
         except OSError:
             m = None
         print(m.group(1) if m and version_key(m.group(1)) else "")
@@ -237,7 +238,7 @@ EOF
 )
 py() { python3 -c "$PY" "$@"; }
 
-# What OpenVR games use now, tab-separated: kind (opencomposite, the copy; steamvr; other; none), the first entry or
+# What OpenVR games use now, tab-separated: kind (openlamina, the copy; steamvr; other; none), the first entry or
 # '-', whether the copy is listed (listed/unlisted), and whether the paths file exists (exists/missing).
 current() {
 	py status "$paths_file" "$copy"
@@ -247,7 +248,7 @@ installed_version() {
 	py source-version "$copy/SOURCE.txt"
 }
 
-# Copies this folder's OpenComposite to $copy. Each file goes to a temporary name first and is then renamed over the
+# Copies this folder's OpenLamina to $copy. Each file goes to a temporary name first and is then renamed over the
 # old one, so a game that has the old library loaded keeps running.
 copy_files() {
 	if [ ! -f "$here/bin/linux64/vrclient.so" ] || [ ! -f "$here/bin/vrclient.so" ]; then
@@ -265,7 +266,7 @@ copy_files() {
 			put "$file" "$copy/${file##*/}"
 		fi
 	done
-	say "Installed OpenComposite $(installed_version) in $copy"
+	say "Installed OpenLamina $(installed_version) in $copy"
 }
 
 put() {
@@ -273,11 +274,11 @@ put() {
 	mv -f "$2.install-tmp" "$2"
 }
 
-use_opencomposite() {
-	[ -f "$copy/bin/linux64/vrclient.so" ] || die "OpenComposite isn't installed in $copy: run install.sh without options first."
+use_openlamina() {
+	[ -f "$copy/bin/linux64/vrclient.so" ] || die "OpenLamina isn't installed in $copy: run install.sh without options first."
 	py use "$paths_file" "$copy"
-	say "OpenVR games now use OpenComposite ($copy)."
-	say "Starting SteamVR from Steam switches them back to SteamVR; $copy/install.sh --opencomposite switches again."
+	say "OpenVR games now use OpenLamina ($copy)."
+	say "Starting SteamVR from Steam switches them back to SteamVR; $copy/install.sh --openlamina switches again."
 }
 
 # steamvr: the copy out of the list and SteamVR first. remove (the uninstall): the copy out of the list, and SteamVR
@@ -289,8 +290,8 @@ $(current)
 EOF
 	case $kind in
 	steamvr) say "OpenVR games now use SteamVR ($first)." ;;
-	none) say "OpenComposite isn't in $paths_file, which names no other runtime." ;;
-	*) say "OpenComposite isn't in $paths_file; OpenVR games use $first." ;;
+	none) say "OpenLamina isn't in $paths_file, which names no other runtime." ;;
+	*) say "OpenLamina isn't in $paths_file; OpenVR games use $first." ;;
 	esac
 }
 
@@ -302,7 +303,7 @@ $state
 EOF
 	say "OpenVR paths file: $paths_file$([ "$exists" = missing ] && printf ' (none yet)')"
 	case $kind in
-	opencomposite) say "OpenVR games use: OpenComposite ($first)" ;;
+	openlamina) say "OpenVR games use: OpenLamina ($first)" ;;
 	steamvr) say "OpenVR games use: SteamVR ($first)" ;;
 	other) say "OpenVR games use: $first" ;;
 	unreadable) say "OpenVR games use: unreadable (see above)" ;;
@@ -311,7 +312,7 @@ EOF
 	if [ -f "$copy/bin/linux64/vrclient.so" ]; then
 		version=$(installed_version)
 		[ -n "$version" ] || version="(a build that is not a release)"
-		say "Installed: OpenComposite $version in $copy$([ "$listed" = unlisted ] && printf ', not in the paths file')"
+		say "Installed: OpenLamina $version in $copy$([ "$listed" = unlisted ] && printf ', not in the paths file')"
 	else
 		say "Installed: no ($copy)"
 	fi
@@ -319,7 +320,7 @@ EOF
 	if [ -n "$runtime" ]; then
 		say "OpenXR runtime: $runtime"
 	else
-		say "OpenXR runtime: none found. OpenComposite needs your headset's OpenXR runtime to be the active one."
+		say "OpenXR runtime: none found. OpenLamina needs your headset's OpenXR runtime to be the active one."
 	fi
 }
 
@@ -407,9 +408,9 @@ launch_options() {
 
 fetch() {
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL --proto =https --proto-redir =https -H "User-Agent: OpenComposite-installer" "$1"
+		curl -fsSL --proto =https --proto-redir =https -H "User-Agent: OpenLamina-installer" "$1"
 	elif command -v wget >/dev/null 2>&1; then
-		wget -q -O - --header "User-Agent: OpenComposite-installer" "$1"
+		wget -q -O - --header "User-Agent: OpenLamina-installer" "$1"
 	else
 		die "--update needs curl or wget."
 	fi
@@ -429,7 +430,7 @@ update() {
 	IFS='	' read -r version url sha <<EOF
 $newest
 EOF
-	say "Downloading OpenComposite $version"
+	say "Downloading OpenLamina $version"
 	work=$(mktemp -d)
 	trap 'rm -rf "$work"' EXIT
 	# sh runs the EXIT trap on exit, not when killed by a signal.
@@ -438,19 +439,19 @@ EOF
 	actual=$(sha256sum "$work/$ARCHIVE" | cut -d' ' -f1)
 	[ "$actual" = "$sha" ] || die "$ARCHIVE was refused: its SHA-256 is $actual, but GitHub lists $sha."
 	tar -xzf "$work/$ARCHIVE" -C "$work"
-	sh "$work/OpenComposite/install.sh" --no-switch "$target_flag"
+	sh "$work/OpenLamina/install.sh" --no-switch "$target_flag"
 }
 
 case $command in
 install)
 	copy_files
-	use_opencomposite
+	use_openlamina
 	other_steam
 	say ""
 	launch_options
 	;;
 copy) copy_files ;;
-use) use_opencomposite ;;
+use) use_openlamina ;;
 steamvr) use_steamvr steamvr ;;
 uninstall)
 	use_steamvr remove

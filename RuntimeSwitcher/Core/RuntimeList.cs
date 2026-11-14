@@ -9,7 +9,7 @@ namespace RuntimeSwitcher.Core
         /// <summary>The list is empty.</summary>
         None,
 
-        /// <summary>This install's OpenComposite folder.</summary>
+        /// <summary>This install's OpenLamina folder.</summary>
         OpenComposite,
 
         /// <summary>Mirador's per-user copy of OpenComposite (%LOCALAPPDATA%\Mirador\OpenComposite).</summary>
@@ -21,7 +21,7 @@ namespace RuntimeSwitcher.Core
 
     /// <summary>
     /// The changes to openvrpaths.vrpath's "runtime" list. The first entry is the runtime; the others stay in the list,
-    /// in their order: OpenComposite's per-app settings send a program to SteamVR through the list's SteamVR entry, and
+    /// in their order: OpenLamina's per-app settings send a program to SteamVR through the list's SteamVR entry, and
     /// Mirador's copy is never removed or reordered here except by moving another entry before it.
     /// </summary>
     public static class RuntimeList

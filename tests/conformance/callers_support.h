@@ -9,7 +9,7 @@
 #include <d3d11.h>
 #endif
 
-// Types Valve deleted from OpenVR that old headers still use (as stdafx.h does for OpenComposite)
+// Types Valve deleted from OpenVR that old headers still use (as stdafx.h does for OpenLamina)
 #include "custom_types.h"
 #include "interfaces/vrtypes.h"
 

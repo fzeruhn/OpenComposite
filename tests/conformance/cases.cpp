@@ -1112,7 +1112,7 @@ void EventsCase(CaseContext& c)
 }
 
 // Input read from two threads at once (expect/input_threads.json): the game's thread syncs and
-// reads the manifest's actions and submits frames (OpenComposite reads the old input after each frame, for its button
+// reads the manifest's actions and submits frames (OpenLamina reads the old input after each frame, for its button
 // events), while another thread reads the old input and the same action all the time, as Unity's SteamVR_Controller
 // and a render thread do. With scripts/input_toggle.json and manifest_toggle.json, under either evaluator: nothing may
 // crash, and the toggle still turns on, off and on. The second thread starts after frame 5: the first Submit recreates
@@ -1272,7 +1272,7 @@ void InputFramesCase(CaseContext& c)
 
 // Events between programs (expect/events.json): run at the same time (run.py --jobs 2), "events-commit"
 // commits the room setup 1.5 s in, and "events-listen", polling for 5 s, gets its two events; the committing program
-// gets each once, not again back from the store. Scene apps, each with its own session on the stand-in: OpenComposite
+// gets each once, not again back from the store. Scene apps, each with its own session on the stand-in: OpenLamina
 // gives a Utility app no IVRSystem, and refuses overlay and background apps (not implemented yet)
 vr::IVRSystem_022::IVRSystem* OpenSceneSystem(CaseContext& c)
 {

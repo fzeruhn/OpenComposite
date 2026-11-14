@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    OpenComposite.exe, the Windows app that installer/OpenComposite.iss installs next to the OpenComposite folder's
-    bin\: switches OpenVR games between OpenComposite and SteamVR, sends single programs to either (per-app settings),
-    and offers new releases of github.com/fzeruhn/OpenComposite. Built by scripts/ci/build-installer.ps1; Tests\ checks
+    OpenLamina.exe, the Windows app that installer/OpenLamina.iss installs next to the OpenLamina folder's
+    bin\: switches OpenVR games between OpenLamina and SteamVR, sends single programs to either (per-app settings),
+    and offers new releases of github.com/fzeruhn/OpenLamina. Built by scripts/ci/build-installer.ps1; Tests\ checks
     Core\ (dotnet test RuntimeSwitcher/Tests).
 
     .NET Framework 4.8, which Windows 10 (1903 and later) and 11 come with, so nothing else is installed. It builds with
@@ -13,7 +13,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
-    <AssemblyName>OpenComposite</AssemblyName>
+    <AssemblyName>OpenLamina</AssemblyName>
     <RootNamespace>RuntimeSwitcher</RootNamespace>
     <LangVersion>12</LangVersion>
     <ApplicationIcon>icon.ico</ApplicationIcon>
@@ -24,9 +24,9 @@
     <!-- The same bytes from any checkout folder. -->
     <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Product>OpenComposite</Product>
-    <Description>Switches OpenVR games between OpenComposite and SteamVR</Description>
-    <Company>github.com/fzeruhn/OpenComposite</Company>
+    <Product>OpenLamina</Product>
+    <Description>Switches OpenVR games between OpenLamina and SteamVR</Description>
+    <Company>github.com/fzeruhn/OpenLamina</Company>
     <Copyright>GPL-3.0-or-later</Copyright>
     <!-- The build script passes the release's: Version (numbers only) and InformationalVersion (the release's name). -->
     <Version>0.0.0</Version>

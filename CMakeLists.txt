@@ -6,7 +6,7 @@ if (MSVC)
 endif ()
 
 cmake_minimum_required(VERSION 3.16)
-project(OpenComposite)
+project(OpenLamina)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -21,7 +21,7 @@ option(USE_SYSTEM_OPENXR "Try using system installation of OpenXR if available" 
 option(USE_SYSTEM_GLM "Try using system installation of glm if available" OFF)
 option(OC_BACKTRACE "Print the backtrace on crash" OFF)
 option(ERROR_ON_WARNING "Set all warnings to be errors" OFF)
-option(OC_BUILD_TESTS "Build OpenComposite's tests" OFF)
+option(OC_BUILD_TESTS "Build OpenLamina's tests" OFF)
 
 # Directory for generated files, those being split headers and stubs
 set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
@@ -56,10 +56,10 @@ if (MSVC)
 	set(ERROR_ON_WARNING_FLAG /WX)
 else ()
 	# For all projects, set the symbol visibility to private on Linux
-	# If we don't then if an application declares a function with the same name as an OpenComposite function
+	# If we don't then if an application declares a function with the same name as an OpenLamina function
 	# the application's one will be used instead. This has some nasty effects - for example, when using the
-	# global installation both libopenvr_api.so and OpenComposite will define VR_InitInternal2. What's supposed
-	# to happen is that libopenvr_api calls a VRClient interface method which in turn calls OpenComposite's version
+	# global installation both libopenvr_api.so and OpenLamina will define VR_InitInternal2. What's supposed
+	# to happen is that libopenvr_api calls a VRClient interface method which in turn calls OpenLamina's version
 	# of VR_InitInternal2. But since libopenvr_api was loaded first it's function will be used, leading to
 	# a stack overflow.
 	# In general using private symbols is a great idea, and it's something we'd want to do anyway.
@@ -73,7 +73,7 @@ if (ERROR_ON_WARNING)
 	add_compile_options(${ERROR_ON_WARNING_FLAG})
 endif()
 
-# === Runtime Switcher (OpenComposite.exe, for Visual Studio; scripts/ci/build-installer.ps1 builds it) ===
+# === Runtime Switcher (OpenLamina.exe, for Visual Studio; scripts/ci/build-installer.ps1 builds it) ===
 include_external_msproject(
 	RuntimeSwitcher ${CMAKE_SOURCE_DIR}/RuntimeSwitcher/RuntimeSwitcher.csproj
 	TYPE 9A19103F-16F7-4668-BE54-9A1E7A4F7556

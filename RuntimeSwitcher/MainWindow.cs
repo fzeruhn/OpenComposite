@@ -19,7 +19,7 @@ namespace RuntimeSwitcher
 
         private readonly Label _status = new Label { AutoSize = true };
         private readonly Label _statusDetail = Wrapping(gray: true);
-        private readonly Button _useOpenComposite = NewButton("Use OpenComposite");
+        private readonly Button _useOpenComposite = NewButton("Use OpenLamina");
         private readonly Button _useSteamVR = NewButton("Use SteamVR");
         private readonly Button _perApp = NewButton("Per-app settings…");
         private readonly Label _openXR = Wrapping();
@@ -41,7 +41,7 @@ namespace RuntimeSwitcher
         public MainWindow()
         {
             SuspendLayout();
-            Text = "OpenComposite";
+            Text = "OpenLamina";
             Icon = AppIcon.Get();
             Font = SystemFonts.MessageBoxFont;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -154,12 +154,12 @@ namespace RuntimeSwitcher
             switch (current)
             {
                 case RuntimeKind.OpenComposite:
-                    _status.Text = "OpenComposite";
+                    _status.Text = "OpenLamina";
                     _statusDetail.Text = $"This copy, in {Install.Folder}.";
                     break;
                 case RuntimeKind.Mirador:
-                    _status.Text = "OpenComposite (Mirador's copy)";
-                    _statusDetail.Text = $"Mirador's copy, in {first}. \"Use OpenComposite\" switches to this one.";
+                    _status.Text = "OpenLamina (Mirador's copy)";
+                    _statusDetail.Text = $"Mirador's copy, in {first}. \"Use OpenLamina\" switches to this one.";
                     break;
                 case RuntimeKind.SteamVR:
                     _status.Text = "SteamVR";
@@ -173,7 +173,7 @@ namespace RuntimeSwitcher
                     _status.Text = "None";
                     _statusDetail.Text = paths.Existed
                         ? "openvrpaths.vrpath lists no runtime."
-                        : "There's no openvrpaths.vrpath yet: \"Use OpenComposite\" makes one.";
+                        : "There's no openvrpaths.vrpath yet: \"Use OpenLamina\" makes one.";
                     break;
             }
 
@@ -183,25 +183,25 @@ namespace RuntimeSwitcher
 
             if (!Install.IsComplete)
                 _statusDetail.Text += "\nThis copy has no bin\\vrclient_x64.dll and bin\\vrclient.dll: install " +
-                                      "OpenComposite again to use it.";
+                                      "OpenLamina again to use it.";
 
             _useOpenComposite.Enabled = Install.IsComplete && current != RuntimeKind.OpenComposite;
             bool oursListed = Switcher.Lists(paths, Install.Folder);
             bool steamVR = Switcher.HasSteamVR(paths);
-            _useSteamVR.Text = steamVR ? "Use SteamVR" : "Stop using OpenComposite";
+            _useSteamVR.Text = steamVR ? "Use SteamVR" : "Stop using OpenLamina";
             _useSteamVR.Enabled = steamVR ? current != RuntimeKind.SteamVR || oursListed : oursListed;
 
             _mirador.Visible = Install.MiradorInstalled || Switcher.Lists(paths, Install.MiradorCopy);
-            _mirador.Text = "Mirador is installed: it has its own copy of OpenComposite for Monado, which its \"Set " +
-                            "OpenComposite\" button puts first. Either copy works; OpenVR games use the one shown above.";
+            _mirador.Text = "Mirador is installed: it has its own copy of OpenLamina for Monado, which its \"Set " +
+                            "OpenLamina\" button puts first. Either copy works; OpenVR games use the one shown above.";
         }
 
         private void ShowOpenXR()
         {
             string runtime = Install.OpenXRRuntime();
             _openXR.Text = runtime != null
-                ? $"OpenXR runtime: {runtime}. OpenComposite runs games on it."
-                : "No OpenXR runtime is set. OpenComposite needs one: make your headset's runtime the active OpenXR " +
+                ? $"OpenXR runtime: {runtime}. OpenLamina runs games on it."
+                : "No OpenXR runtime is set. OpenLamina needs one: make your headset's runtime the active OpenXR " +
                   "runtime (in its own app).";
             _openXR.ForeColor = runtime != null ? SystemColors.ControlText : Color.Firebrick;
         }
@@ -215,7 +215,7 @@ namespace RuntimeSwitcher
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException ||
                                       e is InvalidDataException || e is InvalidOperationException)
             {
-                MessageBox.Show(this, e.Message, "OpenComposite", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, e.Message, "OpenLamina", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
             RefreshStatus();
@@ -238,7 +238,7 @@ namespace RuntimeSwitcher
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException ||
                                       e is Newtonsoft.Json.JsonException)
             {
-                MessageBox.Show(this, e.Message, "OpenComposite", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, e.Message, "OpenLamina", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -249,7 +249,7 @@ namespace RuntimeSwitcher
             {
                 string installed = Install.Version;
                 _version.Text = installed != null
-                    ? $"Installed: OpenComposite {installed}"
+                    ? $"Installed: OpenLamina {installed}"
                     : "Installed: a build that isn't a release (its SOURCE.txt names no release)";
                 _releases = await Updater.GetReleasesAsync();
             }
@@ -290,12 +290,12 @@ namespace RuntimeSwitcher
             }
 
             _updateStatus.Text =
-                $"OpenComposite {_pending.Version}{(_pending.Prerelease ? " (a pre-release)" : "")} is out.";
+                $"OpenLamina {_pending.Version}{(_pending.Prerelease ? " (a pre-release)" : "")} is out.";
             _update.Text = $"Update to {_pending.Version}";
             _update.Enabled = true;
         }
 
-        /// <summary>Downloads the release's OpenComposite-Setup.exe, checks it, and runs it; the window closes.</summary>
+        /// <summary>Downloads the release's OpenLamina-Setup.exe, checks it, and runs it; the window closes.</summary>
         private async Task UpdateAsync()
         {
             Release release = _pending;
@@ -304,18 +304,18 @@ namespace RuntimeSwitcher
             // Setup installs into this user's folder: refuse when that isn't this copy (another account's elevation, or a
             // copy run from elsewhere), so the update doesn't land somewhere else
             string target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Programs", "OpenComposite");
+                "Programs", "OpenLamina");
             if (!RuntimeList.SamePath(Install.Folder, target, true))
             {
-                MessageBox.Show(this, "The update installs into " + target + ", but this copy of OpenComposite is in " +
-                                      Install.Folder + ". Open OpenComposite from the Start menu, then update.",
-                    "OpenComposite", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "The update installs into " + target + ", but this copy of OpenLamina is in " +
+                                      Install.Folder + ". Open OpenLamina from the Start menu, then update.",
+                    "OpenLamina", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             if (Install.InUse())
             {
-                MessageBox.Show(this, "A game is using OpenComposite. Close it, then update.", "OpenComposite",
+                MessageBox.Show(this, "A game is using OpenLamina. Close it, then update.", "OpenLamina",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -323,8 +323,8 @@ namespace RuntimeSwitcher
             _update.Enabled = _includePrereleases.Enabled = false;
             _progress.Value = 0;
             _progress.Visible = true;
-            _updateStatus.Text = $"Downloading OpenComposite {release.Version}…";
-            string downloads = Path.Combine(Path.GetTempPath(), "OpenComposite-update");
+            _updateStatus.Text = $"Downloading OpenLamina {release.Version}…";
+            string downloads = Path.Combine(Path.GetTempPath(), "OpenLamina-update");
             string setup = Path.Combine(downloads, release.Version, Install.SetupAssetName);
             Updater.DeleteOtherFolders(downloads, release.Version);
             try
@@ -364,7 +364,7 @@ namespace RuntimeSwitcher
             }
             catch (System.ComponentModel.Win32Exception e)
             {
-                MessageBox.Show(this, $"{url}\n\n{e.Message}", "OpenComposite", MessageBoxButtons.OK,
+                MessageBox.Show(this, $"{url}\n\n{e.Message}", "OpenLamina", MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
         }

@@ -8,13 +8,13 @@ using RuntimeSwitcher.Core;
 namespace RuntimeSwitcher
 {
     /// <summary>
-    /// Where things are. OpenComposite.exe sits in the OpenComposite folder the installer made
-    /// (%LOCALAPPDATA%\Programs\OpenComposite): that folder, with bin\vrclient_x64.dll and bin\vrclient.dll, is the
+    /// Where things are. OpenLamina.exe sits in the OpenLamina folder the installer made
+    /// (%LOCALAPPDATA%\Programs\OpenLamina): that folder, with bin\vrclient_x64.dll and bin\vrclient.dll, is the
     /// runtime folder it puts in openvrpaths.vrpath.
     /// </summary>
     internal static class Install
     {
-        public const string SetupAssetName = "OpenComposite-Setup.exe";
+        public const string SetupAssetName = "OpenLamina-Setup.exe";
 
         public static string Folder { get; } = RuntimeList.Normalize(AppDomain.CurrentDomain.BaseDirectory);
 
@@ -28,7 +28,7 @@ namespace RuntimeSwitcher
 
         public static string Version => InstalledVersion.Read(Folder);
 
-        /// <summary>Mirador's own per-user copy, which Mirador's "Set OpenComposite" puts first.</summary>
+        /// <summary>Mirador's own per-user copy, which Mirador's "Set OpenLamina" puts first.</summary>
         public static string MiradorCopy { get; } =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Mirador",
                 "OpenComposite");
@@ -64,7 +64,7 @@ namespace RuntimeSwitcher
 
         /// <summary>
         /// The active OpenXR runtime's name (its manifest's runtime.name, or the manifest's file name), or null with
-        /// none set. OpenComposite runs games on it. Never throws.
+        /// none set. OpenLamina runs games on it. Never throws.
         /// </summary>
         public static string OpenXRRuntime()
         {

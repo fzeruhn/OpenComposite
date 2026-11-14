@@ -1,4 +1,4 @@
-# Builds OpenComposite for Windows and Linux, 64- and 32-bit, the Windows installer, and packs the archives (scripts/ci;
+# Builds OpenLamina for Windows and Linux, 64- and 32-bit, the Windows installer, and packs the archives (scripts/ci;
 # the same scripts build locally). A v* tag (v2026.11.07, say) also puts them on its release: a pushed tag gets a new draft release, to check
 # and publish by hand; a tag made by publishing a release on GitHub's release page gets the files added to that release.
 name: Build
@@ -83,7 +83,7 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/regress.py --results conformance/stand-in/results.json --baseline tests/conformance/baseline/stand-in.json ${{ matrix.baseline }}
           if ($LASTEXITCODE) { $failed++ }
-          # What OpenComposite does when OpenXR calls fail (expect/xr_failures.json)
+          # What OpenLamina does when OpenXR calls fail (expect/xr_failures.json)
           python tests/conformance/xr_failures.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --ci --out conformance/xr-failures
           if ($LASTEXITCODE) { $failed++ }
           # Exact answers for chosen cases (expect/)
@@ -246,15 +246,15 @@ jobs:
         run: |
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { "dev-$($env:GITHUB_SHA.Substring(0, 12))" }
           scripts/ci/build-installer.ps1 -Artifacts artifacts -Version $version -Out build/installer-again -Repository $env:GITHUB_REPOSITORY | Out-Null
-          $a = (Get-FileHash build/installer/OpenComposite-Setup.exe).Hash
-          $b = (Get-FileHash build/installer-again/OpenComposite-Setup.exe).Hash
-          if ($a -eq $b) { "::notice::OpenComposite-Setup.exe is the same bytes when built again ($a)." }
-          else { "::error::OpenComposite-Setup.exe differs when built again ($a, $b)."; exit 1 }
+          $a = (Get-FileHash build/installer/OpenLamina-Setup.exe).Hash
+          $b = (Get-FileHash build/installer-again/OpenLamina-Setup.exe).Hash
+          if ($a -eq $b) { "::notice::OpenLamina-Setup.exe is the same bytes when built again ($a)." }
+          else { "::error::OpenLamina-Setup.exe differs when built again ($a, $b)."; exit 1 }
 
       - uses: actions/upload-artifact@v7
         with:
           name: installer
-          path: build/installer/OpenComposite-Setup.exe
+          path: build/installer/OpenLamina-Setup.exe
           if-no-files-found: error
 
   package:
@@ -281,16 +281,16 @@ jobs:
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA:0:12}; fi
           python3 scripts/ci/package.py --version "$version" --artifacts artifacts --out dist --repository "$GITHUB_REPOSITORY" \
-            --installer installer-build/OpenComposite-Setup.exe
+            --installer installer-build/OpenLamina-Setup.exe
 
       - name: Try install.sh
         run: |
           shellcheck -s sh installer/install.sh scripts/ci/test-install.sh
-          sh scripts/ci/test-install.sh dist/OpenComposite-linux.tar.gz
+          sh scripts/ci/test-install.sh dist/OpenLamina-linux.tar.gz
 
       - uses: actions/upload-artifact@v7
         with:
-          name: OpenComposite
+          name: OpenLamina
           path: dist/
           if-no-files-found: error
 
@@ -305,7 +305,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: OpenComposite
+          name: OpenLamina
           path: dist
 
       - name: Put the files on the release
@@ -313,12 +313,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          set -- dist/OpenComposite-Setup.exe dist/OpenComposite-windows.zip dist/OpenComposite-linux.tar.gz \
-            dist/OpenComposite-source.tar.gz dist/SHA256SUMS.txt
+          set -- dist/OpenLamina-Setup.exe dist/OpenLamina-windows.zip dist/OpenLamina-linux.tar.gz \
+            dist/OpenLamina-source.tar.gz dist/SHA256SUMS.txt
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             # Made on GitHub's release page: add the files, and keep its title and notes.
             gh release upload "$GITHUB_REF_NAME" "$@" --clobber
           else
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
-              --title "OpenComposite ${GITHUB_REF_NAME#v}" --notes-file dist/RELEASE_NOTES.md "$@"
+              --title "OpenLamina ${GITHUB_REF_NAME#v}" --notes-file dist/RELEASE_NOTES.md "$@"
           fi

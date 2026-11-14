@@ -1,16 +1,16 @@
 #Requires -Version 7.2
 <#
 .SYNOPSIS
-    Builds OpenComposite-Setup.exe, the Windows installer (installer\OpenComposite.iss), the way the release workflow
+    Builds OpenLamina-Setup.exe, the Windows installer (installer\OpenLamina.iss), the way the release workflow
     (.github/workflows/build.yml) does.
 .DESCRIPTION
     From the Windows builds' DLLs: -Artifacts is a folder with windows-x64\vrclient_x64.dll and windows-x86\vrclient.dll,
     as the workflow's artifacts are, or as build-windows.ps1 leaves them when copied there.
 
-    1. scripts\ci\package.py lays out the OpenComposite folder as OpenComposite-windows.zip has it (bin\, the licences,
+    1. scripts\ci\package.py lays out the OpenLamina folder as OpenLamina-windows.zip has it (bin\, the licences,
        SOURCE.txt with -Version).
-    2. RuntimeSwitcher\Tests runs, then RuntimeSwitcher builds OpenComposite.exe; warnings are errors.
-    3. Inno Setup compiles installer\OpenComposite.iss to <Out>\OpenComposite-Setup.exe.
+    2. RuntimeSwitcher\Tests runs, then RuntimeSwitcher builds OpenLamina.exe; warnings are errors.
+    3. Inno Setup compiles installer\OpenLamina.iss to <Out>\OpenLamina-Setup.exe.
 
     Needs the .NET SDK 8 or later, Python, and Inno Setup 6 (winget install JRSoftware.InnoSetup).
 .EXAMPLE
@@ -21,7 +21,7 @@ param(
     [Parameter(Mandatory)] [string]$Artifacts,
     [Parameter(Mandatory)] [string]$Version,
     [string]$Out,
-    [string]$Repository = 'fzeruhn/OpenComposite'
+    [string]$Repository = 'fzeruhn/OpenLamina'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,30 +60,30 @@ if (-not $iscc) {
     throw 'Inno Setup 6 is needed (winget install JRSoftware.InnoSetup).'
 }
 
-$folder = Join-Path $Out 'OpenComposite'
+$folder = Join-Path $Out 'OpenLamina'
 $switcher = Join-Path $Out 'switcher'
 # Only what this script makes in $Out is deleted; anything else there is left alone.
-foreach ($path in $folder, $switcher, (Join-Path $Out 'OpenComposite-Setup.exe')) {
+foreach ($path in $folder, $switcher, (Join-Path $Out 'OpenLamina-Setup.exe')) {
     if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Recurse -Force
     }
 }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
-# 1. The OpenComposite folder.
+# 1. The OpenLamina folder.
 Invoke-Checked {
     python (Join-Path $root 'scripts\ci\package.py') --version $Version --artifacts $Artifacts --windows-folder $folder `
         --repository $Repository
-} 'Laying out the OpenComposite folder'
+} 'Laying out the OpenLamina folder'
 
-# 2. OpenComposite.exe, after its tests.
+# 2. OpenLamina.exe, after its tests.
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 Invoke-Checked { dotnet test (Join-Path $root 'RuntimeSwitcher\Tests') --nologo } 'The RuntimeSwitcher tests'
 Invoke-Checked {
     dotnet build (Join-Path $root 'RuntimeSwitcher\RuntimeSwitcher.csproj') --nologo -c Release -o $switcher `
         "-p:Version=$numeric" "-p:InformationalVersion=$Version" -p:ContinuousIntegrationBuild=true
-} 'Building OpenComposite.exe'
+} 'Building OpenLamina.exe'
 # Newtonsoft.Json.dll goes with it, so its licence does too.
 $packages = ((dotnet nuget locals global-packages --list) -replace '^global-packages:\s*', '').Trim()
 $jsonVersion = ([xml](Get-Content -LiteralPath (Join-Path $root 'RuntimeSwitcher\RuntimeSwitcher.csproj') -Raw)).Project.ItemGroup.PackageReference |
@@ -100,9 +100,9 @@ Get-ChildItem -LiteralPath $folder, $switcher -Recurse -File | ForEach-Object { 
 Invoke-Checked {
     & $iscc /Q "/DAppVersion=$Version" "/DNumericVersion=$numeric" "/DFolder=$folder" "/DSwitcher=$switcher" "/DOutput=$Out" `
         "/DTouchDate=$($commitTime.ToString('yyyy-MM-dd', [cultureinfo]::InvariantCulture))" "/DTouchTime=$($commitTime.ToString('HH:mm:ss', [cultureinfo]::InvariantCulture))" `
-        (Join-Path $root 'installer\OpenComposite.iss')
+        (Join-Path $root 'installer\OpenLamina.iss')
 } 'Compiling the installer'
 
-$setup = Join-Path $Out 'OpenComposite-Setup.exe'
-Write-Host "OpenComposite $Version ($numeric), Newtonsoft.Json $jsonVersion"
+$setup = Join-Path $Out 'OpenLamina-Setup.exe'
+Write-Host "OpenLamina $Version ($numeric), Newtonsoft.Json $jsonVersion"
 Write-Host "  $setup ($([math]::Round((Get-Item -LiteralPath $setup).Length / 1KB)) KB)"

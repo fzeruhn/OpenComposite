@@ -2,7 +2,7 @@
 # Tries the Linux archive's install.sh on a scratch home folder: install, switch both ways, keep the owner's files,
 # uninstall, and the paths file's other keys kept throughout. No network, no Steam.
 #
-#   scripts/ci/test-install.sh dist/OpenComposite-linux.tar.gz
+#   scripts/ci/test-install.sh dist/OpenLamina-linux.tar.gz
 set -eu
 
 archive=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -15,13 +15,13 @@ fail() {
 
 mkdir -p "$work/unpacked" "$work/home folder/.config/openvr" "$work/home folder/.local/share/Steam"
 tar -xzf "$archive" -C "$work/unpacked"
-installer=$work/unpacked/OpenComposite/install.sh
-[ -x "$installer" ] || fail "the archive has no executable OpenComposite/install.sh."
+installer=$work/unpacked/OpenLamina/install.sh
+[ -x "$installer" ] || fail "the archive has no executable OpenLamina/install.sh."
 
 export HOME="$work/home folder"
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CONFIG_DIRS XR_RUNTIME_JSON
 paths=$HOME/.config/openvr/openvrpaths.vrpath
-copy=$HOME/.local/share/OpenComposite
+copy=$HOME/.local/share/OpenLamina
 steamvr=$HOME/.local/share/Steam/steamapps/common/SteamVR
 cat >"$paths" <<EOF
 {
@@ -66,26 +66,33 @@ cmp -s "$paths.bak" "$work/original" || fail "openvrpaths.vrpath.bak isn't the f
 
 status=$(sh "$copy/install.sh" --status)
 case $status in
-*"OpenVR games use: OpenComposite"*) ;;
-*) fail "--status doesn't say OpenComposite: $status" ;;
+*"OpenVR games use: OpenLamina"*) ;;
+*) fail "--status doesn't say OpenLamina: $status" ;;
 esac
 
+echo "haptics=off" >"$copy/bin/openlamina.ini"
 echo "haptics=off" >"$copy/bin/opencomposite.ini"
 sh "$installer" --no-switch >/dev/null
+[ -f "$copy/bin/openlamina.ini" ] || fail "installing again deleted bin/openlamina.ini."
 [ -f "$copy/bin/opencomposite.ini" ] || fail "installing again deleted bin/opencomposite.ini."
 
 sh "$copy/install.sh" --steamvr >/dev/null
 expect "$steamvr
 /opt/other-runtime" "--steamvr"
 
+sh "$copy/install.sh" --openlamina >/dev/null
+expect "$copy
+$steamvr
+/opt/other-runtime" "--openlamina"
+sh "$copy/install.sh" --steamvr >/dev/null
 sh "$copy/install.sh" --opencomposite >/dev/null
 expect "$copy
 $steamvr
-/opt/other-runtime" "--opencomposite"
+/opt/other-runtime" "--opencomposite, the old name of --openlamina"
 
 sh "$copy/install.sh" --uninstall >/dev/null
 expect "$steamvr
 /opt/other-runtime" "--uninstall"
 [ ! -e "$copy" ] || fail "--uninstall left $copy."
 
-echo "install.sh: install, status, reinstall, --steamvr, --opencomposite and --uninstall work."
+echo "install.sh: install, status, reinstall, --steamvr, --openlamina and --uninstall work."

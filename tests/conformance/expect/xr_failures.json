@@ -1,5 +1,5 @@
 {
- "#": "What OpenComposite does when OpenXR calls fail. xr_failures.py runs each script (scripts/<name>.json) on the stand-in runtime with the cases below and checks these; every script also checks that nothing ended or crashed.",
+ "#": "What OpenLamina does when OpenXR calls fail. xr_failures.py runs each script (scripts/<name>.json) on the stand-in runtime with the cases below and checks these; every script also checks that nothing ended or crashed.",
  "fail_instance": {
   "cases": [
    "init-matrix"

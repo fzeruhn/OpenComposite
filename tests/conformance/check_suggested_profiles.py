@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks that inputEvaluator=steamvr suggests bindings for the same interaction
 profiles as direct. A profile the game's bindings give nothing must not become one the runtime may pick because of
-OpenComposite's own raw inputs (direct leaves such a profile out, so the runtime doesn't choose khr/simple over a
+OpenLamina's own raw inputs (direct leaves such a profile out, so the runtime doesn't choose khr/simple over a
 controller the game has bindings for).
 
   check_suggested_profiles.py <dump under direct> <dump under steamvr>

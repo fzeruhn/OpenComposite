@@ -70,7 +70,7 @@ namespace RuntimeSwitcher
             // 
             this.optUseOpenComposite.Name = "optUseOpenComposite";
             this.optUseOpenComposite.Size = new System.Drawing.Size(222, 22);
-            this.optUseOpenComposite.Text = "Always use OpenComposite";
+            this.optUseOpenComposite.Text = "Always use OpenLamina";
             this.optUseOpenComposite.Click += new System.EventHandler(this.optUseOpenComposite_Click);
             // 
             // optUseSteamVR
@@ -123,7 +123,7 @@ namespace RuntimeSwitcher
             this.Controls.Add(this.appsList);
             this.Icon = AppIcon.Get();
             this.Name = "AppListForm";
-            this.Text = "OpenComposite: per-app settings";
+            this.Text = "OpenLamina: per-app settings";
             this.contextMenuStrip1.ResumeLayout(false);
             this.ResumeLayout(false);
             this.PerformLayout();

@@ -9,7 +9,7 @@ namespace RuntimeSwitcher.Tests
 {
     public class RuntimeListTests
     {
-        private const string Ours = @"C:\Users\u\AppData\Local\Programs\OpenComposite";
+        private const string Ours = @"C:\Users\u\AppData\Local\Programs\OpenLamina";
         private const string Mirador = @"C:\Users\u\AppData\Local\Mirador\OpenComposite";
         private const string SteamVR = @"C:\Program Files (x86)\Steam\steamapps\common\SteamVR";
         private const string Other = @"D:\Runtimes\Something";
@@ -29,10 +29,10 @@ namespace RuntimeSwitcher.Tests
         }
 
         [Theory]
-        [InlineData(@"C:\Users\u\AppData\Local\Programs\OpenComposite", true)]
-        [InlineData("C:/Users/u/AppData/Local/Programs/OpenComposite/", true)]
-        [InlineData(@"C:\Users\u/AppData/Local\Programs\OpenComposite\\", true)]
-        [InlineData(@"C:\Users\u\AppData\Local\Programs\OpenComposite2", false)]
+        [InlineData(@"C:\Users\u\AppData\Local\Programs\OpenLamina", true)]
+        [InlineData("C:/Users/u/AppData/Local/Programs/OpenLamina/", true)]
+        [InlineData(@"C:\Users\u/AppData/Local\Programs\OpenLamina\\", true)]
+        [InlineData(@"C:\Users\u\AppData\Local\Programs\OpenLamina2", false)]
         public void SamePathFoldsSeparators(string path, bool same)
         {
             Assert.Equal(same, RuntimeList.SamePath(path, Ours, true));
@@ -82,8 +82,8 @@ namespace RuntimeSwitcher.Tests
         [Fact]
         public void CaseMattersWhenAskedTo()
         {
-            var result = RuntimeList.UseOpenComposite(new[] { "/home/u/OpenComposite" }, "/home/u/opencomposite", false);
-            Assert.Equal(new[] { "/home/u/opencomposite", "/home/u/OpenComposite" }, result);
+            var result = RuntimeList.UseOpenComposite(new[] { "/home/u/OpenLamina" }, "/home/u/opencomposite", false);
+            Assert.Equal(new[] { "/home/u/opencomposite", "/home/u/OpenLamina" }, result);
         }
 
         [Theory]
@@ -230,13 +230,13 @@ namespace RuntimeSwitcher.Tests
                 $"{{\"tag_name\":\"{r.tag}\",\"prerelease\":{(r.pre ? "true" : "false")},\"draft\":{(r.draft ? "true" : "false")}," +
                 $"\"html_url\":\"https://github.com/x/y/releases/tag/{r.tag}\",\"assets\":[" +
                 (r.asset
-                    ? $"{{\"name\":\"OpenComposite-Setup.exe\",\"browser_download_url\":\"https://example/{r.tag}/OpenComposite-Setup.exe\",\"size\":10" +
+                    ? $"{{\"name\":\"OpenLamina-Setup.exe\",\"browser_download_url\":\"https://example/{r.tag}/OpenLamina-Setup.exe\",\"size\":10" +
                       (r.digest ? $",\"digest\":\"sha256:{Sha.ToUpperInvariant()}\"" : ",\"digest\":null") + "}"
                     : "") +
                 "]}")) + "]";
 
         private static Release Find(string json, string installed, bool pre) =>
-            Releases.FindUpdate(Releases.Parse(json), installed, pre, "OpenComposite-Setup.exe");
+            Releases.FindUpdate(Releases.Parse(json), installed, pre, "OpenLamina-Setup.exe");
 
         [Fact]
         public void TheNewestStableReleaseWithTheSetup()
@@ -268,7 +268,7 @@ namespace RuntimeSwitcher.Tests
                 ("v2026.12.01", false, false, true, false), ("v2026.11.20", false, false, true, true));
             Release found = Find(json, "2026.11.06", true);
             Assert.Equal("2026.11.20", found?.Version);
-            Assert.Equal(Sha, found?.Asset("OpenComposite-Setup.exe")?.Sha256);
+            Assert.Equal(Sha, found?.Asset("OpenLamina-Setup.exe")?.Sha256);
         }
 
         [Fact]
@@ -322,8 +322,9 @@ namespace RuntimeSwitcher.Tests
         }
 
         [Theory]
-        [InlineData("OpenComposite 2026.11.06, commit 7534249abc\nFrom https://…\n", "2026.11.06")]
-        [InlineData("OpenComposite dev-0123456789ab, commit 0123456789abcdef\n", null)]
+        [InlineData("OpenLamina 2026.11.06, commit 7534249abc\nFrom https://…\n", "2026.11.06")]
+        [InlineData("OpenComposite 2026.11.06, commit 7534249abc\nFrom https://…\n", "2026.11.06")] // written before OpenLamina
+        [InlineData("OpenLamina dev-0123456789ab, commit 0123456789abcdef\n", null)]
         [InlineData("something else\n", null)]
         [InlineData("", null)]
         public void TheInstalledVersionFromSourceTxt(string text, string version)
@@ -338,7 +339,7 @@ namespace RuntimeSwitcher.Tests
             try
             {
                 Directory.CreateDirectory(Path.Combine(folder, "2026.11.06"));
-                File.WriteAllText(Path.Combine(folder, "2026.11.06", "OpenComposite-Setup.exe"), "old");
+                File.WriteAllText(Path.Combine(folder, "2026.11.06", "OpenLamina-Setup.exe"), "old");
                 Directory.CreateDirectory(Path.Combine(folder, "2026.12.01"));
                 Updater.DeleteOtherFolders(folder, "2026.12.01");
                 Assert.Equal(new[] { "2026.12.01" }, Directory.GetDirectories(folder).Select(Path.GetFileName));
