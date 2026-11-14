@@ -51,23 +51,16 @@ uint64_t XrGenericTracker::GetUint64TrackedDeviceProperty(vr::ETrackedDeviceProp
 uint32_t XrGenericTracker::GetStringTrackedDeviceProperty(vr::ETrackedDeviceProperty prop,
     char* value, uint32_t bufferSize, vr::ETrackedPropertyError* pErrorL)
 {
-#define PROP(in, out)                                                                                  \
-	if (prop == in) {                                                                                  \
-		if (value != NULL && bufferSize > 0) {                                                         \
-			strcpy_s(value, bufferSize, out); /* FFS msvc - strncpy IS the secure version of strcpy */ \
-		}                                                                                              \
-		return (uint32_t)strlen(out) + 1;                                                              \
-	}
-
-	if (pErrorL)
-		*pErrorL = vr::TrackedProp_Success;
-
-	PROP(vr::Prop_RenderModelName_String, GetInteractionProfile()->GetOpenVRName().value());
-	PROP(vr::Prop_ControllerType_String, "vive_tracker_handheld_object");
-	PROP(vr::Prop_ModelNumber_String, "Vive Tracker Handheld Object")
-	PROP(vr::Prop_SerialNumber_String, xdevProperties.serial);
-
+	// From the tracker's row (Identity)
 	return XrTrackedDevice::GetStringTrackedDeviceProperty(prop, value, bufferSize, pErrorL);
+}
+
+DeviceIdentity XrGenericTracker::Identity()
+{
+	DeviceIdentity id = TrackerIdentity(xdevProperties.name, xdevProperties.serial);
+	if (std::optional<const char*> name = GetInteractionProfile()->GetOpenVRName())
+		id.renderModel = *name;
+	return id;
 }
 
 vr::ETrackedDeviceClass XrGenericTracker::GetTrackedDeviceClass()

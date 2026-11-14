@@ -1,0 +1,26 @@
+// An overlay application and a template, as tools ship them (with a comment and a trailing comma)
+{
+	"source" : "oc_tests",
+	"applications" : [
+		{
+			"app_key" : "oc.test.overlay",
+			"launch_type" : "binary",
+			"binary_path" : "bin/overlay_tool",
+			"working_directory" : "bin",
+			"arguments" : "--overlay",
+			"is_dashboard_overlay" : true,
+			"action_manifest_path" : "actions.json",
+			"strings" : { "en_us" : { "name" : "Overlay Tool", "description" : "A dashboard overlay" } },
+		},
+		{
+			"app_key" : "oc.test.template",
+			"launch_type" : "url",
+			"url" : "https://example.invalid/app",
+			"is_template" : true,
+		},
+		{
+			"launch_type" : "binary",
+			"binary_path" : "no_key.exe"
+		}
+	]
+}

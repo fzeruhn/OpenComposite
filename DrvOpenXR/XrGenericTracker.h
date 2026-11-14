@@ -26,6 +26,7 @@ public:
 
 	uint64_t GetUint64TrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* pErrorL) override;
 	uint32_t GetStringTrackedDeviceProperty(vr::ETrackedDeviceProperty prop, char* pchValue, uint32_t unBufferSize, vr::ETrackedPropertyError* pErrorL) override;
+	DeviceIdentity Identity() override;
 
 private:
 	const InteractionProfile& profile;

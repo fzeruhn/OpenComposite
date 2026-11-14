@@ -233,6 +233,8 @@ add_library(DrvOpenXR STATIC
 	DrvOpenXR/XrHMD.h
 
 	DrvOpenXR/XrController.cpp
+	DrvOpenXR/DeviceIdentity.cpp
+	DrvOpenXR/DeviceIdentity.h
 	DrvOpenXR/XrController.h
 
 	DrvOpenXR/XrGenericTracker.cpp
@@ -311,8 +313,18 @@ add_library(OCCore STATIC
 	OpenOVR/Misc/Config.cpp
 	OpenOVR/Misc/JsonFile.cpp
 	OpenOVR/Misc/SteamVRPaths.cpp
+	OpenOVR/Misc/SharedStore.cpp
+	OpenOVR/Misc/SteamVRSettings.cpp
+	OpenOVR/Misc/AppManifest.cpp
+	OpenOVR/Misc/ChaperoneData.cpp
+	OpenOVR/Misc/ProgramEvents.cpp
 	OpenOVR/Misc/JsonFile.h
 	OpenOVR/Misc/SteamVRPaths.h
+	OpenOVR/Misc/SharedStore.h
+	OpenOVR/Misc/SteamVRSettings.h
+	OpenOVR/Misc/AppManifest.h
+	OpenOVR/Misc/ChaperoneData.h
+	OpenOVR/Misc/ProgramEvents.h
 	OpenOVR/Misc/SoftFail.cpp
 	OpenOVR/Misc/SoftFail.h
 	OpenOVR/Misc/EnumNames.h

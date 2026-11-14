@@ -1,6 +1,12 @@
 #pragma once
 #include "BaseCommon.h"
 
+#include <optional>
+#include <string>
+
+class SharedStore;
+struct AppManifestEntry;
+
 /** Used for all errors reported by the IVRApplications interface */
 enum OOVR_EVRApplicationError {
 	// clang-format off
@@ -80,6 +86,15 @@ struct OOVR_AppOverrideKeys_t {
 
 class BaseApplications {
 public:
+	/** The registry in the process's store (SharedStore::Get()) */
+	BaseApplications() = default;
+	/** The registry in that store (tests) */
+	explicit BaseApplications(SharedStore& store)
+	    : store(&store) {}
+
+	/** The Scene document: this process becomes the scene application (at session start), or stops being it */
+	static void SetSceneProcess(bool running);
+	static void SetSceneProcess(SharedStore& store, bool running);
 
 	typedef OOVR_EVRApplicationError EVRApplicationError;
 	typedef OOVR_EVRApplicationProperty EVRApplicationProperty;
@@ -220,4 +235,11 @@ public:
 	 * answered (UnknownApplication), and none can be set */
 	EVRApplicationError GetHomeApplication(VR_OUT_STRING() char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen);
 	EVRApplicationError SetHomeApplication(const char* pchAppKey);
+
+private:
+	SharedStore& Store();
+	std::optional<AppManifestEntry> Find(const char* pchAppKey);
+	EVRApplicationError Launch(const AppManifestEntry& app, const std::string& extraArguments);
+
+	SharedStore* store = nullptr;
 };

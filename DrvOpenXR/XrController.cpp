@@ -73,23 +73,9 @@ uint64_t XrController::GetUint64TrackedDeviceProperty(vr::ETrackedDeviceProperty
 
 	TRY_PROFILE_PROP(uint64_t);
 
-	// This is for the old input system, which we don't initially need
-	if (prop == vr::Prop_SupportedButtons_Uint64) {
-		// Just assume we're an Oculus Touch-style controller and enable all the buttons.
-		uint64_t supported = 0;
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_System);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_ApplicationMenu);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_Grip);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_Axis2);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_DPad_Left);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_DPad_Up);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_DPad_Down);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_DPad_Right);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_A);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Touchpad);
-		supported |= vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger);
-		return supported;
-	}
+	// The old input system's buttons: those the controller's interaction profile has (DeviceIdentity)
+	if (prop == vr::Prop_SupportedButtons_Uint64)
+		return Identity().supportedButtons;
 
 	return XrTrackedDevice::GetUint64TrackedDeviceProperty(prop, pErrorL);
 }
@@ -102,53 +88,24 @@ uint32_t XrController::GetStringTrackedDeviceProperty(vr::ETrackedDeviceProperty
 		*pErrorL = vr::TrackedProp_Success;
 
 	std::optional<std::string> ret = profile.GetProperty<std::string>(prop, GetHand());
-	if (ret.has_value()) {
-		if (value != NULL && bufferSize > 0) {
-			strcpy_s(value, bufferSize, ret->c_str());
-		}
-		return ret->size() + 1;
-	}
+	if (ret.has_value())
+		return AnswerString(*ret, value, bufferSize, pErrorL);
 
-#define PROP(in, out)                                                                                  \
-	if (prop == in) {                                                                                  \
-		if (value != NULL && bufferSize > 0) {                                                         \
-			strcpy_s(value, bufferSize, out); /* FFS msvc - strncpy IS the secure version of strcpy */ \
-		}                                                                                              \
-		return (uint32_t)strlen(out) + 1;                                                              \
-	}
-
-	// Resonite determines controller type by using render model name, if it can't recognize - it will load generic controller
-	switch (type) {
-	case XCT_LEFT: {
-		std::optional<const char*> leftHandPath = GetInteractionProfile()->GetLeftHandRenderModelName();
-		if (leftHandPath.has_value()) {
-			PROP(vr::Prop_RenderModelName_String, leftHandPath.value());
-		} else {
-			PROP(vr::Prop_RenderModelName_String, "renderLeftHand");
-		}
-		PROP(vr::Prop_RegisteredDeviceType_String, "oculus/F00BAAF00F_Controller_Left");
-		break;
-	}
-	case XCT_RIGHT: {
-		std::optional<const char*> rightHandPath = GetInteractionProfile()->GetRightHandRenderModelName();
-		if (rightHandPath.has_value()) {
-			PROP(vr::Prop_RenderModelName_String, rightHandPath.value());
-		} else {
-			PROP(vr::Prop_RenderModelName_String, "renderRightHand");
-		}
-		PROP(vr::Prop_RegisteredDeviceType_String, "oculus/F00BAAF00F_Controller_Right");
-		break;
-	}
-	case XCT_TRACKED_OBJECT:
-		PROP(vr::Prop_RenderModelName_String, "renderObject0");
-		break;
-	default:
-		// A controller type OpenComposite doesn't know: the generic properties only
-		OOVR_LOG_ONCE("GetStringTrackedDeviceProperty: unknown controller type");
-		break;
-	}
-
+	// The rest from the controller's row (Identity): Resonite tells controllers apart by the render model name
 	return XrTrackedDevice::GetStringTrackedDeviceProperty(prop, value, bufferSize, pErrorL);
+}
+
+DeviceIdentity XrController::Identity()
+{
+	switch (type) {
+	case XCT_LEFT:
+		return ControllerIdentity(*GetInteractionProfile(), vr::TrackedControllerRole_LeftHand);
+	case XCT_RIGHT:
+		return ControllerIdentity(*GetInteractionProfile(), vr::TrackedControllerRole_RightHand);
+	default:
+		// A tracked object (or a type OpenComposite doesn't know): no hand
+		return ControllerIdentity(*GetInteractionProfile(), vr::TrackedControllerRole_Invalid);
+	}
 }
 
 ITrackedDevice::TrackedDeviceType XrController::GetHand()

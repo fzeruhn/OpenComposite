@@ -6,6 +6,10 @@
 #include "generated/static_bases.gen.h"
 
 #include "Drivers/Backend.h"
+#include "Misc/ChaperoneData.h"
+#include "Misc/SharedStore.h"
+
+#include <algorithm>
 
 #include <vector>
 
@@ -86,7 +90,7 @@ bool BaseChaperone::GetPlayAreaRect(HmdQuad_t* rect)
 }
 void BaseChaperone::ReloadInfo(void)
 {
-	// The play area is asked of the OpenXR runtime each time, so there's nothing to reload
+	// The play area is asked of the OpenXR runtime, and the committed room setup read from the store, each time
 }
 void BaseChaperone::SetSceneColor(HmdColor_t color)
 {
@@ -94,12 +98,17 @@ void BaseChaperone::SetSceneColor(HmdColor_t color)
 }
 void BaseChaperone::GetBoundsColor(HmdColor_t* pOutputColorArray, int nNumOutputColors, float flCollisionBoundsFadeDistance, HmdColor_t* pOutputCameraColor)
 {
-	// The OpenXR runtime draws its own boundary: no colours to report
+	// The colours of the committed room setup (IVRChaperoneSetup); none (zero) before one is committed
+	HmdColor_t bounds{}, camera{};
+	if (auto committed = ChaperoneData::FromJson(SharedStore::Get().Read(StoreDoc::Chaperone))) {
+		bounds = committed->colors[0];
+		camera = committed->colors[1];
+	}
 	// No more than any boundary has colours for: an app's count beyond that is a bad argument, not a buffer size
 	if (pOutputColorArray && nNumOutputColors > 0)
-		memset(pOutputColorArray, 0, sizeof(HmdColor_t) * std::min(nNumOutputColors, 1024));
+		std::fill(pOutputColorArray, pOutputColorArray + std::min(nNumOutputColors, 1024), bounds);
 	if (pOutputCameraColor)
-		*pOutputCameraColor = {};
+		*pOutputCameraColor = camera;
 }
 bool BaseChaperone::AreBoundsVisible()
 {

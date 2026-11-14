@@ -1,0 +1,16 @@
+{
+	"steamvr" : {
+		"supersampleManualOverride" : true,
+		"supersampleScale" : 1.5,
+		"enableHomeApp" : false
+	},
+	"steam.app.4242" : {
+		"resolutionScale" : 50
+	},
+	"oc_test" : {
+		"answer" : 42,
+		"name" : "forty-two",
+		"ratio" : 0.25,
+		"words" : "not a number"
+	}
+}

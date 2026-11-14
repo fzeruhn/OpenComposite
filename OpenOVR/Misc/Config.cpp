@@ -110,6 +110,12 @@ static float parse_float(string orig, string name, int line)
 	return result;
 }
 
+static string parse_string(string orig, string name, int line)
+{
+	OOVR_LOGF("Setting config param %s to %s", name.c_str(), orig.c_str());
+	return orig;
+}
+
 int Config::ini_handler(void* user, const char* pSection,
     const char* pName, const char* pValue,
     int lineno)
@@ -145,6 +151,7 @@ int Config::ini_handler(void* user, const char* pSection,
 		CFGOPT(bool, initUsingVulkan);
 		CFGOPT(float, hiddenMeshVerticalScale);
 		CFGOPT(bool, logAllOpenVRCalls);
+		CFGOPT(string, bindingEditor);
 	}
 
 #undef CFGOPT

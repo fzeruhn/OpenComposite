@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 class Config {
 public:
 	Config();
@@ -18,6 +20,8 @@ public:
 	inline bool InitUsingVulkan() const { return initUsingVulkan; }
 	float HiddenMeshVerticalScale() const { return hiddenMeshVerticalScale; }
 	inline bool LogAllOpenVRCalls() const { return logAllOpenVRCalls; }
+	/** The program OpenBindingUI starts; empty for none */
+	const std::string& BindingEditor() const { return bindingEditor; }
 
 private:
 	static int ini_handler(
@@ -38,6 +42,7 @@ private:
 	bool initUsingVulkan = false;
 	float hiddenMeshVerticalScale = 1.0f;
 	bool logAllOpenVRCalls = false;
+	std::string bindingEditor;
 };
 
 extern Config oovr_global_configuration;

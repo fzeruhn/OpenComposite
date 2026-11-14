@@ -4,6 +4,9 @@
 #include "json/json.h"
 #define BASE_IMPL
 #include "BaseInput.h"
+#include "Misc/AppManifest.h"
+#include "Misc/ProgramEvents.h"
+#include "Misc/Config.h"
 #include <string>
 
 #include <convert.h>
@@ -395,6 +398,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		return VRInputError_InvalidParam;
 	}
 
+	bool reloading = hasLoadedActions;
 	if (hasLoadedActions) {
 		// It stands to reason that nothing would happen if we try to load the same manifest again
 		if (loadedActionsPath == pchActionManifestPath)
@@ -419,6 +423,11 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 
 	hasLoadedActions = true;
 	loadedActionsPath = pchActionManifestPath;
+
+	// Another manifest in place of the first: its bindings are new
+	if (reloading) {
+		OcPostEvent(vr::VREvent_ActionBindingReloaded, vr::k_unTrackedDeviceIndexInvalid, vr::VREvent_Data_t{}, false);
+	}
 
 	// Random setting which is in the action manifest
 	const Json::Value& dominantHandSetting = root["supports_dominant_hand_setting"];
@@ -2141,16 +2150,29 @@ EVRInputError BaseInput::GetBoneCount(VRActionHandle_t action, uint32_t* pBoneCo
 }
 EVRInputError BaseInput::GetBoneHierarchy(VRActionHandle_t action, VR_ARRAY_COUNT(unIndexArayCount) BoneIndex_t* pParentIndices, uint32_t unIndexArayCount)
 {
-	// For now: no skeleton hierarchy to give
-	if (pParentIndices && unIndexArayCount)
-		memset(pParentIndices, 0, sizeof(BoneIndex_t) * unIndexArayCount);
-	OC_UNSUPPORTED(VRInputError_InvalidSkeleton, "GetBoneHierarchy: not yet");
+	GET_ACTION_FROM_HANDLE(act, action);
+	if ((int)act->skeletalHand >= 2)
+		return VRInputError_InvalidSkeleton;
+	if (!pParentIndices || unIndexArayCount < eBone_Count)
+		return VRInputError_BufferTooSmall;
+	for (BoneIndex_t i = 0; i < eBone_Count; i++)
+		pParentIndices[i] = HandBoneParent(i);
+	return VRInputError_None;
 }
 EVRInputError BaseInput::GetBoneName(VRActionHandle_t action, BoneIndex_t nBoneIndex, VR_OUT_STRING() char* pchBoneName, uint32_t unNameBufferSize)
 {
 	if (pchBoneName && unNameBufferSize)
 		pchBoneName[0] = 0;
-	OC_UNSUPPORTED(VRInputError_InvalidSkeleton, "GetBoneName: not yet");
+	GET_ACTION_FROM_HANDLE(act, action);
+	if ((int)act->skeletalHand >= 2)
+		return VRInputError_InvalidSkeleton;
+	if (nBoneIndex < 0 || nBoneIndex >= eBone_Count)
+		return VRInputError_InvalidBoneIndex;
+	std::string name = HandBoneName(nBoneIndex, act->skeletalHand == ITrackedDevice::HAND_RIGHT);
+	if (!pchBoneName || unNameBufferSize < name.size() + 1)
+		return VRInputError_BufferTooSmall;
+	memcpy(pchBoneName, name.c_str(), name.size() + 1);
+	return VRInputError_None;
 }
 EVRInputError BaseInput::GetSkeletalReferenceTransforms(VRActionHandle_t actionHandle, EVRSkeletalTransformSpace eTransformSpace, EVRSkeletalReferencePose eReferencePose, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount)
 {
@@ -2418,16 +2440,27 @@ EVRInputError BaseInput::GetSkeletalBoneDataCompressed(VRActionHandle_t action, 
     EVRSkeletalMotionRange eMotionRange, VR_OUT_BUFFER_COUNT(unCompressedSize) void* pvCompressedData, uint32_t unCompressedSize,
     uint32_t* punRequiredCompressedSize, VRInputValueHandle_t ulRestrictToDevice)
 {
+	// OpenComposite's own format (CompressBones): only DecompressSkeletalBoneData here reads it. No bones (a bad
+	// action, no hand): no size either, as SteamVR answers
 	if (punRequiredCompressedSize)
 		*punRequiredCompressedSize = 0;
-	OC_UNSUPPORTED(VRInputError_NoData, "GetSkeletalBoneDataCompressed: no compressed bone data yet");
+	BoneArray bones{};
+	EVRInputError err = GetSkeletalBoneData(action, eTransformSpace, eMotionRange, bones.data(), (uint32_t)bones.size());
+	if (err != VRInputError_None)
+		return err;
+	if (punRequiredCompressedSize)
+		*punRequiredCompressedSize = kCompressedBonesSize;
+	if (!pvCompressedData || unCompressedSize < kCompressedBonesSize)
+		return VRInputError_BufferTooSmall;
+	CompressBones(eTransformSpace, eMotionRange, bones.data(), pvCompressedData, unCompressedSize);
+	return VRInputError_None;
 }
 EVRInputError BaseInput::GetSkeletalBoneDataCompressed(VRActionHandle_t action, EVRSkeletalMotionRange eMotionRange,
     VR_OUT_BUFFER_COUNT(unCompressedSize) void* pvCompressedData, uint32_t unCompressedSize, uint32_t* punRequiredCompressedSize)
 {
-	if (punRequiredCompressedSize)
-		*punRequiredCompressedSize = 0;
-	OC_UNSUPPORTED(VRInputError_NoData, "GetSkeletalBoneDataCompressed: no compressed bone data yet");
+	// IVRInput_003/004: bones in parent space, as SteamVR gave them then
+	return GetSkeletalBoneDataCompressed(action, VRSkeletalTransformSpace_Parent, eMotionRange, pvCompressedData, unCompressedSize,
+	    punRequiredCompressedSize, vr::k_ulInvalidInputValueHandle);
 }
 EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigitalActionData_t* pActionData, uint32_t unActionDataSize)
 {
@@ -2480,13 +2513,17 @@ EVRInputError BaseInput::DecompressSkeletalBoneData(void* pvCompressedBuffer, ui
     EVRSkeletalTransformSpace* peTransformSpace, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray,
     uint32_t unTransformArrayCount)
 {
-	// GetSkeletalBoneDataCompressed hands out nothing to decompress
-	OC_UNSUPPORTED(VRInputError_NoData, "DecompressSkeletalBoneData: no compressed bone data yet");
+	// The older call: the bones in the space they were compressed in, and which that was
+	if (!pTransformArray || unTransformArrayCount != eBone_Count)
+		return VRInputError_InvalidParam;
+	return DecompressBones(pvCompressedBuffer, unCompressedBufferSize, std::nullopt, pTransformArray, peTransformSpace);
 }
 EVRInputError BaseInput::DecompressSkeletalBoneData(const void* pvCompressedBuffer, uint32_t unCompressedBufferSize, EVRSkeletalTransformSpace eTransformSpace,
     VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount)
 {
-	OC_UNSUPPORTED(VRInputError_NoData, "DecompressSkeletalBoneData: no compressed bone data yet");
+	if (!pTransformArray || unTransformArrayCount != eBone_Count)
+		return VRInputError_InvalidParam;
+	return DecompressBones(pvCompressedBuffer, unCompressedBufferSize, eTransformSpace, pTransformArray);
 }
 
 EVRInputError BaseInput::TriggerHapticVibrationAction(VRActionHandle_t action, float fStartSecondsFromNow, float fDurationSeconds,
@@ -2787,8 +2824,21 @@ bool BaseInput::IsUsingLegacyInput()
 EVRInputError BaseInput::OpenBindingUI(const char* pchAppKey, VRActionSetHandle_t ulActionSetHandle,
     VRInputValueHandle_t ulDeviceHandle, bool bShowOnDesktop)
 {
-	// There's no binding editor yet; SteamVR answers this without Steam
-	OC_UNSUPPORTED(VRInputError_NoSteam, "OpenBindingUI: no binding editor");
+	// The binding editor set in opencomposite.ini, if any; SteamVR answers NoSteam without Steam
+	std::string editor = oovr_global_configuration.BindingEditor();
+	if (editor.empty())
+		OC_UNSUPPORTED(VRInputError_NoSteam, "OpenBindingUI: no bindingEditor in opencomposite.ini");
+
+	std::string key = pchAppKey && pchAppKey[0] ? std::string(pchAppKey) : CurrentProcessAppKey();
+	ActionSet* set = ulActionSetHandle != vr::k_ulInvalidActionSetHandle ? cast_ASH(ulActionSetHandle) : nullptr;
+	InputValueHandle* device = cast_IVH(ulDeviceHandle);
+	// Each value one argument of its own, whatever it holds
+	std::string args = "--app-key " + QuoteArgument(key) + " --action-set " + QuoteArgument(set ? set->fullName : "")
+	    + " --device " + QuoteArgument(device ? device->path : "");
+	std::filesystem::path binary = PathFromUtf8(editor);
+	if (!LaunchProcess(binary, args, binary.parent_path()))
+		OC_UNSUPPORTED(VRInputError_NoSteam, "OpenBindingUI: the binding editor %s didn't start", editor.c_str());
+	return VRInputError_None;
 }
 
 EVRInputError BaseInput::GetBindingVariant(vr::VRInputValueHandle_t ulDevicePath, char* pchVariantArray, uint32_t unVariantArraySize)

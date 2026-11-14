@@ -4,8 +4,10 @@
 #include "conformance.h"
 
 #include "IVRApplications_001.h"
+#include "IVRApplications_007.h"
 #include "IVRChaperone_002.h"
 #include "IVRChaperone_004.h"
+#include "IVRChaperoneSetup_006.h"
 #include "IVRCompositor_005.h"
 #include "IVRControlPanel_001.h"
 #include "IVRDriverManager_001.h"
@@ -28,9 +30,16 @@
 #include "IVRSystem_009.h"
 #include "IVRSystem_022.h"
 
+#include <chrono>
 #include <cstring>
-
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <thread>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace conformance;
 
@@ -784,6 +793,352 @@ void NewInterfaces(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// What the devices say they are (expect/device_identity.json): the HMD's row in the identity table, a string answer
+// that doesn't fit, and IVRSystem_003's distortion
+void DeviceIdentityCase(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	auto* sys003 = (vr::IVRSystem_003::IVRSystem*)c.core->GetGenericInterface("IVRSystem_003", &le);
+	if (!sys || !sys003) {
+		c.Record("no IVRSystem_022 or 003", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	auto stringProp = [&](const char* label, vr::ETrackedDeviceProperty prop, uint32_t size) {
+		char value[64];
+		memset(value, 'x', sizeof(value));
+		vr::ETrackedPropertyError err = vr::TrackedProp_Success;
+		Json::Value r;
+		r["ret"] = sys->GetStringTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, prop, value, size, &err);
+		r["error"] = (int)err;
+		r["value"] = size ? std::string(value, strnlen(value, size)) : std::string();
+		c.Record(label, r);
+	};
+	stringProp("HMD TrackingSystemName", vr::Prop_TrackingSystemName_String, 64);
+	stringProp("HMD ManufacturerName", vr::Prop_ManufacturerName_String, 64);
+	stringProp("HMD RenderModelName", vr::Prop_RenderModelName_String, 64);
+	stringProp("HMD ControllerType", vr::Prop_ControllerType_String, 64);
+	stringProp("HMD TrackingSystemName in 3 bytes", vr::Prop_TrackingSystemName_String, 3);
+
+	Json::Value r;
+	vr::DistortionCoordinates_t d = sys003->ComputeDistortion(vr::Eye_Left, 0.25f, 0.75f);
+	r["red"] = std::to_string(d.rfRed[0]) + "," + std::to_string(d.rfRed[1]);
+	r["blue"] = std::to_string(d.rfBlue[0]) + "," + std::to_string(d.rfBlue[1]);
+	c.Record("IVRSystem_003 ComputeDistortion", r);
+
+	c.core->Cleanup();
+}
+
+// This program's folder, where oc_echo_app is built
+std::filesystem::path OwnFolder()
+{
+#ifdef _WIN32
+	wchar_t path[MAX_PATH * 4];
+	DWORD n = GetModuleFileNameW(nullptr, path, (DWORD)(sizeof(path) / sizeof(path[0])));
+	return std::filesystem::path(std::wstring(path, n)).parent_path();
+#else
+	std::error_code ec;
+	return std::filesystem::read_symlink("/proc/self/exe", ec).parent_path();
+#endif
+}
+
+std::string JsonEscaped(const std::string& s)
+{
+	std::string out;
+	for (char ch : s) {
+		if (ch == '\\' || ch == '"')
+			out += '\\';
+		out += ch;
+	}
+	return out;
+}
+
+// The application registry (expect/applications.json): a manifest added, its application installed, launched
+// (oc_echo_app writes a marker file) and named. A Utility app, so it runs without an OpenXR runtime too.
+void ApplicationsCase(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Utility, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* apps = (vr::IVRApplications_007::IVRApplications*)c.core->GetGenericInterface("IVRApplications_007", &le);
+	if (!apps) {
+		c.Record("no IVRApplications_007", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	// echo.vrmanifest, with the binary where it was built and the marker to write as its argument
+	namespace fs = std::filesystem;
+	auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	fs::path dir = fs::temp_directory_path() / ("oc_applications_case_" + std::to_string(stamp));
+	fs::create_directories(dir);
+	fs::path marker = dir / "marker.txt";
+	std::ifstream in(c.call->dataDir / "echo.vrmanifest");
+	std::stringstream text;
+	text << in.rdbuf();
+	std::string manifest = text.str();
+#ifdef _WIN32
+	const char* binaryKey = "\"binary_path_windows\" : \"oc_echo_app.exe\"";
+	fs::path binary = OwnFolder() / "oc_echo_app.exe";
+#else
+	const char* binaryKey = "\"binary_path_linux\" : \"oc_echo_app\"";
+	fs::path binary = OwnFolder() / "oc_echo_app";
+#endif
+	auto replace = [&](const std::string& from, const std::string& to) {
+		size_t at = manifest.find(from);
+		if (at != std::string::npos)
+			manifest.replace(at, from.size(), to);
+	};
+	std::string key = binaryKey;
+	replace(key, key.substr(0, key.find(':') + 2) + "\"" + JsonEscaped(binary.generic_string()) + "\"");
+	replace("\"arguments\" : \"\"", "\"arguments\" : \"\\\"" + JsonEscaped(marker.generic_string()) + "\\\" launched\"");
+	fs::path manifestPath = dir / "echo.vrmanifest";
+	std::ofstream(manifestPath) << manifest;
+
+	c.Record("AddApplicationManifest", Err(apps->AddApplicationManifest(manifestPath.string().c_str(), false)));
+	Json::Value installed;
+	installed["ret"] = apps->IsApplicationInstalled("oc.test.echo");
+	c.Record("IsApplicationInstalled", installed);
+
+	Json::Value launch = Err(apps->LaunchApplication("oc.test.echo"));
+	bool appeared = false;
+	for (int i = 0; i < 50 && !appeared; i++) {
+		std::error_code ec;
+		appeared = fs::exists(marker, ec) && fs::file_size(marker, ec) > 0;
+		if (!appeared)
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+	launch["marker"] = appeared;
+	if (appeared) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(100)); // its one line written
+		std::ifstream m(marker);
+		std::string line;
+		std::getline(m, line);
+		launch["marker_text"] = line;
+	}
+	c.Record("LaunchApplication", launch);
+
+	char name[64] = "unchanged";
+	vr::IVRApplications_007::EVRApplicationError error = vr::IVRApplications_007::VRApplicationError_None;
+	Json::Value prop;
+	prop["ret"] = apps->GetApplicationPropertyString("oc.test.echo", vr::IVRApplications_007::VRApplicationProperty_Name_String, name, sizeof(name), &error);
+	prop["error"] = (int)error;
+	prop["value"] = std::string(name);
+	c.Record("GetApplicationPropertyString Name", prop);
+
+	Json::Value last;
+	last["after_launch"] = apps->GetApplicationPropertyUint64("oc.test.echo", vr::IVRApplications_007::VRApplicationProperty_LastLaunchTime_Uint64, &error) > 0;
+	c.Record("LastLaunchTime", last);
+
+	c.Record("RemoveApplicationManifest", Err(apps->RemoveApplicationManifest(manifestPath.string().c_str())));
+	Json::Value gone;
+	gone["ret"] = apps->IsApplicationInstalled("oc.test.echo");
+	c.Record("IsApplicationInstalled after removal", gone);
+
+	c.core->Cleanup();
+	std::error_code ec;
+	fs::remove_all(dir, ec);
+}
+
+// The room setup (expect/chaperone.json), on the stand-in with stage_bounds [2, 3]
+// (scripts/stage_2x3.json). "chaperone" commits a 4 x 5 play area; "chaperone-read", run after it in another process
+// (run.py --jobs 1), finds it.
+vr::IVRChaperoneSetup_006::IVRChaperoneSetup* OpenChaperoneSetup(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return nullptr;
+	}
+	vr::EVRInitError le;
+	auto* setup = (vr::IVRChaperoneSetup_006::IVRChaperoneSetup*)c.core->GetGenericInterface("IVRChaperoneSetup_006", &le);
+	if (!setup) {
+		c.Record("no IVRChaperoneSetup_006", Err(le));
+		c.core->Cleanup();
+	}
+	return setup;
+}
+
+void RecordPlayArea(CaseContext& c, vr::IVRChaperoneSetup_006::IVRChaperoneSetup* setup, const char* label)
+{
+	float x = -1, z = -1;
+	Json::Value r;
+	r["ret"] = setup->GetWorkingPlayAreaSize(&x, &z);
+	r["size"] = std::to_string(x) + "," + std::to_string(z);
+	c.Record(label, r);
+}
+
+void ChaperoneCase(CaseContext& c)
+{
+	auto* setup = OpenChaperoneSetup(c);
+	if (!setup)
+		return;
+
+	uint32_t count = 0;
+	Json::Value live;
+	live["count_ret"] = setup->GetLiveCollisionBoundsInfo(nullptr, &count);
+	live["count"] = count;
+	vr::HmdQuad_t quad{};
+	count = 1;
+	live["ret"] = setup->GetLiveCollisionBoundsInfo(&quad, &count);
+	std::string corners;
+	for (const vr::HmdVector3_t& v : quad.vCorners)
+		corners += (corners.empty() ? "" : " ") + std::to_string(v.v[0]) + "," + std::to_string(v.v[2]);
+	live["corners"] = corners;
+	c.Record("GetLiveCollisionBoundsInfo", live);
+
+	RecordPlayArea(c, setup, "working play area before");
+	setup->SetWorkingPlayAreaSize(4, 5);
+	RecordPlayArea(c, setup, "working play area set");
+	Json::Value commit;
+	commit["ret"] = setup->CommitWorkingCopy(vr::IVRChaperoneSetup_006::EChaperoneConfigFile_Live);
+	c.Record("CommitWorkingCopy", commit);
+	c.core->Cleanup();
+}
+
+void ChaperoneReadCase(CaseContext& c)
+{
+	auto* setup = OpenChaperoneSetup(c);
+	if (!setup)
+		return;
+	RecordPlayArea(c, setup, "working play area in the next process");
+
+	// Exported, changed, and imported back into the working copy
+	uint32_t size = 0;
+	Json::Value exported;
+	exported["size_ret"] = setup->ExportLiveToBuffer(nullptr, &size);
+	std::string text(size, '\0');
+	exported["ret"] = size > 0 && setup->ExportLiveToBuffer(text.data(), &size);
+	c.Record("ExportLiveToBuffer", exported);
+	setup->SetWorkingPlayAreaSize(1, 1);
+	Json::Value imported;
+	imported["ret"] = setup->ImportFromBufferToWorking(text.c_str(), 0);
+	c.Record("ImportFromBufferToWorking", imported);
+	RecordPlayArea(c, setup, "working play area imported");
+	c.core->Cleanup();
+}
+
+// Events from calls (expect/events.json), on the stand-in with scripts/legacy_click.json: the Index profile's
+// right trigger clicked from frame 10 to 20. The game reads the legacy input (GetControllerState at frame 2), so the
+// legacy button events come; ResetSeatedZeroPose's event is the next one polled after it.
+void EventsCase(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	int pressFrame = -1, unpressFrame = -1, pressDevice = -1;
+	Json::Value reset;
+	for (int frame = 1; frame <= 40; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		if (frame == 2) {
+			vr::VRControllerState_t state;
+			f.sys->GetControllerState(2, &state, sizeof(state));
+		}
+		vr::VREvent_t ev{};
+		while (f.sys->PollNextEvent(&ev, sizeof(ev))) {
+			if (ev.data.controller.button != vr::k_EButton_SteamVR_Trigger)
+				continue;
+			if (ev.eventType == vr::VREvent_ButtonPress && pressFrame < 0) {
+				pressFrame = frame;
+				pressDevice = (int)ev.trackedDeviceIndex;
+			}
+			if (ev.eventType == vr::VREvent_ButtonUnpress && unpressFrame < 0)
+				unpressFrame = frame;
+		}
+		if (frame == 5) {
+			// IVRSystem_022 has it no more: IVRChaperone's
+			vr::EVRInitError le;
+			auto* chap = (vr::IVRChaperone_004::IVRChaperone*)c.core->GetGenericInterface("IVRChaperone_004", &le);
+			if (chap)
+				chap->ResetZeroPose(vr::TrackingUniverseSeated);
+			reset["polled"] = f.sys->PollNextEvent(&ev, sizeof(ev));
+			reset["type"] = (int)ev.eventType;
+		}
+	}
+	c.Record("ResetSeatedZeroPose then PollNextEvent", reset);
+	Json::Value buttons;
+	buttons["press_frame"] = pressFrame;
+	buttons["unpress_frame"] = unpressFrame;
+	// The stand-in counts frames per session, and reading the legacy input may restart the session once: a few
+	// frames late, then the ten frames the script holds it
+	buttons["press_in_frames_10_to_16"] = pressFrame >= 10 && pressFrame <= 16;
+	buttons["held_10_frames"] = unpressFrame - pressFrame >= 9 && unpressFrame - pressFrame <= 11;
+	buttons["device"] = pressDevice;
+	c.Record("trigger button events", buttons);
+	c.core->Cleanup();
+}
+
+// Events between programs (expect/events.json): run at the same time (run.py --jobs 2), "events-commit"
+// commits the room setup 1.5 s in, and "events-listen", polling for 5 s, gets its two events; the committing program
+// gets each once, not again back from the store. Scene apps, each with its own session on the stand-in: OpenComposite
+// gives a Utility app no IVRSystem, and refuses overlay and background apps (not implemented yet)
+vr::IVRSystem_022::IVRSystem* OpenSceneSystem(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return nullptr;
+	}
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	if (!sys) {
+		c.Record("no IVRSystem_022", Err(le));
+		c.core->Cleanup();
+	}
+	return sys;
+}
+
+Json::Value CountChaperoneEvents(vr::IVRSystem_022::IVRSystem* sys, int milliseconds)
+{
+	int data = 0, universe = 0;
+	auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+	while (std::chrono::steady_clock::now() < until) {
+		vr::VREvent_t ev{};
+		while (sys->PollNextEvent(&ev, sizeof(ev))) {
+			data += ev.eventType == vr::VREvent_ChaperoneDataHasChanged;
+			universe += ev.eventType == vr::VREvent_ChaperoneUniverseHasChanged;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	Json::Value r;
+	r["ChaperoneDataHasChanged"] = data;
+	r["ChaperoneUniverseHasChanged"] = universe;
+	return r;
+}
+
+void EventsListenCase(CaseContext& c)
+{
+	auto* sys = OpenSceneSystem(c);
+	if (!sys)
+		return;
+	c.Record("events from the other program", CountChaperoneEvents(sys, 5000));
+	c.core->Cleanup();
+}
+
+void EventsCommitCase(CaseContext& c)
+{
+	auto* sys = OpenSceneSystem(c);
+	if (!sys)
+		return;
+	std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+	vr::EVRInitError le;
+	auto* setup = (vr::IVRChaperoneSetup_006::IVRChaperoneSetup*)c.core->GetGenericInterface("IVRChaperoneSetup_006", &le);
+	Json::Value commit;
+	commit["ret"] = setup ? setup->CommitWorkingCopy(vr::IVRChaperoneSetup_006::EChaperoneConfigFile_Live) : false;
+	c.Record("CommitWorkingCopy", commit);
+	c.Record("own events", CountChaperoneEvents(sys, 1000));
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -861,6 +1216,13 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "old-overlay", OldOverlay },
 		{ "old-misc", OldMisc },
 		{ "new-interfaces", NewInterfaces },
+		{ "device-identity", DeviceIdentityCase },
+		{ "applications", ApplicationsCase },
+		{ "chaperone", ChaperoneCase },
+		{ "chaperone-read", ChaperoneReadCase },
+		{ "events", EventsCase },
+		{ "events-listen", EventsListenCase },
+		{ "events-commit", EventsCommitCase },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

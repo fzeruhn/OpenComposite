@@ -1,6 +1,11 @@
 #pragma once
 #include "BaseCommon.h"
 
+#include "Misc/ChaperoneData.h"
+
+#include <mutex>
+#include <optional>
+
 enum OOVR_EChaperoneConfigFile {
 	EChaperoneConfigFile_Live = 1, // The live chaperone config, used by most applications and games
 	EChaperoneConfigFile_Temp = 2, // The temporary chaperone config, used to live-preview collision bounds in room setup
@@ -94,4 +99,17 @@ public:
 	 * system make any last minute adjustments that should be incorporated into the new setup.  If the user is adjusting
 	 * live in HMD using a tweak tool, keep in mind that calling this might cause the user to see the room jump. */
 	void RoomSetupStarting();
+
+	/** The committed room setup: the store's Chaperone document, else the OpenXR runtime's stage. found, if given,
+	 * says whether either existed. */
+	static ChaperoneData LiveData(bool* found = nullptr);
+
+private:
+	// Loaded from LiveData on first use, and by RevertWorkingCopy and ReloadFromDisk; lock held. While LiveData
+	// found neither source, it's loaded again on each use, until editing (a Set*) keeps it.
+	ChaperoneData& Working(bool editing = false);
+
+	std::mutex lock;
+	std::optional<ChaperoneData> working;
+	bool workingKept = false;
 };
