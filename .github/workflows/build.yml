@@ -131,6 +131,10 @@ jobs:
           python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_a_only.json --ini tests/conformance/ini/steamvr_evaluator.ini --out conformance/profiles-steamvr
           python tests/conformance/check_suggested_profiles.py conformance/profiles-direct/raw/case-input-manifest.dump.json conformance/profiles-steamvr/raw/case-input-manifest.dump.json
           if ($LASTEXITCODE) { $failed++ }
+          # Under direct, vector actions are suggested only onto two-axis components (a runtime may refuse the rest)
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --manifest tests/unit/data/manifest_vector3.json --out conformance/vector-shapes
+          python tests/conformance/check_suggested_profiles.py --vector-shapes conformance/vector-shapes/raw/case-input-manifest.dump.json
+          if ($LASTEXITCODE) { $failed++ }
           # Converting bindings to other controllers only adds: everything bound without it is bound with it
           $env:OC_NO_BINDING_CONVERSION = '1'
           python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases input-manifest --out conformance/bindings-unconverted

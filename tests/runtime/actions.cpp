@@ -493,10 +493,21 @@ void RtActionsDump(Json::Value& root)
 		root["actions"].append(entry);
 	}
 	root["suggested_bindings"] = Json::Value(Json::objectValue);
+	// The same with each binding's action and its type (XrActionType): [{ "action", "type", "path" }]
+	root["suggested_actions"] = Json::Value(Json::objectValue);
 	for (auto& [profile, list] : St().suggested) {
-		Json::Value paths(Json::arrayValue);
-		for (auto& [action, path] : list)
+		Json::Value paths(Json::arrayValue), withActions(Json::arrayValue);
+		for (auto& [action, path] : list) {
 			paths.append(RtPathString(path));
+			// An action destroyed since (with its set) is left with no name
+			auto live = St().actions.find(action);
+			Json::Value entry;
+			entry["action"] = live != St().actions.end() ? live->second->name : "";
+			entry["type"] = live != St().actions.end() ? (int)live->second->type : 0;
+			entry["path"] = RtPathString(path);
+			withActions.append(entry);
+		}
 		root["suggested_bindings"][RtPathString(profile)] = paths;
+		root["suggested_actions"][RtPathString(profile)] = withActions;
 	}
 }

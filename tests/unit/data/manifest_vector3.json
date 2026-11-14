@@ -1,0 +1,12 @@
+{
+  "default_bindings": [{ "controller_type": "knuckles", "binding_url": "bindings_vector_knuckles.json" }],
+  "actions": [
+    { "name": "/actions/main/in/move3", "type": "vector3" },
+    { "name": "/actions/main/in/move2", "type": "vector2" },
+    { "name": "/actions/main/in/throttle", "type": "vector3" },
+    { "name": "/actions/main/in/brake", "type": "vector2" },
+    { "name": "/actions/main/in/fire", "type": "boolean" }
+  ],
+  "action_sets": [{ "name": "/actions/main", "usage": "leftright" }],
+  "localization": [{ "language_tag": "en_US", "/actions/main": "Main" }]
+}

@@ -1,0 +1,13 @@
+{
+  "controller_type": "knuckles",
+  "bindings": {
+    "/actions/main": {
+      "sources": [
+        { "path": "/user/hand/left/input/thumbstick", "mode": "joystick", "inputs": { "position": { "output": "/actions/main/in/move3" } } },
+        { "path": "/user/hand/right/input/trackpad", "mode": "trackpad", "inputs": { "position": { "output": "/actions/main/in/move2" } } },
+        { "path": "/user/hand/right/input/trigger", "mode": "trigger", "inputs": { "pull": { "output": "/actions/main/in/throttle" }, "click": { "output": "/actions/main/in/fire" } } },
+        { "path": "/user/hand/left/input/grip", "mode": "trigger", "inputs": { "pull": { "output": "/actions/main/in/brake" } } }
+      ]
+    }
+  }
+}

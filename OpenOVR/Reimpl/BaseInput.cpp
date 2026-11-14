@@ -351,6 +351,14 @@ const BaseInput::ActionPerProfileData BaseInput::Action::defaultActionData;
 
 static double EvaluatorClock(); // below, with the evaluator
 
+// Whether an input path is a two-axis component (OpenXR's thumbsticks, trackpads and joysticks), which a vector2
+// action can be bound to, rather than one of its float or boolean parts (/x, /value, /click...)
+static bool IsTwoAxisComponent(const std::string& path)
+{
+	std::string last = path.substr(path.find_last_of('/') + 1);
+	return last == "thumbstick" || last == "trackpad" || last == "joystick";
+}
+
 BaseInput::BaseInput()
     : actionSets(XR_MAX_ACTION_SET_NAME_SIZE), actions(XR_MAX_ACTION_NAME_SIZE)
 {
@@ -1123,6 +1131,15 @@ void BaseInput::LoadBindingsSet(const InteractionProfile& profile, const std::st
 				if (!profile.IsInputPathValid(pathStr)) {
 					OOVR_LOGF("WARNING: Built invalid input path %s for profile %s from action %s, skipping",
 					    pathStr.c_str(), profile.GetPath().c_str(), actionName.c_str());
+					continue;
+				}
+
+				// A two-axis action (OpenXR's vector2) only on a two-axis component: on a float or boolean one a
+				// runtime may refuse all of this profile's suggestions
+				if ((action->type == ActionType::Vector2 || action->type == ActionType::Vector3) && !IsTwoAxisComponent(pathStr)) {
+					OOVR_LOGF("WARNING: %s is not a two-axis input, for the %s action %s on profile %s: skipping it",
+					    pathStr.c_str(), action->type == ActionType::Vector2 ? "vector2" : "vector3", actionName.c_str(),
+					    profile.GetPath().c_str());
 					continue;
 				}
 
