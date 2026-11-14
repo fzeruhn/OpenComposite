@@ -20,7 +20,7 @@ static IDXGIAdapter1* d3d_get_adapter(const LUID& adapter_luid)
 	while (dxgi_factory->EnumAdapters1(curr++, &curr_adapter) == S_OK) {
 		curr_adapter->GetDesc1(&adapter_desc);
 
-		if (memcmp(&adapter_desc.AdapterLuid, &adapter_luid, sizeof(&adapter_luid)) == 0) {
+		if (memcmp(&adapter_desc.AdapterLuid, &adapter_luid, sizeof(LUID)) == 0) {
 			final_adapter = curr_adapter;
 			break;
 		}

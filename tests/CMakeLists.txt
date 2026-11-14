@@ -106,6 +106,7 @@ add_executable(oc_unit_tests
 	unit/BaseInputTests.cpp
 	unit/BaseCompositorTests.cpp
 	unit/NumbersTests.cpp
+	unit/XrHMDTests.cpp
 	${OC_TEST_RESOURCES}
 )
 target_include_directories(oc_unit_tests PRIVATE

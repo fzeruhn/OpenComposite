@@ -196,20 +196,21 @@ TEST_CASE("Libmonado_path_through_a_chain_of_links")
 #endif
 
 namespace {
-// The fake's count of battery calls: it's the library LibMonado loaded (the same file, so the same module)
-int FakeBatteryCalls()
+// One of the fake's call counts: it's the library LibMonado loaded (the same file, so the same module)
+int FakeCount(const char* counter)
 {
 	using Fn = int (*)();
 #ifdef _WIN32
 	HMODULE lib = LoadLibraryA(OC_TEST_FAKE_LIBMONADO);
-	Fn fn = lib ? (Fn)GetProcAddress(lib, "fake_mnd_battery_calls") : nullptr;
+	Fn fn = lib ? (Fn)GetProcAddress(lib, counter) : nullptr;
 #else
 	void* lib = dlopen(OC_TEST_FAKE_LIBMONADO, RTLD_NOW);
-	Fn fn = lib ? (Fn)dlsym(lib, "fake_mnd_battery_calls") : nullptr;
+	Fn fn = lib ? (Fn)dlsym(lib, counter) : nullptr;
 #endif
 	REQUIRE(fn);
 	return fn();
 }
+int FakeBatteryCalls() { return FakeCount("fake_mnd_battery_calls"); }
 } // namespace
 
 TEST_CASE("Bool_property_makes_no_battery_call")
