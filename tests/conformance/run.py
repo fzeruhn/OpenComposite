@@ -41,6 +41,9 @@ CASES = ["init-matrix", "init-repeat", "init-other-thread", "lookup-before-init"
 TIMEOUT = 60
 CASE_TIMEOUT = 600  # init-repeat starts OpenComposite 200 times
 MAX_REPEAT = 100  # --repeat's bound: each round is a child process
+# Cases run as separate programs that must see each other's store: events-commit's room setup reaches events-listen,
+# chaperone's play area chaperone-read (run after it, --jobs 1). Every other child has a store of its own.
+SHARED_STORES = {"events-listen": "events", "events-commit": "events", "chaperone": "chaperone", "chaperone-read": "chaperone"}
 # SteamVR's answers while vrserver was starting or stopping between children (Retry, AnotherAppLaunching,
 # ShuttingDown): a recording keeps them, a comparison skips them
 STEAMVR_TRANSIENT = {115, 117, 119}
@@ -79,8 +82,10 @@ class Runner:
         self.out = Path(args.out)
         # OC_TEST_NO_STEAMVR: OpenComposite finds no SteamVR or Steam config (its settings, resources and legacy
         # binding files), so a run here answers as on CI's runner, which has none
-        self.env = {"OC_NO_MESSAGE_BOX": "1", "OC_LOG_DIR": str(self.out / "logs"),
-                    "OC_STORE_DIR": str(self.out / "store"), "OC_TEST_NO_STEAMVR": "1"}
+        # Each child gets its own store (OC_STORE_DIR, see child), so one child's settings and events never reach another
+        self.env = {"OC_NO_MESSAGE_BOX": "1", "OC_LOG_DIR": str(self.out / "logs"), "OC_TEST_NO_STEAMVR": "1"}
+        # A store left by an earlier run into the same --out would carry its state into this one
+        shutil.rmtree(self.out / "store", ignore_errors=True)
         self.monado = args.xr_runtime.startswith("monado:")
         if self.monado:
             self.manifest = str(Path(args.xr_runtime[len("monado:"):]).resolve())
@@ -126,12 +131,15 @@ class Runner:
                 subprocess.run(["reg", "add", r"HKLM\SOFTWARE\Khronos\OpenXR\1", "/v", "ActiveRuntime", "/t", "REG_SZ",
                                 "/d", self.manifest, "/f", view], check=True, capture_output=True)
 
-    def child(self, extra, raw, timeout=TIMEOUT, env_extra=None):
+    def child(self, extra, raw, timeout=TIMEOUT, env_extra=None, store=None):
+        """Runs oc_conformance with its store in store/<store> under --out: by default the child's own (named after its
+        output), so another child's events and settings never reach it."""
         cmd = [self.conformance, "--runtime", self.runtime, "--out", str(raw)] + extra
         if self.args.real_runtime:
             cmd.append("--real-runtime")
         env = dict(os.environ)
         env.update(self.env)
+        env["OC_STORE_DIR"] = str(self.out / "store" / (store or Path(raw).stem))
         env.update(env_extra or {})
         if unelevated.integrity_above_medium() and not self.args.ci:
             return unelevated.run_medium(cmd, env, None, timeout)
@@ -202,7 +210,11 @@ class Runner:
         # The stand-in runtime's dump of what it was asked (frames ended and so on), for xr_failures.py
         dump = self.out / "raw" / f"{stem}.dump.json"
         dump.unlink(missing_ok=True)
-        code = self.child(extra, raw, CASE_TIMEOUT, {"OC_TEST_RUNTIME_DUMP": str(dump)})
+        # The cases that work between programs share a store (one per round); the others have their own
+        share = SHARED_STORES.get(name)
+        if share and round_ is not None:
+            share += f"-{round_}"
+        code = self.child(extra, raw, CASE_TIMEOUT, {"OC_TEST_RUNTIME_DUMP": str(dump)}, share)
         records = read_jsonl(raw)
         dump_data = None
         if any("dump_join" in r for r in records) and dump.exists():

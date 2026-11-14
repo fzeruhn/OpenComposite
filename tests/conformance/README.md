@@ -35,7 +35,9 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
   `samples_error`. The dump keeps whole records for frames 1-64, every 32nd after and the last one
   (`tests/runtime/script.h`).
 - Each child gets `OC_NO_MESSAGE_BOX=1` (OpenComposite ending a program exits with code 70, without a box),
-  `OC_LOG_DIR` and `OC_STORE_DIR` under `--out`, so a run never touches the user's own logs or state.
+  `OC_LOG_DIR` and `OC_STORE_DIR` under `--out`, so a run never touches the user's own logs or state. Each child has a
+  store of its own (`store/<its output>`), so one child's settings and events never reach another, except the cases that
+  work between programs (`SHARED_STORES` in `run.py`: events-listen with events-commit, chaperone with chaperone-read).
 
 `out/summary.txt` has the counts per status (`ok`, `ended`: OpenComposite ended the program, `crashed`, `timeout`) and
 every record that wasn't ok; `out/results.json` has every record. When a child ends early the runner starts it again
