@@ -28,6 +28,9 @@ KhrSimpleInteractionProfile::KhrSimpleInteractionProfile()
 		}
 	}
 
+	// SteamVR's names for the raw inputs the binding evaluator reads (RawComponents)
+	this->rawSourceNames = { { "select", "trigger" }, { "menu", "application_menu" } };
+
 	pathTranslationMap = {
 		{ "application_menu", "menu" },
 		{ "trigger/click", "select/click" },

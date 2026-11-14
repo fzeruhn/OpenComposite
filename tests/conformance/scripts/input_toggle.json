@@ -1,0 +1,20 @@
+{
+  "#": "The Index profile's right trigger clicked at frames 10, 30 and 50 for 5 frames each (a toggle_button turns on, off, on); the left thumbstick pushed to (0.5, -0.25) from frame 40 (a vector3 action)",
+  "interaction_profile": "/interaction_profiles/valve/index_controller",
+  "inputs": [
+    { "frame": 10, "path": "/user/hand/right/input/trigger/click", "value": 1.0 },
+    { "frame": 10, "path": "/user/hand/right/input/trigger/value", "value": 1.0 },
+    { "frame": 15, "path": "/user/hand/right/input/trigger/click", "value": 0.0 },
+    { "frame": 15, "path": "/user/hand/right/input/trigger/value", "value": 0.0 },
+    { "frame": 30, "path": "/user/hand/right/input/trigger/click", "value": 1.0 },
+    { "frame": 30, "path": "/user/hand/right/input/trigger/value", "value": 1.0 },
+    { "frame": 35, "path": "/user/hand/right/input/trigger/click", "value": 0.0 },
+    { "frame": 35, "path": "/user/hand/right/input/trigger/value", "value": 0.0 },
+    { "frame": 50, "path": "/user/hand/right/input/trigger/click", "value": 1.0 },
+    { "frame": 50, "path": "/user/hand/right/input/trigger/value", "value": 1.0 },
+    { "frame": 55, "path": "/user/hand/right/input/trigger/click", "value": 0.0 },
+    { "frame": 55, "path": "/user/hand/right/input/trigger/value", "value": 0.0 },
+    { "frame": 40, "path": "/user/hand/left/input/thumbstick/x", "value": 0.5 },
+    { "frame": 40, "path": "/user/hand/left/input/thumbstick/y", "value": -0.25 }
+  ]
+}

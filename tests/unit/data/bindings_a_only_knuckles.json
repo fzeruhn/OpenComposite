@@ -1,0 +1,11 @@
+{
+  "#": "Only the right A button: controllers without an A (or a counterpart for it) get no bindings from this file, so OpenComposite suggests nothing for them",
+  "controller_type": "knuckles",
+  "bindings": {
+    "/actions/main": {
+      "sources": [
+        { "path": "/user/hand/right/input/a", "mode": "button", "inputs": { "click": { "output": "/actions/main/in/jump" } } }
+      ]
+    }
+  }
+}

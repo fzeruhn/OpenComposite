@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <atomic>
 #include <thread>
 
 #ifndef _WIN32
@@ -1034,15 +1035,28 @@ void EventsCase(CaseContext& c)
 		return;
 	callers::Texture tex(ArgSet::Valid, *c.call);
 	int pressFrame = -1, unpressFrame = -1, pressDevice = -1;
+	int statePressFirst = -1, statePressLast = -1, statePressFrames = 0; // GetControllerState's trigger
+	float axisAtPress = 0;
+	uint64_t aButtonMask = 0; // what the A click (frames 25 to 30) sets, from frame 27
 	Json::Value reset;
 	for (int frame = 1; frame <= 40; frame++) {
 		vr::TrackedDevicePose_t poses[16];
 		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
 		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
 		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
-		if (frame == 2) {
-			vr::VRControllerState_t state;
+		if (frame >= 2) {
+			vr::VRControllerState_t state{};
 			f.sys->GetControllerState(2, &state, sizeof(state));
+			if (state.ulButtonPressed & (1ull << vr::k_EButton_SteamVR_Trigger)) {
+				if (statePressFirst < 0) {
+					statePressFirst = frame;
+					axisAtPress = state.rAxis[1].x;
+				}
+				statePressLast = frame;
+				statePressFrames++;
+			}
+			if (frame == 27)
+				aButtonMask = state.ulButtonPressed;
 		}
 		vr::VREvent_t ev{};
 		while (f.sys->PollNextEvent(&ev, sizeof(ev))) {
@@ -1075,6 +1089,184 @@ void EventsCase(CaseContext& c)
 	buttons["held_10_frames"] = unpressFrame - pressFrame >= 9 && unpressFrame - pressFrame <= 11;
 	buttons["device"] = pressDevice;
 	c.Record("trigger button events", buttons);
+	// The same click through GetControllerState: the trigger pressed for the ten frames the script holds it (from
+	// frame 10, a few frames late if the session restarted), its axis 1 at 1
+	Json::Value polled;
+	polled["first"] = statePressFirst;
+	polled["last"] = statePressLast;
+	polled["pressed_from_10_to_16"] = statePressFirst >= 10 && statePressFirst <= 16;
+	polled["pressed_10_frames"] = statePressFrames == 10 && statePressLast - statePressFirst == 9;
+	polled["trigger_axis_full"] = axisAtPress == 1.0f;
+	c.Record("trigger controller state", polled);
+	// The A click as the old input shows it, and the buttons the right controller says it has
+	Json::Value a;
+	a["a_bit"] = (aButtonMask & (1ull << vr::k_EButton_A)) != 0;
+	a["grip_bit"] = (aButtonMask & (1ull << vr::k_EButton_Grip)) != 0;
+	vr::ETrackedPropertyError pe = vr::TrackedProp_Success;
+	a["supported_buttons"] = (Json::UInt64)f.sys->GetUint64TrackedDeviceProperty(2, vr::Prop_SupportedButtons_Uint64, &pe);
+	a["axis0_type"] = f.sys->GetInt32TrackedDeviceProperty(2, vr::Prop_Axis0Type_Int32, &pe);
+	a["axis1_type"] = f.sys->GetInt32TrackedDeviceProperty(2, vr::Prop_Axis1Type_Int32, &pe);
+	a["axis2_type"] = f.sys->GetInt32TrackedDeviceProperty(2, vr::Prop_Axis2Type_Int32, &pe);
+	c.Record("a button controller state", a);
+	c.core->Cleanup();
+}
+
+// Input read from two threads at once (expect/input_threads.json): the game's thread syncs and
+// reads the manifest's actions and submits frames (OpenComposite reads the old input after each frame, for its button
+// events), while another thread reads the old input and the same action all the time, as Unity's SteamVR_Controller
+// and a render thread do. With scripts/input_toggle.json and manifest_toggle.json, under either evaluator: nothing may
+// crash, and the toggle still turns on, off and on. The second thread starts after frame 5: the first Submit recreates
+// the session for the game's graphics API, and reading input while that happens is another problem (not this case's).
+void InputThreadsCase(CaseContext& c)
+{
+	using namespace vr::IVRInput_010;
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* in = (IVRInput*)c.core->GetGenericInterface("IVRInput_010", &le);
+	if (!in) {
+		c.Record("no IVRInput_010", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	in->SetActionManifestPath(c.manifest.c_str());
+	vr::VRActionSetHandle_t set = vr::k_ulInvalidActionSetHandle;
+	vr::VRActionHandle_t toggle = 0, haptic = 0;
+	in->GetActionSetHandle("/actions/main", &set);
+	in->GetActionHandle("/actions/main/in/toggle", &toggle);
+	in->GetActionHandle("/actions/main/out/haptic", &haptic);
+	callers::Texture tex(ArgSet::Valid, *c.call);
+
+	std::atomic<bool> done{ false }, start{ false };
+	std::atomic<int> polls{ 0 };
+	std::thread reader([&] {
+		while (!start && !done)
+			std::this_thread::yield();
+		// As fast as it can (to meet the other thread), but bounded: at most 200000 passes, and haptics (which the
+		// stand-in records) only every 50th. run.py's memory limit is the backstop.
+		for (int pass = 0; !done && pass < 200000; pass++) {
+			std::this_thread::yield();
+			for (vr::TrackedDeviceIndex_t dev = 1; dev <= 2; dev++) {
+				vr::VRControllerState_t state{};
+				f.sys->GetControllerState(dev, &state, sizeof(state));
+			}
+			InputDigitalActionData_t d{};
+			in->GetDigitalActionData(toggle, &d, sizeof(d), vr::k_ulInvalidInputValueHandle);
+			if (pass % 50 == 0)
+				in->TriggerHapticVibrationAction(haptic, 0, 0.01f, 160, 0.5f, vr::k_ulInvalidInputValueHandle);
+			polls++;
+		}
+	});
+	int changes = 0;
+	bool last = false;
+	const int frames = 300;
+	for (int frame = 1; frame <= frames; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		VRActiveActionSet_t active{};
+		active.ulActionSet = set;
+		in->UpdateActionState(&active, sizeof(active), 1);
+		InputDigitalActionData_t d{};
+		in->GetDigitalActionData(toggle, &d, sizeof(d), vr::k_ulInvalidInputValueHandle);
+		changes += (bool)d.bState != last ? 1 : 0;
+		last = d.bState;
+		vr::VRControllerState_t state{};
+		f.sys->GetControllerState(2, &state, sizeof(state));
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		if (frame == 5) {
+			start = true;
+			// The reader's first pass before the frames that meet it (a busy runner may not schedule it at once)
+			for (int wait = 0; polls == 0 && wait < 2000; wait++)
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+	done = true;
+	reader.join();
+	Json::Value r;
+	r["frames"] = frames;
+	r["polled"] = polls > 0;
+	r["toggle_changes"] = changes;
+	c.Record("threads", r);
+	c.core->Cleanup();
+}
+
+// The action manifest's actions read frame by frame (expect/input_evaluator.json), on the stand-in with
+// scripts/input_toggle.json and --manifest manifest_toggle.json: a toggle_button on the right trigger, which the script
+// clicks at frames 10, 30 and 50, and a vector3 action on the left thumbstick, pushed from frame 40. Records where the
+// toggle's state changed (the stand-in counts frames per session, and loading the manifest may restart the session, so
+// a few frames late), and the vector3 action's data at the end.
+void InputFramesCase(CaseContext& c)
+{
+	using namespace vr::IVRInput_010;
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* in = (IVRInput*)c.core->GetGenericInterface("IVRInput_010", &le);
+	if (!in) {
+		c.Record("no IVRInput_010", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	in->SetActionManifestPath(c.manifest.c_str());
+	vr::VRActionSetHandle_t set = vr::k_ulInvalidActionSetHandle;
+	vr::VRActionHandle_t toggle = 0, move3 = 0;
+	in->GetActionSetHandle("/actions/main", &set);
+	in->GetActionHandle("/actions/main/in/toggle", &toggle);
+	in->GetActionHandle("/actions/main/in/move3", &move3);
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	std::vector<int> changes; // the frames the state changed on
+	std::vector<int> changedFlags; // the frames bChanged was true on
+	int activeFrames = 0, originFrames = 0;
+	bool last = false;
+	InputAnalogActionData_t analog{};
+	vr::EVRInputError analogErr = vr::VRInputError_None;
+	for (int frame = 1; frame <= 70; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		VRActiveActionSet_t active{};
+		active.ulActionSet = set;
+		in->UpdateActionState(&active, sizeof(active), 1);
+		InputDigitalActionData_t d{};
+		in->GetDigitalActionData(toggle, &d, sizeof(d), vr::k_ulInvalidInputValueHandle);
+		activeFrames += d.bActive ? 1 : 0;
+		originFrames += d.activeOrigin != vr::k_ulInvalidInputValueHandle ? 1 : 0;
+		if ((bool)d.bState != last)
+			changes.push_back(frame);
+		if (d.bChanged)
+			changedFlags.push_back(frame);
+		last = d.bState;
+		if (frame == 70)
+			analogErr = in->GetAnalogActionData(move3, &analog, sizeof(analog), vr::k_ulInvalidInputValueHandle);
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+	}
+	Json::Value out;
+	Json::Value list(Json::arrayValue);
+	for (int frame : changes)
+		list.append(frame);
+	out["changes"] = list;
+	Json::Value toggle3;
+	toggle3["on_off_on"] = changes.size() == 3;
+	toggle3["first_on_in_10_to_16"] = !changes.empty() && changes[0] >= 10 && changes[0] <= 16;
+	toggle3["twenty_frames_apart"] = changes.size() == 3 && changes[1] - changes[0] == 20 && changes[2] - changes[1] == 20;
+	toggle3["changed_only_on_changes"] = changedFlags == changes;
+	toggle3["active_every_frame"] = activeFrames == 70;
+	toggle3["origin_every_frame"] = originFrames == 70;
+	out["checks"] = toggle3;
+	// The checks at the top for --expect; all of it as "out", which --expected compares (baseline/input-direct.json)
+	Json::Value record = toggle3;
+	record["out"] = out;
+	c.Record("toggle", record);
+	Json::Value v3;
+	v3["err"] = (int)analogErr;
+	v3["active"] = (bool)analog.bActive;
+	v3["x"] = analog.x;
+	v3["y"] = analog.y;
+	v3["z"] = analog.z;
+	c.Record("vector3", v3);
 	c.core->Cleanup();
 }
 
@@ -1221,6 +1413,8 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "chaperone", ChaperoneCase },
 		{ "chaperone-read", ChaperoneReadCase },
 		{ "events", EventsCase },
+		{ "input-frames", InputFramesCase },
+		{ "input-threads", InputThreadsCase },
 		{ "events-listen", EventsListenCase },
 		{ "events-commit", EventsCommitCase },
 		{ "submit-edges", SubmitEdges },

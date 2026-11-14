@@ -4,6 +4,7 @@
 #include "runtime_internal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace {
@@ -226,9 +227,13 @@ XrResult XRAPI_CALL GetActionStateFloat(XrSession session, const XrActionStateGe
 	RtAction* a = it->second.get();
 	if (a->type != XR_ACTION_TYPE_FLOAT_INPUT)
 		return XR_ERROR_ACTION_TYPE_MISMATCH;
+	// Several bound inputs: the one of the largest magnitude, as OpenXR 1.0 11.4 has it (a negative axis too)
 	float value = 0;
-	for (const std::string& p : BoundPaths(s, a, info->subactionPath))
-		value = std::max(value, InputValue(s, p));
+	for (const std::string& p : BoundPaths(s, a, info->subactionPath)) {
+		float v = InputValue(s, p);
+		if (std::fabs(v) > std::fabs(value))
+			value = v;
+	}
 	state->isActive = ActionActive(s, a) ? XR_TRUE : XR_FALSE;
 	state->changedSinceLastSync = XR_FALSE;
 	state->currentState = value;
@@ -302,7 +307,10 @@ XrResult XRAPI_CALL ApplyHapticFeedback(XrSession session, const XrHapticActionI
 		entry["frequency"] = v->frequency;
 		Dump& d = GetDump();
 		std::lock_guard<std::mutex> dg(d.lock);
-		d.root["haptics"].append(entry);
+		// The first 1000, then only a count: a game (or a test) calling it in a loop mustn't fill the memory
+		if (d.root["haptics"].size() < 1000)
+			d.root["haptics"].append(entry);
+		d.root["haptics_total"] = d.root["haptics_total"].asUInt64() + 1;
 	}
 	return XR_SUCCESS;
 }

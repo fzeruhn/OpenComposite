@@ -4,6 +4,9 @@
 // FIXME don't do that, it's ugly and slows down the build when modifying headers
 
 #include "Drivers/Backend.h"
+#include <map>
+#include <mutex>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -11,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Misc/Input/Bindings/Evaluator.h"
 #include "Misc/Input/InputData.h"
 #include "Misc/Input/InteractionProfile.h"
 #include "Misc/Input/LegacyControllerActions.h"
@@ -483,6 +487,7 @@ private:
 	struct ActionSet {
 		std::string fullName; // Eg '/actions/main'
 		std::string name; // Eg 'main'
+		std::string manifestName; // As the manifest has it, lower-cased and never shortened (the binding evaluator's name)
 		ActionSetUsage usage = ActionSetUsage::LeftRight;
 
 		XrActionSet xr = XR_NULL_HANDLE;
@@ -663,6 +668,7 @@ private:
 
 		std::string fullName; // Full name as set in the JSON file, eg '/actions/main/in/Test1'
 		std::string shortName; // The last part of the name, eg 'Test1'
+		std::string manifestName; // As the manifest has it, lower-cased and never shortened (the binding evaluator's name)
 		ActionRequirement requirement = ActionRequirement::Suggested;
 		bool haptic = false;
 		ActionType type = ActionType::Boolean;
@@ -836,6 +842,40 @@ private:
 	std::unordered_map<std::string, XrAction> indexGripExtensionActions;
 
 	XrActionSet legacyInputsSet = XR_NULL_HANDLE;
+
+	// inputEvaluator=steamvr: an action set with one action per raw input (by its OpenXR component, such as
+	// /input/trigger/click, for every hand), each profile's raw inputs and its binding file's evaluator, and the
+	// evaluators the last UpdateActionState updated
+	bool useEvaluator = false;
+	XrActionSet rawInputsSet = XR_NULL_HANDLE;
+	std::map<std::string, XrAction> rawActions;
+	std::map<const InteractionProfile*, std::vector<std::pair<std::string, std::string>>> rawComponents;
+	std::map<const InteractionProfile*, std::unique_ptr<BindingEvaluator>> evaluators;
+	std::vector<const BindingEvaluator*> evaluatedThisSync;
+	// Guards everything above and the legacy evaluators: a game reads input on its own thread while OpenComposite
+	// reads the old input after each frame on the thread that submits
+	mutable std::recursive_mutex evaluatorLock;
+	void CreateRawActions();
+	void SuggestRawInputs(const InteractionProfile& profile, std::vector<XrActionSuggestedBinding>& bindings);
+	void SuggestRawBindings(const InteractionProfile& profile, const std::string& bindingsPath, std::vector<XrActionSuggestedBinding>& bindings);
+	/** One hand's raw inputs (index into allSubactionPaths) on a profile, by SteamVR path, into state */
+	void ReadRawInputs(size_t hand, const InteractionProfile& profile, RawInputState& state);
+	/** The old input's evaluator for a controller's profile, evaluated once per sync; null if it has none.
+	 * Call it, and use what it returns, with evaluatorLock held. */
+	const BindingEvaluator* LegacyEvaluatorFor(const InteractionProfile* profile);
+	struct LegacyEvaluator {
+		std::unique_ptr<BindingEvaluator> evaluator;
+		uint64_t evaluatedAt = 0;
+		bool evaluated = false;
+	};
+	std::map<std::string, LegacyEvaluator> legacyEvaluators; // by controller type
+	void UpdateEvaluators(const VRActiveActionSet_t* sets, uint32_t count);
+	/** This sync's digital or analog output for an action from the evaluators, matching ulRestrictToDevice (a copy,
+	 * taken under evaluatorLock) */
+	std::optional<DigitalOut> EvaluatedDigital(const Action& action, VRInputValueHandle_t restrictToDevice) const;
+	std::optional<AnalogOut> EvaluatedAnalog(const Action& action, VRInputValueHandle_t restrictToDevice) const;
+	/** The input source handle of a binding's source path (an evaluated action's origin) */
+	VRInputValueHandle_t OriginHandle(const std::string& sourcePath);
 
 	/**
 	 * The list of subaction paths anything can be bound to - this basically just means 'everything' and contains

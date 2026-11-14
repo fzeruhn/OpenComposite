@@ -1,0 +1,4 @@
+{
+ "#": "Input-frames as expect/input_evaluator.json, with inputEvaluator=direct (no ini). The toggle is compared with baseline/input-direct.json (run.py --expected); here only the vector3 action, which both paths read (the vector3 action reads the same either way): (0.5, -0.25, 0) from the left thumbstick.",
+ "input-frames/vector3/-/-": { "err": 0, "active": true, "x": 0.5, "y": -0.25, "z": 0.0 }
+}

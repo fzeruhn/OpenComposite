@@ -114,6 +114,14 @@ public:
 	std::string TranslateAction(const std::string& inputPath) const;
 
 	/**
+	 * The raw inputs the SteamVR binding evaluator reads: each of this profile's button and axis components as
+	 * (OpenXR path, SteamVR raw input path), for both hands. For example on Index, /user/hand/right/input/squeeze/value
+	 * feeds /user/hand/right/input/grip/value. Poses and haptics aren't in it. Each profile names its sources SteamVR
+	 * calls otherwise in rawSourceNames.
+	 */
+	std::vector<std::pair<std::string, std::string>> RawComponents() const;
+
+	/**
 	 * Returns the name for the profile as recognized by OpenVR, if it is recognized by it.
 	 */
 	virtual std::optional<const char*> GetOpenVRName() const = 0;
@@ -219,6 +227,10 @@ protected:
 	// A map with OpenVR action name parts as keys and OpenXR equivalents as values.
 	// For example, one common key, value pair might be "application_menu", "menu"
 	std::map<std::string, std::string, translation_compare> pathTranslationMap;
+
+	// OpenXR input source names SteamVR calls otherwise on this controller (RawComponents), for example
+	// { "squeeze", "grip" }; a source not in it keeps its name
+	std::map<std::string, std::string> rawSourceNames;
 
 	// A map for HMD properties.
 	// Note that for a SteamVR supported device can be extracted from the SteamVR System Report,
