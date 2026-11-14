@@ -258,6 +258,14 @@ public:
 		return vr::VRInputError_None;
 	}
 
+	/** An action's fUpdateTime: when its value last changed (changeTime, 0 for never), as seconds from now (0 or
+	 * less). One that never changed counts from when it was made (createdAt). */
+	static float UpdateTimeFromNow(double changeTime, double createdAt, double now)
+	{
+		double since = changeTime != 0 ? changeTime : createdAt;
+		return since >= now ? 0.0f : (float)(since - now);
+	}
+
 	/** Reads the state of a digital action given its handle. This will return VRInputError_WrongType if the type of
 	 * action is something other than digital */
 	EVRInputError GetDigitalActionData(VRActionHandle_t action, InputDigitalActionData_t* pActionData, uint32_t unActionDataSize, VRInputValueHandle_t ulRestrictToDevice);
@@ -690,6 +698,7 @@ private:
 		ActionType type = ActionType::Boolean;
 		ActionSet* set = nullptr;
 		std::string setName; // The name of the action set - set before we've enumerated the action sets, eg 'main'
+		double createdAt = 0; // when the manifest made it, on the evaluator's clock (its fUpdateTime until it changes)
 
 		XrAction xr = XR_NULL_HANDLE;
 		// used for extending float value range: if this reports a value above 0, the value read by this action is one plus that value

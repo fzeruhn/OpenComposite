@@ -349,6 +349,8 @@ void BaseInput::Registry<T>::Reset()
 
 const BaseInput::ActionPerProfileData BaseInput::Action::defaultActionData;
 
+static double EvaluatorClock(); // below, with the evaluator
+
 BaseInput::BaseInput()
     : actionSets(XR_MAX_ACTION_SET_NAME_SIZE), actions(XR_MAX_ACTION_NAME_SIZE)
 {
@@ -475,6 +477,7 @@ EVRInputError BaseInput::SetActionManifestPath(const char* pchActionManifestPath
 		}
 		std::unique_ptr<Action> actionPtr = std::make_unique<Action>();
 		Action& action = *actionPtr;
+		action.createdAt = EvaluatorClock();
 
 		action.fullName = actions.ShortenOrLookupName(item["name"].asString());
 		action.manifestName = lowerStr(item["name"].asString());
@@ -2115,7 +2118,7 @@ EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigi
 			pActionData->bActive = true;
 			pActionData->bState = d->state;
 			pActionData->bChanged = d->changed;
-			pActionData->fUpdateTime = d->changeTime == 0 ? 0 : (float)(d->changeTime - EvaluatorClock()); // 0: never changed
+			pActionData->fUpdateTime = UpdateTimeFromNow(d->changeTime, act->createdAt, EvaluatorClock());
 			pActionData->activeOrigin = OriginHandle(d->origin);
 		}
 		return VRInputError_None;
