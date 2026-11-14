@@ -88,3 +88,15 @@ TEST_CASE("App_key_with_dots_is_one_folder")
 	CHECK_FALSE(FindBindingFile("..", "knuckles", t.root / "user", {}, {}, "").has_value());
 	CHECK_FALSE(FindBindingFile("../x", "knuckles", t.root / "user", {}, {}, "").has_value());
 }
+
+#ifdef _WIN32
+TEST_CASE("Bindings_dir_from_wide_env")
+{
+	// A folder name outside the ANSI code page, as the variable holds it (wide)
+	const std::wstring dir = L"C:\\oc_bindings_\u0436\u00e9";
+	_wputenv_s(L"OC_BINDINGS_DIR", dir.c_str());
+	fs::path got = UserBindingsDir();
+	_wputenv_s(L"OC_BINDINGS_DIR", L"");
+	CHECK(got == fs::path(dir));
+}
+#endif

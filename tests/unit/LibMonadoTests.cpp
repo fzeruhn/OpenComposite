@@ -232,3 +232,33 @@ TEST_CASE("Bool_property_makes_no_battery_call")
 	CHECK(XrController::BatteryBoolProperty(mnd, vr::Prop_DeviceProvidesBatteryStatus_Bool, nullptr) == std::optional<bool>(true));
 	CHECK(FakeBatteryCalls() == asked);
 }
+
+#ifndef _WIN32
+TEST_CASE("Manifest_search_xdg_config_dirs")
+{
+	// No XR_RUNTIME_JSON, an XDG_CONFIG_HOME without one, and XDG_CONFIG_DIRS's second folder with one: that one, as
+	// the loader finds it
+	auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	fs::path root = fs::temp_directory_path() / ("oc_xdg_" + std::to_string(stamp));
+	fs::create_directories(root / "home");
+	fs::create_directories(root / "first");
+	fs::create_directories(root / "second" / "openxr" / "1");
+	fs::path manifest = root / "second" / "openxr" / "1" / "active_runtime.json";
+	std::ofstream(manifest) << "{}";
+
+	auto saved = [](const char* name) { const char* v = getenv(name); return v ? std::optional<std::string>(v) : std::nullopt; };
+	std::optional<std::string> runtimeJson = saved("XR_RUNTIME_JSON"), home = saved("XDG_CONFIG_HOME"), dirs = saved("XDG_CONFIG_DIRS");
+	SetEnv("XR_RUNTIME_JSON", nullptr);
+	SetEnv("XDG_CONFIG_HOME", (root / "home").c_str());
+	SetEnv("XDG_CONFIG_DIRS", ((root / "first").string() + ":" + (root / "second").string()).c_str());
+	std::optional<fs::path> found = LibMonado::ActiveRuntimeManifest();
+	SetEnv("XR_RUNTIME_JSON", runtimeJson ? runtimeJson->c_str() : nullptr);
+	SetEnv("XDG_CONFIG_HOME", home ? home->c_str() : nullptr);
+	SetEnv("XDG_CONFIG_DIRS", dirs ? dirs->c_str() : nullptr);
+	std::error_code ec;
+	fs::remove_all(root, ec);
+
+	REQUIRE(found.has_value());
+	CHECK(*found == manifest);
+}
+#endif

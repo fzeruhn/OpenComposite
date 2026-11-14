@@ -143,7 +143,18 @@ std::optional<fs::path> LibMonado::ActiveRuntimeManifest()
 		candidates.push_back(fs::path(xdg) / "openxr" / "1" / "active_runtime.json");
 	else if (const char* home = getenv("HOME"); home && home[0])
 		candidates.push_back(fs::path(home) / ".config" / "openxr" / "1" / "active_runtime.json");
-	candidates.push_back("/etc/xdg/openxr/1/active_runtime.json");
+	// Then each of XDG_CONFIG_DIRS (':'-separated, /etc/xdg if it's unset or empty), then /etc, as the loader looks
+	std::string dirs = getenv("XDG_CONFIG_DIRS") ? getenv("XDG_CONFIG_DIRS") : "";
+	if (dirs.empty())
+		dirs = "/etc/xdg";
+	for (size_t start = 0; start <= dirs.size();) {
+		size_t end = dirs.find(':', start);
+		if (end == std::string::npos)
+			end = dirs.size();
+		if (end > start)
+			candidates.push_back(fs::path(dirs.substr(start, end - start)) / "openxr" / "1" / "active_runtime.json");
+		start = end + 1;
+	}
 	candidates.push_back("/etc/openxr/1/active_runtime.json");
 	for (const fs::path& p : candidates) {
 		std::error_code ec;
