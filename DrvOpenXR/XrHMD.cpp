@@ -48,6 +48,7 @@ void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 
 vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, float fFarZ, EGraphicsAPIConvention convention)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	if (eEye < 0 || (int)eEye >= 2)
 		eEye = vr::Eye_Left;
 
@@ -103,6 +104,7 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 
 void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	// This is how SteamVR seems to handle invalid eyes
 	if (eEye < 0 || (int)eEye >= 2)
 		eEye = vr::Eye_Left;
@@ -170,6 +172,7 @@ bool XrHMD::ComputeDistortion(vr::EVREye eEye, float fU, float fV, vr::Distortio
 
 vr::HmdMatrix34_t XrHMD::GetEyeToHeadTransform(vr::EVREye eEye)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	static XrTime time = ~0; // Don't set to zero by default, otherwise we'll return an identity matrix before the first frame
 	static XrView views[XruEyeCount] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
 

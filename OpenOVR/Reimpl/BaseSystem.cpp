@@ -281,6 +281,7 @@ void BaseSystem::GetDeviceToAbsoluteTrackingPose(ETrackingUniverseOrigin toOrigi
 
 HmdMatrix34_t BaseSystem::GetSeatedZeroPoseToStandingAbsoluteTrackingPose()
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	glm::mat4 m;
 	XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION, nullptr, 0, {} };
 	if (!xr_gbl)
@@ -881,6 +882,8 @@ void BaseSystem::PerformanceTestReportFidelityLevelChange(int nFidelityLevel)
 // Tracking origin stuff
 void BaseSystem::ResetSeatedZeroPose()
 {
+	// Exclusive: the seated space is replaced, and other threads locate against it
+	auto sessionLock = xr_session.lock();
 	if (BackendManager::Instance().IsGraphicsConfigured() && xr_gbl) {
 		XrSpaceVelocity velocity{ XR_TYPE_SPACE_VELOCITY };
 		XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION, &velocity, 0, {} };

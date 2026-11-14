@@ -6,6 +6,7 @@ records. See README.md.
          --xr-runtime none|stand-in|<manifest>|monado:<manifest> --out <dir> [--script <json>] [--expected <json>]
          [--differences <json>] [--expect <json>] [--known-failures <json>] [--allow-skip <regex>] [--only <regex>]
          [--cases <a,b,...>] [--jobs N] [--ci] [--allow-failures] [--real-runtime] [--ini <opencomposite.ini>]
+         [--repeat N] [--case-arg <name>=<value>]...
 
 Exit code 0 only if no child was ended by OpenComposite (exit 70), crashed or timed out, and nothing differed from
 --expected (beyond --differences) or --expect, except the records --known-failures lists.
@@ -39,6 +40,7 @@ CASES = ["init-matrix", "init-repeat", "init-other-thread", "lookup-before-init"
          "overlay-lifecycle", "input-manifest", "frame-loop", "submit-edges", "applications"]
 TIMEOUT = 60
 CASE_TIMEOUT = 600  # init-repeat starts OpenComposite 200 times
+MAX_REPEAT = 100  # --repeat's bound: each round is a child process
 # SteamVR's answers while vrserver was starting or stopping between children (Retry, AnotherAppLaunching,
 # ShuttingDown): a recording keeps them, a comparison skips them
 STEAMVR_TRANSIENT = {115, 117, 119}
@@ -187,14 +189,18 @@ class Runner:
                 break
         return results
 
-    def run_case(self, name):
-        raw = self.out / "raw" / f"case-{name}.jsonl"
+    def run_case(self, name, round_=None):
+        # With --repeat, each round has its own files, and its records say which round they're from
+        stem = f"case-{name}" if round_ is None else f"case-{name}-{round_}"
+        raw = self.out / "raw" / f"{stem}.jsonl"
         raw.unlink(missing_ok=True)
         extra = ["--case", name]
         if self.args.manifest:
             extra += ["--manifest", str(Path(self.args.manifest).resolve())]
+        for kv in self.args.case_arg or []:
+            extra += ["--case-arg", kv]
         # The stand-in runtime's dump of what it was asked (frames ended and so on), for xr_failures.py
-        dump = self.out / "raw" / f"case-{name}.dump.json"
+        dump = self.out / "raw" / f"{stem}.dump.json"
         dump.unlink(missing_ok=True)
         code = self.child(extra, raw, CASE_TIMEOUT, {"OC_TEST_RUNTIME_DUMP": str(dump)})
         records = read_jsonl(raw)
@@ -210,6 +216,9 @@ class Runner:
                 r["dump"] = join_dump(dump_data, r.pop("dump_join"))
         if code != 0:
             records.append(self.take_crash(raw, {"case": name, "method": "<end>", "status": self.status_of(code), "exit_code": code}))
+        if round_ is not None:
+            for r in records:
+                r["round"] = round_
         return records
 
     def cleanup(self):
@@ -234,10 +243,14 @@ class Runner:
                     jobs.append(("i", v, t, "valid"))
         cases = self.args.cases.split(",") if self.args.cases else ([] if only else CASES)
         for c in cases:
-            jobs.append(("c", c, None, None))
+            if self.args.repeat > 1:
+                for i in range(self.args.repeat):
+                    jobs.append(("c", c, i + 1, None))
+            else:
+                jobs.append(("c", c, None, None))
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.args.jobs) as pool:
-            futures = [pool.submit(self.run_interface, j[1], j[2], j[3]) if j[0] == "i" else pool.submit(self.run_case, j[1])
+            futures = [pool.submit(self.run_interface, j[1], j[2], j[3]) if j[0] == "i" else pool.submit(self.run_case, j[1], j[2])
                        for j in jobs]
             for f in futures:
                 results += f.result()
@@ -330,28 +343,32 @@ def compare(results, expected_path, differences_path, arch):
     return diffs
 
 
-def check_expect(results, expect_path, allow_skip=None):
-    """The mismatches with an --expect file, as (record key, text). A field "dump:<path>" is looked up in the record's
-    joined dump. A skipped record passes only if its case matches allow_skip (a regex)."""
+def check_expect(results, expect_path, allow_skip=None, rounds=None):
+    """The mismatches with an --expect file, as (record key, text), in every round of a --repeat run (rounds: their
+    numbers). A field "dump:<path>" is looked up in the record's joined dump. A skipped record passes only if its case
+    matches allow_skip (a regex)."""
     expect = json.loads(Path(expect_path).read_text(encoding="utf-8"))
-    by_key = {expect_key(r): r for r in results}
+    by_key = {(expect_key(r), r.get("round")): r for r in results}
     misses = []
     for k, fields in expect.items():
         if k.startswith("#"):
             continue
-        r = by_key.get(k)
-        if r is None:
-            misses.append((k, f"{k}: no such record"))
-            continue
-        if r.get("skipped"):
-            if not (allow_skip and re.fullmatch(allow_skip, r.get("case", ""))):
-                misses.append((k, f'{k}: skipped ({r["skipped"]})'))
-            continue
-        for f, v in fields.items():
-            got = dump_path(r.get("dump"), f[len("dump:"):]) if f.startswith("dump:") else r.get(f)
-            if got != v:
-                shown = "nothing" if got is MISSING else json.dumps(got)
-                misses.append((k, f"{k} {f}: got {shown}, expected {json.dumps(v)}"))
+        for n in rounds or [None]:
+            # An interface's record isn't repeated: the same one for every round
+            r = by_key.get((k, n), by_key.get((k, None)))
+            where = k if n is None else f"{k} (round {n})"
+            if r is None:
+                misses.append((k, f"{where}: no such record"))
+                continue
+            if r.get("skipped"):
+                if not (allow_skip and re.fullmatch(allow_skip, r.get("case", ""))):
+                    misses.append((k, f'{where}: skipped ({r["skipped"]})'))
+                continue
+            for f, v in fields.items():
+                got = dump_path(r.get("dump"), f[len("dump:"):]) if f.startswith("dump:") else r.get(f)
+                if got != v:
+                    shown = "nothing" if got is MISSING else json.dumps(got)
+                    misses.append((k, f"{where} {f}: got {shown}, expected {json.dumps(v)}"))
     return misses
 
 
@@ -360,6 +377,20 @@ def load_known(path):
     if not path:
         return {}
     return {k: v for k, v in json.loads(Path(path).read_text(encoding="utf-8")).items() if not k.startswith("#")}
+
+
+def round_summary(results, repeat):
+    """Per case of a --repeat run: how many rounds ended without a crash, an end or a timeout."""
+    bad, cases = {}, []
+    for r in results:
+        if "round" not in r:
+            continue
+        if r["case"] not in cases:
+            cases.append(r["case"])
+        if r["status"] in ("ended", "crashed", "timeout"):
+            bad.setdefault(r["case"], set()).add(r["round"])
+    return [f"{c}: {repeat - len(bad.get(c, ()))} of {repeat} rounds ended ok"
+            + (f" (not: {', '.join(str(n) for n in sorted(bad[c]))})" if c in bad else "") for c in cases]
 
 
 def main():
@@ -383,9 +414,18 @@ def main():
     ap.add_argument("--ci", action="store_true")
     ap.add_argument("--allow-failures", action="store_true")
     ap.add_argument("--real-runtime", action="store_true")
+    ap.add_argument("--repeat", type=int, default=1, help=f"run each case this many times (at most {MAX_REPEAT})")
+    ap.add_argument("--case-arg", action="append", metavar="NAME=VALUE", help="passed to every case (repeatable)")
     args = ap.parse_args()
     if args.cases and not args.only:
         args.cases_only = True
+    if not 1 <= args.repeat <= MAX_REPEAT:
+        ap.error(f"--repeat must be 1 to {MAX_REPEAT}")
+    if args.repeat > 1 and args.expected:
+        ap.error("--expected compares each record once: not with --repeat")
+    for kv in args.case_arg or []:
+        if "=" not in kv:
+            ap.error(f"--case-arg {kv}: expected <name>=<value>")
 
     runner = Runner(args)
     try:
@@ -402,9 +442,12 @@ def main():
     known_hit = set()
     bad = [r for r in results if r["status"] in ("ended", "crashed", "timeout")]
     lines = [f"{k}: {v}" for k, v in sorted(counts.items())] + [""]
+    if args.repeat > 1:
+        lines += round_summary(results, args.repeat) + [""]
     problems = 0
     for r in bad:
-        line = f'{r["status"]}: {key_of(r)} (exit {r.get("exit_code")})' + (f' - {r["crash"].splitlines()[0]}' if r.get("crash") else "")
+        line = (f'{r["status"]}: {key_of(r)}' + (f' (round {r["round"]})' if "round" in r else "") + f' (exit {r.get("exit_code")})'
+                + (f' - {r["crash"].splitlines()[0]}' if r.get("crash") else ""))
         if expect_key(r) in known:
             known_hit.add(expect_key(r))
             line = "known: " + line
@@ -416,7 +459,8 @@ def main():
         lines += ["", f"differences from {args.expected}: {len(diffs)}"] + diffs
         problems += len(diffs)
     if args.expect:
-        misses = check_expect(results, args.expect, args.allow_skip)
+        misses = check_expect(results, args.expect, args.allow_skip,
+                              list(range(1, args.repeat + 1)) if args.repeat > 1 else None)
         new = [text for k, text in misses if k not in known]
         old = [text for k, text in misses if k in known]
         known_hit.update(k for k, _ in misses if k in known)

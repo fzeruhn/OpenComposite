@@ -134,9 +134,9 @@ std::shared_ptr<ITrackedDevice> XrBackend::GetDevice(
 	case vr::k_unTrackedDeviceIndex_Hmd:
 		return GetPrimaryHMD();
 	case 1:
-		return hand_left;
+		return Hand(XrController::XCT_LEFT);
 	case 2:
-		return hand_right;
+		return Hand(XrController::XCT_RIGHT);
 	default:
 		std::shared_lock lock(generic_trackers_mutex);
 		vr::TrackedDeviceIndex_t corrected_index = index - RESERVED_DEVICE_INDICES;
@@ -152,9 +152,9 @@ std::shared_ptr<ITrackedDevice> XrBackend::GetDeviceByHand(
 {
 	switch (hand) {
 	case ITrackedDevice::HAND_LEFT:
-		return hand_left;
+		return Hand(XrController::XCT_LEFT);
 	case ITrackedDevice::HAND_RIGHT:
-		return hand_right;
+		return Hand(XrController::XCT_RIGHT);
 	default:
 		OOVR_SOFT_ABORTF("Cannot get hand by type '%d'", (int)hand);
 		return nullptr;
@@ -1208,7 +1208,7 @@ void XrBackend::PumpEvents()
    */
 	// Not while a session is being ended (ShutdownSession pumps events while it waits, maybe under the input restart)
 	BaseInput* input = GetUnsafeBaseInput();
-	if (input && !exitExpected && !input->AreActionsLoaded() && sessionState == XR_SESSION_STATE_FOCUSED && !hand_left && !hand_right) {
+	if (input && !exitExpected && !input->AreActionsLoaded() && sessionState == XR_SESSION_STATE_FOCUSED && !Hand(XrController::XCT_LEFT) && !Hand(XrController::XCT_RIGHT)) {
 		QueryForInteractionProfile();
 	}
 }
@@ -1353,7 +1353,10 @@ void XrBackend::UpdateInteractionProfile()
 			for (const std::unique_ptr<InteractionProfile>& profile : InteractionProfile::GetProfileList()) {
 				if (profile->GetPath() == path_name) {
 					OOVR_LOGF("%s - Using interaction profile: %s", info.pathstr, path_name);
-					info.controller = std::make_unique<XrController>(info.hand, *profile);
+					{
+						std::unique_lock handsLock(hands_mutex);
+						info.controller = std::make_shared<XrController>(info.hand, *profile);
+					}
 					hmd->SetInteractionProfile(profile.get());
 					BaseSystem* system = GetUnsafeBaseSystem();
 					if (system) {
@@ -1371,15 +1374,18 @@ void XrBackend::UpdateInteractionProfile()
 					break;
 				}
 			}
-			if (!hand_left && !hand_right) {
+			if (!Hand(XrController::XCT_LEFT) && !Hand(XrController::XCT_RIGHT)) {
 				// Runtime returned an unknown interaction profile: no controller until it gives one we know
 				OOVR_LOGF("Runtime unexpectedly returned an unknown interaction profile: %s", path_name);
 			}
 		} else {
 			// interaction profile lost/not detected
 			OOVR_LOGF("%s - No interaction profile detected", info.pathstr);
-			if (info.controller) {
-				info.controller.reset();
+			if (Hand(info.hand)) {
+				{
+					std::unique_lock handsLock(hands_mutex);
+					info.controller.reset();
+				}
 				BaseSystem* system = GetUnsafeBaseSystem();
 				if (system) {
 					VREvent_t event = {

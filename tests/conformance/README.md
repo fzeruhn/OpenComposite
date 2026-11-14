@@ -19,6 +19,9 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
   uses that runtime (Monado's, say). `monado:<manifest>` runs on a Monado service that is already running (the run
   stops at once if none is), and keeps the manifest with `--real-runtime`; there's no stand-in dump to join then.
 - `--only <regex>` limits the interface versions, `--cases a,b` runs only those cases.
+- `--repeat N` (at most 100) runs each case N times, each in its own child; every record gets its `round`, the summary
+  says how many rounds of each case ended ok, and `--expect` checks every round. `--case-arg <name>=<value>` (repeatable)
+  is passed to every case, as `input-threads`' `start_frame=<n>`.
 - `--expected expected/steamvr-<version>.json --differences differences.json` compares every answer with SteamVR's
   recorded ones (`record-steamvr.ps1`); `--expect <file>` checks exact values for chosen records (`expect/`).
 - `--known-failures <file>` lists records (keyed as in `--expect`) that may fail today; any other failure still fails

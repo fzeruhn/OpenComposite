@@ -699,6 +699,7 @@ bool BaseRenderModels::GetComponentState(const char* pchRenderModelName, const c
 
 bool BaseRenderModels::TryGetComponentState(ITrackedDevice::TrackedDeviceType hand, const std::string& componentName, OOVR_RenderModel_ComponentState_t* result)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	if (hand == ITrackedDevice::HAND_NONE)
 		return false;
 

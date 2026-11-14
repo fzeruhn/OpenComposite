@@ -42,8 +42,11 @@ struct CaseContext {
 	Writer* out = nullptr;
 	std::string caseName;
 	std::string manifest; // --manifest, for input-manifest
+	std::map<std::string, std::string> args; // each --case-arg <name>=<value>
 	// Writes {"case", "method": label, fields...}
 	void Record(const std::string& label, Json::Value fields = Json::Value(Json::objectValue));
+	// A --case-arg as a whole number, or fallback if it isn't given or isn't one
+	int IntArg(const std::string& name, int fallback) const;
 };
 
 using CaseFn = void (*)(CaseContext& ctx);

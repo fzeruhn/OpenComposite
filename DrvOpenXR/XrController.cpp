@@ -165,6 +165,7 @@ ITrackedDevice::TrackedDeviceType XrController::GetHand()
 
 void XrController::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t* pose, ETrackingStateType trackingState)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	// Default to an invalid pose
 	ZeroMemory(pose, sizeof(*pose));
 	pose->bDeviceIsConnected = true;

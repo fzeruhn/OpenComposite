@@ -82,8 +82,16 @@ public:
 
 private:
 	std::shared_ptr<XrHMD> hmd = std::make_shared<XrHMD>();
+	// Replaced when a hand's interaction profile changes, while other threads read input: copied and replaced only
+	// under hands_mutex (Hand), which is held for nothing else
 	std::shared_ptr<XrController> hand_left;
 	std::shared_ptr<XrController> hand_right;
+	mutable std::shared_mutex hands_mutex;
+	std::shared_ptr<XrController> Hand(XrController::XrControllerType hand) const
+	{
+		std::shared_lock lock(hands_mutex);
+		return hand == XrController::XCT_LEFT ? hand_left : hand_right;
+	}
 
 	std::vector<std::shared_ptr<XrGenericTracker>> generic_trackers;
 	std::shared_mutex generic_trackers_mutex;
