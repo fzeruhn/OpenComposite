@@ -2,16 +2,20 @@
 """Runs oc_conformance over every interface version and named case, each in its own child process, and collects the
 records. See README.md.
 
-  run.py --runtime <vrclient dll> --conformance <oc_conformance> --xr-runtime none|stand-in|<manifest> --out <dir>
-         [--script <json>] [--expected <json>] [--differences <json>] [--expect <json>] [--known-failures <json>]
-         [--allow-skip <regex>] [--only <regex>] [--cases <a,b,...>] [--jobs N] [--ci] [--allow-failures]
-         [--real-runtime] [--ini <opencomposite.ini>]
+  run.py --runtime <vrclient dll> --conformance <oc_conformance>
+         --xr-runtime none|stand-in|<manifest>|monado:<manifest> --out <dir> [--script <json>] [--expected <json>]
+         [--differences <json>] [--expect <json>] [--known-failures <json>] [--allow-skip <regex>] [--only <regex>]
+         [--cases <a,b,...>] [--jobs N] [--ci] [--allow-failures] [--real-runtime] [--ini <opencomposite.ini>]
 
 Exit code 0 only if no child was ended by OpenComposite (exit 70), crashed or timed out, and nothing differed from
 --expected (beyond --differences) or --expect, except the records --known-failures lists.
 
 A case record with "dump_join" gets the stand-in's dump joined in as "dump" (see join_dump), which --expect fields
 named "dump:<path>" check.
+
+monado:<manifest> runs the children on a Monado service that is already running (it isn't started here): the manifest
+is their XR_RUNTIME_JSON, with --real-runtime too (which then only skips unsafe_methods.txt's methods). There is no
+stand-in dump, so joined dumps are null.
 """
 
 import argparse
@@ -75,7 +79,10 @@ class Runner:
         # binding files), so a run here answers as on CI's runner, which has none
         self.env = {"OC_NO_MESSAGE_BOX": "1", "OC_LOG_DIR": str(self.out / "logs"),
                     "OC_STORE_DIR": str(self.out / "store"), "OC_TEST_NO_STEAMVR": "1"}
-        if args.xr_runtime == "stand-in":
+        self.monado = args.xr_runtime.startswith("monado:")
+        if self.monado:
+            self.manifest = str(Path(args.xr_runtime[len("monado:"):]).resolve())
+        elif args.xr_runtime == "stand-in":
             manifest = Path(args.conformance).resolve().parent / "runtime" / "oc_test_runtime.json"
             self.manifest = str(manifest)
         elif args.xr_runtime == "none":
@@ -87,7 +94,7 @@ class Runner:
             self.manifest = str(none)
         else:
             self.manifest = args.xr_runtime
-        if args.real_runtime:
+        if args.real_runtime and not self.monado:
             self.manifest = None  # SteamVR: no OpenXR involved
         if self.manifest:
             self.env["XR_RUNTIME_JSON"] = self.manifest
@@ -97,6 +104,10 @@ class Runner:
         self.conformance = str(Path(args.conformance).resolve())
 
     def prepare(self):
+        if self.monado and not monado_running():
+            raise SystemExit("--xr-runtime monado: no Monado service is running (no monado_comp_ipc): start it first")
+        if self.monado and not Path(self.manifest).exists():
+            raise SystemExit(f"--xr-runtime monado: no manifest {self.manifest}")
         self.out.mkdir(parents=True, exist_ok=True)
         (self.out / "raw").mkdir(exist_ok=True)
         if self.args.ini:
@@ -231,6 +242,16 @@ class Runner:
             for f in futures:
                 results += f.result()
         return results
+
+
+def monado_running():
+    """Whether a Monado service is up: its compositor's IPC pipe (Windows) or socket (elsewhere) exists."""
+    if os.name == "nt":
+        try:
+            return any(name.endswith("monado_comp_ipc") for name in os.listdir("\\\\.\\pipe\\"))
+        except OSError:
+            return False
+    return Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "monado_comp_ipc").exists()
 
 
 def join_dump(dump, what):

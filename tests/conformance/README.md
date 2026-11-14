@@ -16,7 +16,8 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
 
 - `--xr-runtime stand-in` runs OpenComposite on `oc_test_runtime` (`tests/runtime`), which needs no headset and can
   be scripted with `--script` (examples in `scripts/`). `none` gives it no OpenXR runtime at all. A manifest path
-  uses that runtime (Monado's, say).
+  uses that runtime (Monado's, say). `monado:<manifest>` runs on a Monado service that is already running (the run
+  stops at once if none is), and keeps the manifest with `--real-runtime`; there's no stand-in dump to join then.
 - `--only <regex>` limits the interface versions, `--cases a,b` runs only those cases.
 - `--expected expected/steamvr-<version>.json --differences differences.json` compares every answer with SteamVR's
   recorded ones (`record-steamvr.ps1`); `--expect <file>` checks exact values for chosen records (`expect/`).
