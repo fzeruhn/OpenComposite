@@ -4,6 +4,11 @@
 #include "stdafx.h"
 
 #include "Misc/LibMonado.h"
+#include "XrController.h"
+
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 #include <chrono>
 #include <cstdlib>
@@ -189,3 +194,41 @@ TEST_CASE("Libmonado_path_through_a_chain_of_links")
 	CHECK(*lib == dir / "monado" / "lib" / "libmonado.so");
 }
 #endif
+
+namespace {
+// The fake's count of battery calls: it's the library LibMonado loaded (the same file, so the same module)
+int FakeBatteryCalls()
+{
+	using Fn = int (*)();
+#ifdef _WIN32
+	HMODULE lib = LoadLibraryA(OC_TEST_FAKE_LIBMONADO);
+	Fn fn = lib ? (Fn)GetProcAddress(lib, "fake_mnd_battery_calls") : nullptr;
+#else
+	void* lib = dlopen(OC_TEST_FAKE_LIBMONADO, RTLD_NOW);
+	Fn fn = lib ? (Fn)dlsym(lib, "fake_mnd_battery_calls") : nullptr;
+#endif
+	REQUIRE(fn);
+	return fn();
+}
+} // namespace
+
+TEST_CASE("Bool_property_makes_no_battery_call")
+{
+	FakeLibMonado fake("1", "1,1,0.5");
+	LibMonado mnd("Monado(XRT) by Collabora et al");
+	REQUIRE(mnd.Available());
+
+	int before = FakeBatteryCalls();
+	CHECK_FALSE(XrController::BatteryBoolProperty(mnd, vr::Prop_DeviceIsWireless_Bool, "left").has_value());
+	CHECK_FALSE(XrController::BatteryBoolProperty(mnd, vr::Prop_DeviceCanPowerOff_Bool, "right").has_value());
+	CHECK(FakeBatteryCalls() == before);
+
+	// The battery's own properties ask for it (LibMonado keeps the answer a while, so once here)
+	CHECK(XrController::BatteryBoolProperty(mnd, vr::Prop_DeviceProvidesBatteryStatus_Bool, "left") == std::optional<bool>(true));
+	CHECK(XrController::BatteryBoolProperty(mnd, vr::Prop_DeviceIsCharging_Bool, "left") == std::optional<bool>(true));
+	int asked = FakeBatteryCalls();
+	CHECK(asked > before);
+	// No role (a tracker): nothing asked
+	CHECK(XrController::BatteryBoolProperty(mnd, vr::Prop_DeviceProvidesBatteryStatus_Bool, nullptr) == std::optional<bool>(true));
+	CHECK(FakeBatteryCalls() == asked);
+}
