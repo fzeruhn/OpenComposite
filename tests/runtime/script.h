@@ -1,5 +1,15 @@
 #pragma once
 // The stand-in runtime's script (OC_TEST_RUNTIME_SCRIPT) and dump (OC_TEST_RUNTIME_DUMP).
+//
+// The script is JSON (comments allowed); every key is optional:
+//   "system_name": "...", "extensions": ["XR_KHR_D3D11_enable", ...], "view_size": [w, h], "fov_deg": 45,
+//   "ipd": 0.063, "display_hz": 90, "stage_bounds": [width, depth],
+//   "events":   [{ "frame": 60, "type": "session_state", "state": "LOSS_PENDING" }],
+//   "fail":     [{ "function": "xrEndFrame", "result": "XR_ERROR_RUNTIME_FAILURE", "after": 29, "count": 1 }]
+//               (the first `after` calls of the function succeed, then `count` fail with `result`; see FAIL_POINT),
+//   "interaction_profile": "/interaction_profiles/valve/index_controller",
+//   "inputs":   [{ "frame": 5, "path": "/user/hand/right/input/trigger/value", "value": 1.0 }],
+//   "presence": [{ "frame": 10, "worn": false }]
 
 #include <openxr/openxr.h>
 
@@ -21,6 +31,7 @@ struct ScriptFailure {
 	std::string function;
 	XrResult result = XR_ERROR_RUNTIME_FAILURE;
 	int count = 1;
+	int after = 0; // the first `after` calls succeed
 };
 
 struct ScriptInput {

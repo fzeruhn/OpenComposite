@@ -15,7 +15,8 @@
 #endif
 
 namespace DrvOpenXR {
-void SetupSession();
+// XR_SUCCESS, or what xrCreateSession answered (no session then: the caller decides what next)
+XrResult SetupSession();
 void ShutdownSession();
 void FullShutdown();
 } // namespace DrvOpenXR

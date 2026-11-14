@@ -5,6 +5,7 @@
 #include "logging.h"
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -319,6 +320,25 @@ void oovr_log_raw_format(const char* file, long line, const char* func, const ch
 	va_end(args);
 }
 
+void oc_strcpy_cut(char* dest, size_t dest_size, const char* src, std::atomic<bool>* logged, const char* file, long line)
+{
+	if (!dest || dest_size == 0)
+		return;
+	if (!src)
+		src = "";
+	size_t n = strnlen(src, dest_size);
+	if (n == dest_size) {
+		n = dest_size - 1;
+		// Not in the middle of a UTF-8 character: src[n], the first byte left out, isn't a continuation byte
+		while (n > 0 && ((unsigned char)src[n] & 0xC0) == 0x80)
+			n--;
+		if (logged && !logged->exchange(true))
+			oovr_log_raw_format(file, line, "strcpy_arr", "Cut to %d bytes, as it doesn't fit: %s (logged once here)", (int)n, src);
+	}
+	memcpy(dest, src, n);
+	dest[n] = 0;
+}
+
 OC_NORETURN void oovr_abort_raw(const char* file, long line, const char* func, const char* msg, const char* title, ...)
 {
 	va_list args;
@@ -357,34 +377,6 @@ OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func
 	DebugBreak();
 	oovr_dump_backtrace();
 	abort();
-}
-
-void oovr_soft_abort_raw(const char* file, long line, const char* func, int* count, const char* msg, ...)
-{
-	// If this has been hit already, just ignore it - if we needed a crash that would've been done.
-	if (*count > 0) {
-		count++;
-		return;
-	}
-
-	va_list args;
-	va_start(args, msg);
-
-	// Otherwise, if we're in debug mode do a hard abort. Otherwise log and continue.
-	// TODO fix this
-	if (oovr_global_configuration.StopOnSoftAbort()) {
-		oovr_abort_raw_va(file, line, func, msg, "OpenComposite Debug Error", args);
-	}
-
-	char buff[256];
-	vsnprintf(buff, sizeof(buff), msg, args);
-	buff[sizeof(buff) - 1] = 0;
-
-	oovr_log_raw_format(file, line, func, "Soft Abort triggered (in non-debug mode, continuing - this will only print once): %s", buff);
-
-	*count = 1;
-
-	va_end(args);
 }
 
 void oovr_message_raw(const char* message, const char* title)

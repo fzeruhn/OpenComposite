@@ -81,60 +81,70 @@ public:
 	    XrVisibilityMaskTypeKHR visibilityMaskType,
 	    XrVisibilityMaskKHR* visibilityMask)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetVisibilityMaskKHR);
+		if (!pfnXrGetVisibilityMaskKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetVisibilityMaskKHR(session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
 	}
 
 	bool handTrackingExtensionAvailable() { return pfnXrCreateHandTrackerExt != nullptr; }
 	XrResult xrCreateHandTrackerEXT(XrSession session, const XrHandTrackerCreateInfoEXT* createInfo, XrHandTrackerEXT* handTracker)
 	{
-		OOVR_FALSE_ABORT(pfnXrCreateHandTrackerExt);
+		if (!pfnXrCreateHandTrackerExt)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrCreateHandTrackerExt(session, createInfo, handTracker);
 	}
 	XrResult xrDestroyHandTrackerEXT(XrHandTrackerEXT handTracker)
 	{
-		OOVR_FALSE_ABORT(pfnXrDestroyHandTrackerExt);
+		if (!pfnXrDestroyHandTrackerExt)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrDestroyHandTrackerExt(handTracker);
 	}
 	XrResult xrLocateHandJointsEXT(XrHandTrackerEXT handTracker, const XrHandJointsLocateInfoEXT* locateInfo, XrHandJointLocationsEXT* locations)
 	{
-		OOVR_FALSE_ABORT(pfnXrLocateHandJointsExt);
+		if (!pfnXrLocateHandJointsExt)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrLocateHandJointsExt(handTracker, locateInfo, locations);
 	}
 
 	XrResult xrCreateXDevListMNDX(XrSession session, const XrCreateXDevListInfoMNDX* createInfo, XrXDevListMNDX* xdevList)
 	{
-		OOVR_FALSE_ABORT(pfnxrCreateXDevListMNDX);
+		if (!pfnxrCreateXDevListMNDX)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnxrCreateXDevListMNDX(session, createInfo, xdevList);
 	}
 
 	XrResult xrGetXDevListGenerationNumberMNDX(XrXDevListMNDX xdevList, uint64_t* outGeneration)
 	{
-		OOVR_FALSE_ABORT(pfnxrGetXDevListGenerationNumberMNDX);
+		if (!pfnxrGetXDevListGenerationNumberMNDX)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnxrGetXDevListGenerationNumberMNDX(xdevList, outGeneration);
 	}
 
 	XrResult xrEnumerateXDevsMNDX(XrXDevListMNDX xdevList, uint32_t xdevCapacityInput, uint32_t* xdevCountOutput, XrXDevIdMNDX* xdevs)
 	{
-		OOVR_FALSE_ABORT(pfnxrEnumerateXDevsMNDX);
+		if (!pfnxrEnumerateXDevsMNDX)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnxrEnumerateXDevsMNDX(xdevList, xdevCapacityInput, xdevCountOutput, xdevs);
 	}
 
 	XrResult xrGetXDevPropertiesMNDX(XrXDevListMNDX xdevList, const XrGetXDevInfoMNDX* info, XrXDevPropertiesMNDX* properties)
 	{
-		OOVR_FALSE_ABORT(pfnxrGetXDevPropertiesMNDX);
+		if (!pfnxrGetXDevPropertiesMNDX)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnxrGetXDevPropertiesMNDX(xdevList, info, properties);
 	}
 
 	XrResult xrDestroyXDevListMNDX(XrXDevListMNDX xdevList)
 	{
-		OOVR_FALSE_ABORT(pfnxrDestroyXDevListMNDX);
+		if (!pfnxrDestroyXDevListMNDX)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnxrDestroyXDevListMNDX(xdevList);
 	}
 
 	XrResult xrCreateXDevSpaceMNDX(XrSession session, const XrCreateXDevSpaceInfoMNDX* createInfo, XrSpace* space)
 	{
-		OOVR_FALSE_ABORT(pfnxrCreateXDevSpaceMNDX);
+		if (!pfnxrCreateXDevSpaceMNDX)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnxrCreateXDevSpaceMNDX(session, createInfo, space);
 	}
 
@@ -145,7 +155,8 @@ public:
 	}
 	XrResult xrGetD3D11GraphicsRequirementsKHR(XrInstance instance, XrSystemId systemId, XrGraphicsRequirementsD3D11KHR* graphicsRequirements)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetD3D11GraphicsRequirementsKHR);
+		if (!pfnXrGetD3D11GraphicsRequirementsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetD3D11GraphicsRequirementsKHR(instance, systemId, graphicsRequirements);
 	}
 #endif
@@ -156,7 +167,8 @@ public:
 	}
 	XrResult xrGetD3D12GraphicsRequirementsKHR(XrInstance instance, XrSystemId systemId, XrGraphicsRequirementsD3D12KHR* graphicsRequirements)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetD3D12GraphicsRequirementsKHR);
+		if (!pfnXrGetD3D12GraphicsRequirementsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetD3D12GraphicsRequirementsKHR(instance, systemId, graphicsRequirements);
 	}
 #endif
@@ -167,25 +179,29 @@ public:
 	}
 	XrResult xrGetVulkanInstanceExtensionsKHR(XrInstance instance, XrSystemId systemId, uint32_t bufferCapacityInput, uint32_t* bufferCountOutput, char* buffer)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetVulkanInstanceExtensionsKHR);
+		if (!pfnXrGetVulkanInstanceExtensionsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetVulkanInstanceExtensionsKHR(instance, systemId, bufferCapacityInput, bufferCountOutput, buffer);
 	}
 	bool xrGetVulkanDeviceExtensionsKHR_Available() { return pfnXrGetVulkanDeviceExtensionsKHR != nullptr; }
 	XrResult xrGetVulkanDeviceExtensionsKHR(XrInstance instance, XrSystemId systemId, uint32_t bufferCapacityInput, uint32_t* bufferCountOutput, char* buffer)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetVulkanDeviceExtensionsKHR);
+		if (!pfnXrGetVulkanDeviceExtensionsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetVulkanDeviceExtensionsKHR(instance, systemId, bufferCapacityInput, bufferCountOutput, buffer);
 	}
 	bool xrGetVulkanGraphicsDeviceKHR_Available() { return pfnXrGetVulkanGraphicsDeviceKHR != nullptr; }
 	XrResult xrGetVulkanGraphicsDeviceKHR(XrInstance instance, XrSystemId systemId, VkInstance vkInstance, VkPhysicalDevice* vkPhysicalDevice)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetVulkanGraphicsDeviceKHR);
+		if (!pfnXrGetVulkanGraphicsDeviceKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetVulkanGraphicsDeviceKHR(instance, systemId, vkInstance, vkPhysicalDevice);
 	}
 	bool xrGetVulkanGraphicsRequirementsKHR_Available() { return pfnXrGetVulkanGraphicsRequirementsKHR != nullptr; }
 	XrResult xrGetVulkanGraphicsRequirementsKHR(XrInstance instance, XrSystemId systemId, XrGraphicsRequirementsVulkanKHR* graphicsRequirements)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetVulkanGraphicsRequirementsKHR);
+		if (!pfnXrGetVulkanGraphicsRequirementsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetVulkanGraphicsRequirementsKHR(instance, systemId, graphicsRequirements);
 	}
 #endif
@@ -196,7 +212,8 @@ public:
 	}
 	XrResult xrGetOpenGLGraphicsRequirementsKHR(XrInstance instance, XrSystemId systemId, XrGraphicsRequirementsOpenGLKHR* graphicsRequirements)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetOpenGLGraphicsRequirementsKHR);
+		if (!pfnXrGetOpenGLGraphicsRequirementsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetOpenGLGraphicsRequirementsKHR(instance, systemId, graphicsRequirements);
 	}
 #endif
@@ -207,7 +224,8 @@ public:
 	}
 	XrResult xrGetOpenGLESGraphicsRequirementsKHR(XrInstance instance, XrSystemId systemId, XrGraphicsRequirementsOpenGLESKHR* graphicsRequirements)
 	{
-		OOVR_FALSE_ABORT(pfnXrGetOpenGLESGraphicsRequirementsKHR);
+		if (!pfnXrGetOpenGLESGraphicsRequirementsKHR)
+			return XR_ERROR_FUNCTION_UNSUPPORTED; // the runtime lacks the extension; callers check the result
 		return pfnXrGetOpenGLESGraphicsRequirementsKHR(instance, systemId, graphicsRequirements);
 	}
 #endif

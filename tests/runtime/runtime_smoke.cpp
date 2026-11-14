@@ -175,7 +175,10 @@ int main()
 
 	xrDestroySwapchain(swapchain);
 	xrDestroySpace(stage);
-	xrEndSession(session);
+	// The session ends only once it's STOPPING
+	CHECK(xrEndSession(session) == XR_ERROR_SESSION_NOT_STOPPING);
+	XR_OK(xrRequestExitSession(session));
+	XR_OK(xrEndSession(session));
 	xrDestroySession(session);
 	xrDestroyInstance(instance);
 	device->Release();

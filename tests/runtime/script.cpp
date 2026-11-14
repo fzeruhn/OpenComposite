@@ -63,6 +63,7 @@ static Script LoadScript()
 		fail.function = f["function"].asString();
 		fail.result = ResultFromName(f["result"].asString());
 		fail.count = f.isMember("count") ? f["count"].asInt() : 1;
+		fail.after = f.isMember("after") ? f["after"].asInt() : 0;
 		s.failures.push_back(fail);
 	}
 	s.interactionProfile = root["interaction_profile"].asString();
@@ -91,12 +92,17 @@ const Script& GetScript()
 bool ScriptFails(const char* function, XrResult* result)
 {
 	static std::mutex lock;
-	static std::map<std::string, int> used;
+	static std::map<std::string, int> calls;
+	static std::map<const ScriptFailure*, int> used;
 	std::lock_guard<std::mutex> guard(lock);
+	int call = ++calls[function]; // this call's number, from 1
 	for (const ScriptFailure& f : GetScript().failures) {
 		if (f.function != function)
 			continue;
-		int& n = used[f.function];
+		// The first `after` calls succeed, then `count` fail
+		if (call <= f.after)
+			continue;
+		int& n = used[&f];
 		if (n >= f.count)
 			continue;
 		n++;
@@ -106,6 +112,7 @@ bool ScriptFails(const char* function, XrResult* result)
 		Json::Value entry;
 		entry["function"] = function;
 		entry["result"] = (int)f.result;
+		entry["call"] = call;
 		d.root["failed_calls"].append(entry);
 		return true;
 	}

@@ -12,9 +12,14 @@
 #include "Misc/backtrace.h"
 #include "logging.h"
 #include "steamvr_abi.h"
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <set>
+
+#include "Misc/EnumNames.h"
 
 // Specific to OCOVR
 #include "Drivers/Backend.h"
@@ -27,15 +32,21 @@ static bool running;
 static bool running_ovr; // are we in an apptype which uses LibOVR?
 static uint32_t current_init_token = 1;
 static EVRApplicationType current_apptype;
+// Inits of a running Scene app not yet matched by a shutdown (a second Init succeeds and is counted)
+static int scene_init_count = 0;
+// A Utility app has called Init: it may have the interfaces whose APPTYPE flag allows Utility, with no backend
+static bool utility_init = false;
+// Unknown interface names already logged (games ask from several threads)
+static std::set<std::string> logged_unknown_interfaces;
+static std::mutex logged_unknown_interfaces_mutex;
+
+static bool FirstAskForUnknown(const char* interfaceVersion)
+{
+	std::lock_guard<std::mutex> lock(logged_unknown_interfaces_mutex);
+	return logged_unknown_interfaces.insert(interfaceVersion).second;
+}
 
 static alternativeCoreFactory_t alternativeCoreFactory = nullptr;
-
-OC_NORETURN void ERR(string msg)
-{
-	char buff[4096];
-	snprintf(buff, sizeof(buff), "OpenComposite DLLMain ERROR: %s", msg.c_str());
-	OOVR_ABORT_T(buff, "OpenComposite Error");
-}
 
 class _InheritCVRLayout {
 	virtual void _ignore() = 0;
@@ -51,7 +62,13 @@ static std::map<std::string, correct_layout_unique> interfaces;
 
 VR_INTERFACE void* VR_CALLTYPE VR_GetGenericInterface(const char* interfaceVersion, EVRInitError* error)
 {
-	if (!running) {
+	if (!interfaceVersion) {
+		if (error)
+			*error = VRInitError_Init_InvalidInterface;
+		return NULL;
+	}
+
+	if (!running && !utility_init) {
 		OOVR_LOGF("[INFO] VR_GetGenericInterface called while OOVR not running, setting error=NotInitialized, for interfaceVersion=%s", interfaceVersion);
 		if (error)
 			*error = VRInitError_Init_NotInitialized;
@@ -88,49 +105,39 @@ VR_INTERFACE void* VR_CALLTYPE VR_GetGenericInterface(const char* interfaceVersi
 		return interfaces[interfaceVersion].get();
 	}
 
-	// Half-Life: Alyx (2025 builds) also asks for SteamVR's internal IPC resource manager; it carries on without one,
-	// as it does under XRizer, which has none either
-	if (!strncmp("IVRIPCResourceManagerClient_", interfaceVersion, strlen("IVRIPCResourceManagerClient_"))) {
-		if (error)
-			*error = VRInitError_Init_InterfaceNotFound;
-		return NULL;
-	}
-
-	// Hack for Half-Life: Alyx
-	// This is an interface that is enabled or not by what seems to be a compile-time
-	// switch inside SteamVR, disabled on the public build I was looking at.
-	if (!strcmp("IXrProto_001", interfaceVersion)) {
-		if (error)
-			*error = VRInitError_Init_InterfaceNotFound;
-		return NULL;
-	}
-
-	// Hack (kinda) for Vivecraft
-	// They actually used our API! I think they were the only application that ever did so (though only to detect
-	//  if OC was present or not, and it seems that information is no longer used).
-	// We've got rid of it to clean up the code generation, so just say we don't support it for now.
-	if (!strcmp("IVROCSystem_001", interfaceVersion)) {
-		if (error)
-			*error = VRInitError_Init_InterfaceNotFound;
-		return nullptr;
-	}
-
+	// An interface we don't have (and SteamVR-internal ones such as IVRIPCResourceManagerClient_*, IXrProto_001, or
+	// the retired IVROCSystem_001) is answered "not found", as SteamVR answers a version it doesn't have: games check
+	// the error and carry on without it (Half-Life: Alyx does)
 	bool valid_apptypes_success;
 	uint64_t valid_apptypes = GetInterfaceFlagsByName(interfaceVersion, "APPTYPE", &valid_apptypes_success);
-
+	void* probe = nullptr;
 	if (!valid_apptypes_success) {
+		// GetInterfaceFlagsByName only knows the interfaces we have: try making it to tell "unknown" apart
+		probe = CreateInterfaceByName(interfaceVersion);
+		if (!probe) {
+			if (FirstAskForUnknown(interfaceVersion))
+				OOVR_LOGF("Interface %s isn't offered: answering InterfaceNotFound", interfaceVersion);
+			if (error)
+				*error = VRInitError_Init_InterfaceNotFound;
+			return NULL;
+		}
 		valid_apptypes = 1ull << VRApplication_Scene;
 #ifndef _WIN32
 		valid_apptypes |= (1ull << VRApplication_Background); // Proton uses this
 #endif
 	}
 
-	if ((valid_apptypes & (1ull << current_apptype)) == 0) {
-		OOVR_LOGF("Invalid interface %s for apptype %d", interfaceVersion, current_apptype);
-		OOVR_ABORT("Illegal interface for apptype - see log");
+	EVRApplicationType apptype = utility_init && !running ? VRApplication_Utility : current_apptype;
+	if ((valid_apptypes & (1ull << apptype)) == 0) {
+		OOVR_LOGF("Interface %s isn't available to application type %d", interfaceVersion, apptype);
+		if (probe)
+			((CVRCorrectLayout*)probe)->Delete();
+		if (error)
+			*error = apptype == VRApplication_Utility ? VRInitError_Init_NotAvailableToUtilityApps : VRInitError_Init_InvalidInterface;
+		return NULL;
 	}
 
-	CVRCorrectLayout* impl = (CVRCorrectLayout*)CreateInterfaceByName(interfaceVersion);
+	CVRCorrectLayout* impl = (CVRCorrectLayout*)(probe ? probe : CreateInterfaceByName(interfaceVersion));
 	if (impl) {
 		correct_layout_unique ptr(impl, [](CVRCorrectLayout* cl) {
 			cl->Delete();
@@ -139,9 +146,11 @@ VR_INTERFACE void* VR_CALLTYPE VR_GetGenericInterface(const char* interfaceVersi
 		return impl;
 	}
 
-	OOVR_LOG(interfaceVersion);
-	OOVR_MESSAGE(interfaceVersion, "Missing interface");
-	ERR("unknown/unsupported interface " + string(interfaceVersion));
+	if (FirstAskForUnknown(interfaceVersion))
+		OOVR_LOGF("Interface %s isn't offered: answering InterfaceNotFound", interfaceVersion);
+	if (error)
+		*error = VRInitError_Init_InterfaceNotFound;
+	return NULL;
 #undef INTERFACE
 }
 
@@ -158,9 +167,11 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_GetInitToken()
 	return current_init_token;
 }
 
+VR_INTERFACE const char* VR_CALLTYPE VR_GetVRInitErrorAsEnglishDescription(EVRInitError error);
+
 VR_INTERFACE char* VR_GetStringForHmdError(int err)
 {
-	OOVR_ABORT("Stub");
+	return const_cast<char*>(VR_GetVRInitErrorAsEnglishDescription((EVRInitError)err));
 }
 
 VR_INTERFACE const char* VR_CALLTYPE VR_GetVRInitErrorAsEnglishDescription(EVRInitError error)
@@ -223,12 +234,12 @@ VR_INTERFACE const char* VR_CALLTYPE VR_GetVRInitErrorAsEnglishDescription(EVRIn
 	default:
 		return "VRInitError_Init_IllegalTypeTransition";
 	}
-	OOVR_ABORT(("Init desc: Unknown value " + to_string(error)).c_str());
 }
 
 VR_INTERFACE const char* VR_CALLTYPE VR_GetVRInitErrorAsSymbol(EVRInitError error)
 {
-	OOVR_ABORT("Stub");
+	const char* name = OC_EnumName("EVRInitError", (int32_t)error);
+	return name ? name : "Unknown";
 }
 
 VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal(EVRInitError* peError, EVRApplicationType eApplicationType)
@@ -239,7 +250,6 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal(EVRInitError* peError, EVRAppl
 VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApplicationType eApplicationType, const char* pStartupInfo)
 {
 	OOVR_LOG_ONCEF("Initializing OpenComposite - revision %s", OC_VERSION);
-	BaseClientCore::appType = eApplicationType;
 	if (peError) {
 		*peError = VRInitError_None;
 	}
@@ -257,17 +267,26 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 		if (filename == "vrstartup.exe") {
 			// AFAIK vrstartup is the only program that uses this mode, and returning an
 			// error makes it exit immediately.
-			*peError = VRInitError_Unknown;
+			if (peError)
+				*peError = VRInitError_Unknown;
 			return 0;
 		}
-
-		OOVR_ABORT("VRApplication_Bootstrapper currently only supported for vrstartup.exe");
-#else
-		LINUX_STUBBED();
 #endif
+		OOVR_LOG("Refusing the Bootstrapper application type: only vrstartup.exe uses it");
+		if (peError)
+			*peError = VRInitError_Init_InvalidApplicationType;
+		return 0;
 	}
 
 	if (eApplicationType == VRApplication_Utility) {
+		if (running) {
+			// Counted like a second Init, so its Shutdown doesn't end the running session
+			scene_init_count++;
+			return current_init_token;
+		}
+		// No backend: only the interfaces a Utility app may have (APPTYPE flag), until its Shutdown
+		utility_init = true;
+		BaseClientCore::appType = eApplicationType;
 		return current_init_token;
 	}
 
@@ -285,21 +304,34 @@ VR_INTERFACE uint32_t VR_CALLTYPE VR_InitInternal2(EVRInitError* peError, EVRApp
 			return 0;
 		}
 
-	if (running)
-		ERR("Cannot init VR: Already running!");
+	if (running) {
+		// A second Init while running keeps the running session; each Init is matched by a shutdown
+		OOVR_LOG("Init while already running: keeping the running session");
+		scene_init_count++;
+		return current_init_token;
+	}
 
 	running_ovr = true;
 
 	current_apptype = eApplicationType;
+	BaseClientCore::appType = eApplicationType;
 	running = true;
 
 	// TODO seperate this from the rest of dllmain
-	IBackend* backend = DrvOpenXR::CreateOpenXRBackend(pStartupInfo);
-	if (!backend && peError) {
-		*peError = VRInitError_Init_Internal;
-	} else {
-		BackendManager::Create(backend);
+	EVRInitError backendError = VRInitError_None;
+	IBackend* backend = DrvOpenXR::CreateOpenXRBackend(pStartupInfo, &backendError);
+	if (!backend) {
+		if (peError)
+			*peError = backendError != VRInitError_None ? backendError : VRInitError_Init_Internal;
+		running = false;
+		running_ovr = false;
+		BaseClientCore::appType = utility_init ? VRApplication_Utility : VRApplication_Max;
+		return 0;
 	}
+	BackendManager::Create(backend);
+	// An earlier Utility Init not yet shut down is matched by a Shutdown too
+	scene_init_count = utility_init ? 2 : 1;
+	utility_init = false;
 
 	return current_init_token;
 }
@@ -311,7 +343,8 @@ VR_INTERFACE bool VR_CALLTYPE VR_IsHmdPresent()
 		return true;
 
 	// At this point, we should NOT be running OpenXR, so setup a new session just for this
-	OOVR_FALSE_ABORT(xr_instance == XR_NULL_HANDLE);
+	if (xr_instance != XR_NULL_HANDLE)
+		return true; // an instance from an earlier Init is still up: it found a headset then
 
 	// FIXME copied from DrvOpenXR
 	XrApplicationInfo appInfo{};
@@ -331,16 +364,15 @@ VR_INTERFACE bool VR_CALLTYPE VR_IsHmdPresent()
 	XrSystemId id;
 	XrResult res = xrGetSystem(tmp_instance, &systemInfo, &id);
 
-	OOVR_FAILED_XR_ABORT(xrDestroyInstance(tmp_instance));
+	xrDestroyInstance(tmp_instance);
 
 	if (res == XR_SUCCESS)
 		return true;
 
-	if (res == XR_ERROR_FORM_FACTOR_UNAVAILABLE || res == XR_ERROR_FORM_FACTOR_UNSUPPORTED)
-		return false;
-
-	// Something else went wrong
-	OOVR_ABORTF("Failed to probe for OpenXR systems: return status %d", res);
+	// FORM_FACTOR_UNAVAILABLE (no headset plugged in) and anything else: no headset to start (upstream #467)
+	if (res != XR_ERROR_FORM_FACTOR_UNAVAILABLE && res != XR_ERROR_FORM_FACTOR_UNSUPPORTED)
+		OOVR_LOGF("Failed to probe for OpenXR systems: return status %d", res);
+	return false;
 }
 
 // Necessary for Proton games on Linux: https://github.com/ValveSoftware/Proton/blob/22f40122788d5f65389f59144705309ce9d6d403/vrclient_x64/vrclient_x64/vrclient_main.c#L267
@@ -348,7 +380,8 @@ VR_INTERFACE bool VR_CALLTYPE VR_IsHmdPresent()
 // Either way you need this.
 VR_INTERFACE uint32_t VR_CALLTYPE HmdSystemFactory()
 {
-	OOVR_ABORT("HmdSystemFactory called - this is only here to make Proton recognise us, should never be called! Please file a bug, this is interesting.");
+	OOVR_LOG("HmdSystemFactory called - this is only here to make Proton recognise us, should never be called! Please file a bug, this is interesting.");
+	return 0;
 }
 
 VR_INTERFACE bool VR_CALLTYPE VR_IsInterfaceVersionValid(const char* pchInterfaceVersion)
@@ -364,12 +397,50 @@ VR_INTERFACE bool VR_CALLTYPE VR_IsRuntimeInstalled()
 
 VR_INTERFACE const char* VR_CALLTYPE VR_RuntimePath()
 {
-	OOVR_ABORT("Stub");
+	// The folder our bin\ folder is in, as the paths file names it
+	static std::string path = [] {
+		// As UTF-8, as OpenVR wants: string() throws on Windows for characters outside the ANSI code page
+		try {
+			std::filesystem::path bin = BaseClientCore::GetDllDir(); // ends with a separator
+			if (!bin.has_filename())
+				bin = bin.parent_path();
+			// The Linux libraries are in a folder under bin/ (linux64/, linuxarm64/)
+			if (bin.filename() != "bin" && bin.parent_path().filename() == "bin")
+				bin = bin.parent_path();
+			std::u8string u = bin.parent_path().u8string();
+			return std::string(u.begin(), u.end());
+		} catch (const std::exception&) {
+			return std::string();
+		}
+	}();
+	return path.c_str();
 }
 
 VR_INTERFACE void VR_CALLTYPE VR_ShutdownInternal()
 {
+	if (utility_init && !running) {
+		utility_init = false;
+		BaseClientCore::appType = VRApplication_Max;
+		interfaces.clear();
+		return;
+	}
+	if (!running) {
+		OOVR_LOG("Shutdown while not running: ignored");
+		return;
+	}
+	// A Shutdown after a refused Init (say a plugin's Background one) can't be told from the game's own, so it's counted
+	if (scene_init_count > 1) {
+		scene_init_count--;
+		OOVR_LOGF("Shutdown with %d more Init(s) to match: keeping the session", scene_init_count);
+		return;
+	}
+	scene_init_count = 0;
+	utility_init = false;
+
 	OOVR_LOG("OpenComposite shutdown");
+
+	// What the app asked for that OpenComposite doesn't do, with counts
+	oc_soft_log_summary();
 
 	// Reset interfaces
 	// Do this first, while the OVR session is still available in case they
@@ -380,6 +451,7 @@ VR_INTERFACE void VR_CALLTYPE VR_ShutdownInternal()
 	BackendManager::Reset();
 
 	running = false;
+	BaseClientCore::appType = VRApplication_Max;
 }
 
 VR_INTERFACE void* VRClientCoreFactory(const char* pInterfaceName, int* pReturnCode)
@@ -392,14 +464,19 @@ VR_INTERFACE void* VRClientCoreFactory(const char* pInterfaceName, int* pReturnC
 	bool shouldUseOC = BaseClientCore::CheckAppEnabled();
 	if (!shouldUseOC) {
 		alternativeCoreFactory = PlatformGetAlternativeCoreFactory();
-
-		// TODO use a more descriptive error message
-		OOVR_FALSE_ABORT(alternativeCoreFactory);
-
-		goto use_alt;
+		if (alternativeCoreFactory)
+			goto use_alt;
+		// The app was set to SteamVR, which couldn't be loaded (logged): the game still starts, on OpenComposite
+		OOVR_LOG("SteamVR was chosen for this program but couldn't be loaded; using OpenComposite instead");
 	}
 
-	*pReturnCode = VRInitError_None;
+	if (pReturnCode)
+		*pReturnCode = VRInitError_None;
+	if (!pInterfaceName) {
+		if (pReturnCode)
+			*pReturnCode = VRInitError_Init_InterfaceNotFound;
+		return nullptr;
+	}
 
 	string name = pInterfaceName;
 
@@ -414,7 +491,9 @@ VR_INTERFACE void* VRClientCoreFactory(const char* pInterfaceName, int* pReturnC
 
 #undef CLIENT_VER
 
-	OOVR_LOG(pInterfaceName);
-	OOVR_MESSAGE(pInterfaceName, "Missing client interface");
-	ERR("unknown/unsupported interface " + name);
+	// As SteamVR answers a client core version it doesn't have
+	OOVR_LOGF("Client core interface %s isn't offered: answering InterfaceNotFound", pInterfaceName);
+	if (pReturnCode)
+		*pReturnCode = VRInitError_Init_InterfaceNotFound;
+	return nullptr;
 }

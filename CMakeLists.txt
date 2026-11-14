@@ -143,6 +143,8 @@ if (NOT OpenXR_FOUND OR NOT jsoncpp_FOUND)
 	)
 
 	target_include_directories(jsoncpp PUBLIC ${XrDir}/src/external/jsoncpp/include)
+	# Type errors and the parser's nesting limit throw instead of calling abort(), as a system jsoncpp does
+	target_compile_definitions(jsoncpp PUBLIC JSON_USE_EXCEPTION=1)
 	if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 		target_compile_options(jsoncpp PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-Wno-volatile>)
 	elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -307,6 +309,12 @@ add_library(OCCore STATIC
 	OpenOVR/linux_funcs.cpp
 	OpenOVR/Misc/backtrace.cpp
 	OpenOVR/Misc/Config.cpp
+	OpenOVR/Misc/JsonFile.cpp
+	OpenOVR/Misc/JsonFile.h
+	OpenOVR/Misc/SoftFail.cpp
+	OpenOVR/Misc/SoftFail.h
+	OpenOVR/Misc/EnumNames.h
+	${GENERATED_DIR}/EnumNames.gen.cpp
 	OpenOVR/Misc/debug_helper.cpp
 	OpenOVR/Misc/xrutil.cpp
 	OpenOVR/Misc/xrmoreutils.cpp
@@ -578,6 +586,16 @@ add_custom_command(
 	COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/split_headers.py ${CMAKE_SOURCE_DIR}/OpenVRHeaders ${GENERATED_DIR}
 	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/split_headers.py ${openvr-headers}
 	COMMENT "Splitting headers..."
+	)
+
+# The names of OpenVR enum values (*NameFromEnum, VR_GetVRInitErrorAsSymbol)
+add_custom_command(
+	OUTPUT ${GENERATED_DIR}/EnumNames.gen.cpp
+	COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_enum_names.py ${GENERATED_DIR}/EnumNames.gen.cpp
+		${CMAKE_SOURCE_DIR}/OpenVRHeaders/openvr-2.15.6.h ${CMAKE_SOURCE_DIR}/OpenVRHeaders/openvr-1.23.7.h
+		${CMAKE_SOURCE_DIR}/OpenVRHeaders/openvr-1.0.10.h
+	DEPENDS ${CMAKE_SOURCE_DIR}/scripts/gen_enum_names.py ${CMAKE_SOURCE_DIR}/OpenVRHeaders/openvr-2.15.6.h
+	COMMENT "Generating the OpenVR enum names..."
 	)
 
 # Command for running stub generator

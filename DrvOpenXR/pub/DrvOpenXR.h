@@ -7,6 +7,8 @@
 #endif
 
 namespace DrvOpenXR {
-IBackend* CreateOpenXRBackend(const char* startupInfo);
+// nullptr with *error set if OpenXR can't be started (108 HmdNotFound for no runtime or no headset, else 124
+// Internal), with everything it had created destroyed again
+IBackend* CreateOpenXRBackend(const char* startupInfo, vr::EVRInitError* error);
 void GetXRAppName(char (&appName)[128]);
 }; // namespace DrvOpenXR

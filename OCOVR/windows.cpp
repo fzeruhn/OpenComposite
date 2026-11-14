@@ -66,7 +66,10 @@ static string GetLastErrorAsString()
 
 alternativeCoreFactory_t PlatformGetAlternativeCoreFactory()
 {
+	// nullptr (logged) if SteamVR can't be found or loaded: VRClientCoreFactory then uses OpenComposite
 	string path = BaseClientCore::GetAlternativeRuntimePath();
+	if (path.empty())
+		return nullptr;
 
 	string dll = path + "\\bin\\vrclient";
 #if defined(_WIN64)
@@ -77,15 +80,18 @@ alternativeCoreFactory_t PlatformGetAlternativeCoreFactory()
 	// Make SteamVR load the rest of it's stuff from the correct place
 	bool success = SetEnvironmentVariableA("VR_OVERRIDE", path.c_str());
 	if (!success) {
-		string msg = "Failed to update SteamVR environment variable with error:\n" + GetLastErrorAsString();
-		OOVR_ABORT(msg.c_str());
+		OOVR_LOGF("Failed to update SteamVR environment variable with error: %s", GetLastErrorAsString().c_str());
+		return nullptr;
 	}
 
 	chainedImplementation = LoadLibraryA(dll.c_str());
 	if (!chainedImplementation) {
-		string msg = "Failed to load SteamVR DLL '" + dll + "' with error:\n" + GetLastErrorAsString();
-		OOVR_ABORT(msg.c_str());
+		OOVR_LOGF("Failed to load SteamVR DLL '%s' with error: %s", dll.c_str(), GetLastErrorAsString().c_str());
+		return nullptr;
 	}
 
-	return (alternativeCoreFactory_t)GetProcAddress(chainedImplementation, "VRClientCoreFactory");
+	auto factory = (alternativeCoreFactory_t)GetProcAddress(chainedImplementation, "VRClientCoreFactory");
+	if (!factory)
+		OOVR_LOGF("SteamVR DLL '%s' has no VRClientCoreFactory", dll.c_str());
+	return factory;
 }

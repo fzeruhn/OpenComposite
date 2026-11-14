@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Misc/EnumNames.h"
 #include <numbers>
 #define BASE_IMPL
 #include "BaseRenderModels.h"
@@ -13,6 +14,8 @@
 #include "BaseSystem.h"
 #include "Misc/Input/InteractionProfile.h"
 
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -96,30 +99,95 @@ typedef OOVR_EVRRenderModelError EVRRenderModelError;
 typedef OOVR_RenderModel_TextureMap_t RenderModel_TextureMap_t;
 typedef OOVR_TextureID_t TextureID_t;
 
+// The render models OpenComposite has (LoadRenderModel_Async), each with one component named after it
+static bool IsKnownRenderModel(const char* name)
+{
+	static const char* const known[] = {
+		"renderLeftHand",
+		"renderRightHand",
+		"oculusHmdRenderModel",
+		"oculus_quest2_controller_left",
+		"oculus_quest2_controller_right",
+		"{indexcontroller}valve_controller_knu_1_0_left",
+		"{indexcontroller}valve_controller_knu_1_0_right",
+		"vive_tracker",
+	};
+	for (const char* k : known)
+		if (strcmp(k, name) == 0)
+			return true;
+	return false;
+}
+
+// Copies value into an app's buffer, cut short and terminated if it doesn't fit; returns the size needed with the
+// terminator, as SteamVR does
+static uint32_t CopyOutModelString(const string& value, char* buffer, uint32_t size)
+{
+	if (buffer && size) {
+		size_t n = std::min<size_t>(value.size(), size - 1);
+		memcpy(buffer, value.data(), n);
+		buffer[n] = 0;
+	}
+	return (uint32_t)value.size() + 1;
+}
+
+// The models and textures handed out and not yet freed: Free* ignores anything else (a pointer freed twice, or one
+// that never came from here) instead of corrupting the heap. Never freed: a Free* call can come during static
+// destruction
+static std::mutex& LiveLock()
+{
+	static std::mutex& lock = *new std::mutex;
+	return lock;
+}
+static std::set<const void*>& LiveModels()
+{
+	static std::set<const void*>& models = *new std::set<const void*>;
+	return models;
+}
+static std::set<const void*>& LiveTextures()
+{
+	static std::set<const void*>& textures = *new std::set<const void*>;
+	return textures;
+}
+
+static void AddLive(std::set<const void*>& set, const void* p)
+{
+	std::lock_guard<std::mutex> guard(LiveLock());
+	set.insert(p);
+}
+
+static bool TakeLive(std::set<const void*>& set, const void* p)
+{
+	std::lock_guard<std::mutex> guard(LiveLock());
+	return set.erase(p) != 0;
+}
+
 static string loadResource(int rid)
 {
 #ifndef _WIN32
 	const char *start = nullptr, *end = nullptr;
 	FindResourceLinux(rid, &start, &end);
+	if (!start || !end)
+		return {};
 	return { start, (size_t)(end - start) };
 #else
 	// Open our OBJ file
 	HRSRC ref = FindResource(openovr_module_id, MAKEINTRESOURCE(rid), MAKEINTRESOURCE(RES_T_OBJ));
+	// An empty string if it can't be read: LoadRenderModel_Async then answers NotSupported
 	if (!ref) {
-		string err = "FindResource error: " + std::to_string(GetLastError());
-		OOVR_ABORT(err.c_str());
+		OOVR_LOGF("FindResource error: %lu", GetLastError());
+		return {};
 	}
 
 	char* cstr = (char*)LoadResource(openovr_module_id, ref);
 	if (!cstr) {
-		string err = "LoadResource error: " + std::to_string(GetLastError());
-		OOVR_ABORT(err.c_str());
+		OOVR_LOGF("LoadResource error: %lu", GetLastError());
+		return {};
 	}
 
 	DWORD len = SizeofResource(openovr_module_id, ref);
 	if (!len) {
-		string err = "SizeofResource error: " + std::to_string(GetLastError());
-		OOVR_ABORT(err.c_str());
+		OOVR_LOGF("SizeofResource error: %lu", GetLastError());
+		return {};
 	}
 
 	return string(cstr, len);
@@ -136,22 +204,27 @@ static OOVR_RenderModel_Vertex_t split_face(
 	size_t slash1 = s.find('/');
 	size_t slash2 = s.find('/', slash1 + 1);
 
+	// The models are OpenComposite's own, so a bad face is a build problem: it becomes a zero vertex
+	OOVR_RenderModel_Vertex_t out{};
 	if (slash1 == string::npos || slash2 == string::npos) {
-		string err = "Bad face spec: " + s;
-		OOVR_ABORT(err.c_str());
+		OOVR_LOGF("Bad face spec: %s", s.c_str());
+		return out;
 	}
 
-	int vert = stoi(s.substr(0, slash1));
-	int uv = stoi(s.substr(slash1 + 1, slash1 - slash2 - 1));
-	int norm = stoi(s.substr(slash2 + 1));
+	int vert = atoi(s.substr(0, slash1).c_str());
+	int uv = atoi(s.substr(slash1 + 1, slash2 - slash1 - 1).c_str());
+	int norm = atoi(s.substr(slash2 + 1).c_str());
 
 	// OBJ references start at one
 	vert--;
 	uv--;
 	norm--;
+	if (vert < 0 || uv < 0 || norm < 0 || (size_t)vert >= verts.size() || (size_t)uv >= uvs.size() || (size_t)norm >= normals.size()) {
+		OOVR_LOGF("Face spec out of range: %s", s.c_str());
+		return out;
+	}
 
 	// Build the result
-	OOVR_RenderModel_Vertex_t out{};
 	out.vPosition = verts[vert];
 	out.vNormal = normals[norm];
 	out.rfTextureCoord[0] = uvs[uv].v[0];
@@ -161,6 +234,9 @@ static OOVR_RenderModel_Vertex_t split_face(
 
 EVRRenderModelError BaseRenderModels::LoadRenderModel_Async(const char* pchRenderModelName, RenderModel_t** renderModel)
 {
+	if (!pchRenderModelName || !renderModel)
+		return VRRenderModelError_InvalidArg;
+	*renderModel = nullptr;
 	OOVR_LOGF("LoadRenderModel_Async %s", pchRenderModelName);
 	string name = pchRenderModelName;
 	int rid;
@@ -192,12 +268,14 @@ EVRRenderModelError BaseRenderModels::LoadRenderModel_Async(const char* pchRende
 		// no model for the HMD
 		return VRRenderModelError_NotSupported;
 	} else {
-		string err = "Unknown render model name: " + string(pchRenderModelName);
-		OOVR_ABORT(err.c_str());
-		return VRRenderModelError_None;
+		// A model OpenComposite doesn't have: games then draw none, or their own
+		OC_UNSUPPORTED(VRRenderModelError_NotSupported, "LoadRenderModel_Async: no render model '%s'", pchRenderModelName);
 	}
 
-	std::istringstream res = std::istringstream(loadResource(rid));
+	string resource = loadResource(rid);
+	if (resource.empty())
+		return VRRenderModelError_NotSupported;
+	std::istringstream res = std::istringstream(resource);
 
 	std::vector<vr::HmdVector3_t> verts;
 	std::vector<vr::HmdVector2_t> uvs;
@@ -270,6 +348,7 @@ EVRRenderModelError BaseRenderModels::LoadRenderModel_Async(const char* pchRende
 	}
 	rm.rIndexData = indexData;
 	rm.unTriangleCount = rm.unVertexCount / 3;
+	AddLive(LiveModels(), *renderModel);
 
 	// Texture
 	rm.diffuseTextureId = -1; // Disabled for now
@@ -279,14 +358,21 @@ EVRRenderModelError BaseRenderModels::LoadRenderModel_Async(const char* pchRende
 
 void BaseRenderModels::FreeRenderModel(RenderModel_t* renderModel)
 {
-	delete renderModel->rVertexData;
-	delete renderModel->rIndexData;
+	if (!renderModel || !TakeLive(LiveModels(), renderModel)) {
+		OOVR_LOG_ONCE("FreeRenderModel: not a render model from LoadRenderModel_Async (or freed already), ignored");
+		return;
+	}
+	delete[] renderModel->rVertexData;
+	delete[] renderModel->rIndexData;
 	delete renderModel;
 }
 
 EVRRenderModelError BaseRenderModels::LoadTexture_Async(TextureID_t textureId, RenderModel_TextureMap_t** texture)
 {
+	if (!texture)
+		return VRRenderModelError_InvalidArg;
 	*texture = new RenderModel_TextureMap_t();
+	AddLive(LiveTextures(), *texture);
 	RenderModel_TextureMap_t& tx = **texture;
 
 	// For now use a 1x1 single coloured texture
@@ -306,21 +392,30 @@ EVRRenderModelError BaseRenderModels::LoadTexture_Async(TextureID_t textureId, R
 
 void BaseRenderModels::FreeTexture(RenderModel_TextureMap_t* texture)
 {
-	delete texture->rubTextureMapData;
+	if (!texture || !TakeLive(LiveTextures(), texture)) {
+		OOVR_LOG_ONCE("FreeTexture: not a texture from LoadTexture_Async (or freed already), ignored");
+		return;
+	}
+	delete[] texture->rubTextureMapData;
 	delete texture;
 }
 
 EVRRenderModelError BaseRenderModels::LoadTextureD3D11_Async(TextureID_t textureId, void* pD3D11Device, void** ppD3D11Texture2D)
 {
-	STUBBED();
+	if (ppD3D11Texture2D)
+		*ppD3D11Texture2D = nullptr;
+	OC_UNSUPPORTED(VRRenderModelError_NotSupported, "LoadTextureD3D11_Async: use LoadTexture_Async or LoadIntoTextureD3D11_Async");
 }
 
 EVRRenderModelError BaseRenderModels::LoadIntoTextureD3D11_Async(TextureID_t textureId, void* pDstTexture)
 {
 #ifndef SUPPORT_DX11
-	OOVR_ABORT("Cannot load D3D11 textures without D3D11 support");
+	OC_UNSUPPORTED(VRRenderModelError_NotSupported, "LoadIntoTextureD3D11_Async: this build has no D3D11 support");
 #else
 	ID3D11Texture2D* output = (ID3D11Texture2D*)pDstTexture;
+	// Windows never maps the first 64 KiB, so a "texture" there is a bad argument, not a texture
+	if ((uintptr_t)output < 0x10000)
+		return VRRenderModelError_InvalidArg;
 
 	struct pix_t {
 		uint8_t r, g, b, a;
@@ -357,16 +452,22 @@ EVRRenderModelError BaseRenderModels::LoadIntoTextureD3D11_Async(TextureID_t tex
 		init[i] = { pixels, sizeof(uint32_t), 0 };
 	}
 
-	ID3D11Texture2D* tempTex;
-	OOVR_FAILED_DX_ABORT(device->CreateTexture2D(&desc, init, &tempTex));
+	ID3D11Texture2D* tempTex = nullptr;
+	HRESULT hr = device->CreateTexture2D(&desc, init, &tempTex);
+	delete[] init;
+	delete[] pixels;
+	if (FAILED(hr)) {
+		// The app's texture keeps what it had
+		context->Release();
+		device->Release();
+		OC_UNSUPPORTED(VRRenderModelError_InvalidTexture, "LoadIntoTextureD3D11_Async: CreateTexture2D failed (0x%08lx)", (unsigned long)hr);
+	}
 
 	// Copy over the texture
 	context->CopyResource(output, tempTex);
 
 	// Cleanup
 	tempTex->Release();
-	delete[] init;
-	delete[] pixels;
 	context->Release();
 	device->Release();
 
@@ -376,7 +477,7 @@ EVRRenderModelError BaseRenderModels::LoadIntoTextureD3D11_Async(TextureID_t tex
 
 void BaseRenderModels::FreeTextureD3D11(void* pD3D11Texture2D)
 {
-	STUBBED();
+	// LoadTextureD3D11_Async hands no textures out
 }
 
 uint32_t BaseRenderModels::GetRenderModelName(uint32_t unRenderModelIndex, VR_OUT_STRING() char* pchRenderModelName, uint32_t unRenderModelNameLen)
@@ -428,40 +529,21 @@ uint32_t BaseRenderModels::GetComponentCount(const char* pchRenderModelName)
 uint32_t BaseRenderModels::GetComponentName(const char* pchRenderModelName, uint32_t unComponentIndex,
     char* pchComponentName, uint32_t unComponentNameLen)
 {
-
-	string name = pchRenderModelName;
-
-	if (name != "renderLeftHand"
-	    && name != "renderRightHand"
-	    && name != "oculusHmdRenderModel"
-	    && name != "oculus_quest2_controller_left"
-	    && name != "oculus_quest2_controller_right"
-	    && name != "{indexcontroller}valve_controller_knu_1_0_left"
-	    && name != "{indexcontroller}valve_controller_knu_1_0_right"
-	    && name != "vive_tracker") {
-		string err = "Unknown render model name: " + string(pchRenderModelName);
-		OOVR_ABORT(err.c_str());
-		return VRRenderModelError_None;
+	if (!pchRenderModelName || !IsKnownRenderModel(pchRenderModelName)) {
+		if (pchComponentName && unComponentNameLen)
+			pchComponentName[0] = 0;
+		return 0;
 	}
 
 	// Only the first component exists
 	if (unComponentIndex != 0) {
+		if (pchComponentName && unComponentNameLen)
+			pchComponentName[0] = 0;
 		return 0;
 	}
 
-	if (pchComponentName) {
-		// +1 for NULL
-		if (unComponentNameLen < name.length() + 1) {
-			OOVR_ABORT("unComponentNameLen too small!");
-		}
-
-		// TODO should we allow too small buffers?
-		strcpy_s(pchComponentName, unComponentNameLen, name.c_str());
-		pchComponentName[unComponentNameLen - 1] = 0;
-	}
-
-	// +1 for null
-	return (uint32_t)name.length() + 1;
+	// The component is named after its model; cut short if the buffer is too small, with the size needed returned
+	return CopyOutModelString(pchRenderModelName, pchComponentName, unComponentNameLen);
 }
 
 uint64_t BaseRenderModels::GetComponentButtonMask(const char* pchRenderModelName, const char* pchComponentName)
@@ -472,38 +554,15 @@ uint64_t BaseRenderModels::GetComponentButtonMask(const char* pchRenderModelName
 uint32_t BaseRenderModels::GetComponentRenderModelName(const char* pchRenderModelName, const char* pchComponentName,
     char* componentModelName, uint32_t componentModelNameLen)
 {
-
-	string name = pchRenderModelName;
-	if (name != "renderLeftHand"
-	    && name != "renderRightHand"
-	    && name != "oculusHmdRenderModel"
-	    && name != "oculus_quest2_controller_left"
-	    && name != "oculus_quest2_controller_right"
-	    && name != "{indexcontroller}valve_controller_knu_1_0_left"
-	    && name != "{indexcontroller}valve_controller_knu_1_0_right"
-	    && name != "vive_tracker") {
-		string err = "Unknown render model name: " + string(pchRenderModelName);
-		OOVR_ABORT(err.c_str());
-		return VRRenderModelError_None;
+	if (!pchRenderModelName || !pchComponentName || !IsKnownRenderModel(pchRenderModelName)
+	    || strcmp(pchRenderModelName, pchComponentName) != 0) {
+		// Only the model's one component (named after it) has a render model
+		if (componentModelName && componentModelNameLen)
+			componentModelName[0] = 0;
+		return 0;
 	}
 
-	if (name != pchComponentName) {
-		OOVR_ABORT("pchRenderModelName and pchComponentName mismatch");
-	}
-
-	if (componentModelName) {
-		// +1 for NULL
-		if (componentModelNameLen < name.length() + 1) {
-			OOVR_ABORT("componentModelNameLen too small!");
-		}
-
-		// TODO should we allow too small buffers?
-		strcpy_s(componentModelName, componentModelNameLen, name.c_str());
-		componentModelName[componentModelNameLen - 1] = 0;
-	}
-
-	// +1 for null
-	return (uint32_t)name.length() + 1;
+	return CopyOutModelString(pchRenderModelName, componentModelName, componentModelNameLen);
 }
 
 bool BaseRenderModels::GetComponentStateForDevicePath(const char* pchRenderModelName, const char* pchComponentName,
@@ -526,7 +585,11 @@ bool BaseRenderModels::GetComponentState(const char* pchRenderModelName, const c
 	// Left  tip:      mat4x4((1.000000, 0.000000, 0.000000, 0.000000), (0.000000, 0.794415, -0.607376, 0.000000), (0.000000, 0.607376, 0.794415, 0.000000), (0.016694, -0.025220, 0.024687, 1.000000))
 	// Right tip:      mat4x4((1.000000, 0.000000, 0.000000, 0.000000), (0.000000, 0.794415, -0.607376, 0.000000), (0.000000, 0.607376, 0.794415, 0.000000), (-0.016694, -0.025220, 0.024687, 1.000000))
 
+	if (!pComponentState)
+		return false;
 	ZeroMemory(pComponentState, sizeof(*pComponentState));
+	if (!pchComponentName)
+		return false;
 
 	std::string componentName = pchComponentName;
 
@@ -615,7 +678,9 @@ bool BaseRenderModels::TryGetComponentState(ITrackedDevice::TrackedDeviceType ha
 	}
 
 	XrSpaceLocation location = { XR_TYPE_SPACE_LOCATION };
-	OOVR_FAILED_XR_ABORT(xrLocateSpace(componentSpace, gripSpace, xr_gbl->GetBestTime(), &location));
+	if (!xr_gbl)
+		return false;
+	OC_XR_SOFT(xrLocateSpace(componentSpace, gripSpace, xr_gbl->GetBestTime(), &location), false);
 
 	if ((location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0) {
 		// If the location is invalid, there's not really a lot we can do. Just use the
@@ -634,47 +699,33 @@ bool BaseRenderModels::TryGetComponentState(ITrackedDevice::TrackedDeviceType ha
 
 bool BaseRenderModels::RenderModelHasComponent(const char* pchRenderModelName, const char* pchComponentName)
 {
-	STUBBED();
+	// The models' one component is named after the model (GetComponentName)
+	return pchRenderModelName && pchComponentName && IsKnownRenderModel(pchRenderModelName)
+	    && strcmp(pchRenderModelName, pchComponentName) == 0;
 }
 
 uint32_t BaseRenderModels::GetRenderModelThumbnailURL(const char* pchRenderModelName, VR_OUT_STRING() char* pchThumbnailURL, uint32_t unThumbnailURLLen, EVRRenderModelError* peError)
 {
 	if (peError)
-		*peError = VRRenderModelError_None;
-
-	STUBBED();
+		*peError = VRRenderModelError_NotSupported;
+	if (pchThumbnailURL && unThumbnailURLLen)
+		pchThumbnailURL[0] = 0;
+	// OpenComposite's models have no thumbnails
+	return 0;
 }
 
 uint32_t BaseRenderModels::GetRenderModelOriginalPath(const char* pchRenderModelName, VR_OUT_STRING() char* pchOriginalPath, uint32_t unOriginalPathLen, EVRRenderModelError* peError)
 {
 	if (peError)
-		*peError = VRRenderModelError_None;
-
-	STUBBED();
+		*peError = VRRenderModelError_NotSupported;
+	if (pchOriginalPath && unOriginalPathLen)
+		pchOriginalPath[0] = 0;
+	// OpenComposite's models are built into the DLL: no path
+	return 0;
 }
 
 const char* BaseRenderModels::GetRenderModelErrorNameFromEnum(EVRRenderModelError error)
 {
-#define ERR_HND(name)               \
-	case VRRenderModelError_##name: \
-		return #name;
-
-	switch (error) {
-		ERR_HND(None)
-		ERR_HND(Loading)
-		ERR_HND(NotSupported)
-		ERR_HND(InvalidArg)
-		ERR_HND(InvalidModel)
-		ERR_HND(NoShapes)
-		ERR_HND(MultipleShapes)
-		ERR_HND(TooManyVertices)
-		ERR_HND(MultipleTextures)
-		ERR_HND(BufferTooSmall)
-		ERR_HND(NotEnoughNormals)
-		ERR_HND(NotEnoughTexCoords)
-		ERR_HND(InvalidTexture)
-	default:
-		OOVR_ABORTF("Unknown render model error ID=%d", error);
-	}
-#undef ERR_HND
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRRenderModelError", (int32_t)error, "Unknown render model error (%d)", true);
 }

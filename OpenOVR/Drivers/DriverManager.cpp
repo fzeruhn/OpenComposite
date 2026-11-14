@@ -18,7 +18,8 @@ void* OCDriverContext::GetGenericInterface(const char* pchInterfaceVersion, EVRI
 
 DriverHandle_t OCDriverContext::GetDriverHandle()
 {
-	OOVR_ABORT("GetDriverHandle not yet implemented");
+	// No driver handles yet (the property container handle of "no driver")
+	OC_UNSUPPORTED(vr::k_ulInvalidPropertyContainer, "GetDriverHandle: not yet");
 }
 
 // tracked device
@@ -41,8 +42,11 @@ DriverManager& DriverManager::Instance()
 
 DriverManager& DriverManager::CheckInstance()
 {
-	if (!instance)
-		OOVR_ABORT("Driver manager not initialised!");
+	// Made on first use, as Instance() does: a driver call before the manager exists finds no devices
+	if (!instance) {
+		OOVR_LOG("Driver manager used before it was initialised: making it now");
+		instance.reset(new DriverManager());
+	}
 
 	return *instance;
 }

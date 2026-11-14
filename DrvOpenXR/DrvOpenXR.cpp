@@ -77,13 +77,46 @@ static XrBool32 XRAPI_CALL debugCallback(
 }
 #endif
 
-static void CreateSystemID()
+static XrResult CreateSystemID()
 {
 	// Create a system - this is when we choose what form factor we want, in this case an HMD
 	XrSystemGetInfo systemInfo{};
 	systemInfo.type = XR_TYPE_SYSTEM_GET_INFO;
 	systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-	OOVR_FAILED_XR_ABORT(xrGetSystem(xr_instance, &systemInfo, &xr_system));
+	XrResult res = xrGetSystem(xr_instance, &systemInfo, &xr_system);
+	if (XR_FAILED(res))
+		OOVR_LOGF("xrGetSystem failed: %d (no headset?)", (int)res);
+	return res;
+}
+
+// The init error an OpenVR game gets for a start-up call that failed
+static vr::EVRInitError InitErrorFor(XrResult res)
+{
+	// -51 is XR_ERROR_RUNTIME_UNAVAILABLE (OpenXR 1.0.29), newer than the bundled headers (so not a case: gcc's
+	// -Wswitch rejects a value outside the enum)
+	if ((int)res == -51 || res == XR_ERROR_FORM_FACTOR_UNAVAILABLE || res == XR_ERROR_FORM_FACTOR_UNSUPPORTED)
+		return vr::VRInitError_Init_HmdNotFound;
+	return vr::VRInitError_Init_Internal;
+}
+
+// Destroys what a failed CreateOpenXRBackend had created, and answers nullptr with the error
+static IBackend* StartupFailed(vr::EVRInitError* error, vr::EVRInitError e)
+{
+	if (currentBackend) {
+		// Its destructor shuts the session and the instance down (FullShutdown)
+		delete currentBackend;
+	} else {
+		delete xr_ext;
+		if (xr_instance)
+			xrDestroyInstance(xr_instance);
+		xr_instance = XR_NULL_HANDLE;
+	}
+	xr_ext = nullptr;
+	currentBackend = nullptr;
+	initialised = false;
+	if (error)
+		*error = e;
+	return nullptr;
 }
 
 static void handleStartupInfo(const char* startupInfo)
@@ -114,22 +147,28 @@ static void handleStartupInfo(const char* startupInfo)
 	BaseInput::setStartupManifest(manifest);
 }
 
-IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo)
+IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo, vr::EVRInitError* error)
 {
+	if (error)
+		*error = vr::VRInitError_None;
+
 	// TODO handle something like Unity which stops and restarts the instance
 	if (initialised) {
-		OOVR_ABORT("Cannot double-initialise OpenXR");
+		OOVR_LOG("CreateOpenXRBackend while OpenXR is already running: refused");
+		if (error)
+			*error = vr::VRInitError_Init_Internal;
+		return nullptr;
 	}
 	initialised = true;
 
 	// TODO make these work on Linux
 #ifdef XR_VALIDATION_LAYER_PATH
-	OOVR_FALSE_ABORT(SetEnvironmentVariableA("XR_CORE_VALIDATION_EXPORT_TYPE", "text"));
-	OOVR_FALSE_ABORT(SetEnvironmentVariableA("XR_API_LAYER_PATH", XR_VALIDATION_LAYER_PATH));
+	SetEnvironmentVariableA("XR_CORE_VALIDATION_EXPORT_TYPE", "text");
+	SetEnvironmentVariableA("XR_API_LAYER_PATH", XR_VALIDATION_LAYER_PATH);
 	OOVR_LOGF("Set OpenXR Layer path: %s", XR_VALIDATION_LAYER_PATH);
 #endif
 #ifdef XR_VALIDATION_FILE_NAME
-	OOVR_FALSE_ABORT(SetEnvironmentVariableA("XR_CORE_VALIDATION_FILE_NAME", XR_VALIDATION_FILE_NAME));
+	SetEnvironmentVariableA("XR_CORE_VALIDATION_FILE_NAME", XR_VALIDATION_FILE_NAME);
 	OOVR_LOGF("Set OpenXR validation file path: %s", XR_VALIDATION_FILE_NAME);
 #endif
 
@@ -137,25 +176,29 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo)
 	uint32_t availableExtensionsCount = 0;
 	if (XrResult res = xrEnumerateInstanceExtensionProperties(nullptr, 0, &availableExtensionsCount, nullptr); XR_FAILED(res)) {
 		OOVR_LOGF("Failed to enumerate XR extensions: %d", res);
-		return nullptr;
+		return StartupFailed(error, InitErrorFor(res));
 	}
 	std::vector<XrExtensionProperties> extensionProperties;
 	extensionProperties.resize(availableExtensionsCount, { XR_TYPE_EXTENSION_PROPERTIES });
-	OOVR_FAILED_XR_ABORT(xrEnumerateInstanceExtensionProperties(nullptr,
-	    extensionProperties.size(), &availableExtensionsCount, extensionProperties.data()));
+	if (XrResult res = xrEnumerateInstanceExtensionProperties(nullptr, extensionProperties.size(), &availableExtensionsCount, extensionProperties.data()); XR_FAILED(res)) {
+		OOVR_LOGF("Failed to enumerate XR extensions: %d", res);
+		return StartupFailed(error, InitErrorFor(res));
+	}
 	std::set<std::string> availableExtensions;
 	for (const XrExtensionProperties& ext : extensionProperties) {
 		availableExtensions.insert(ext.extensionName);
 		OOVR_LOGF("Extension: %s", ext.extensionName);
 	}
 
-	uint32_t availableLayersCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateApiLayerProperties(0, &availableLayersCount, nullptr));
+	// The layers are only logged, so failing to list them doesn't matter
+	uint32_t availableLayersCount = 0;
+	if (XR_FAILED(xrEnumerateApiLayerProperties(0, &availableLayersCount, nullptr)))
+		availableLayersCount = 0;
 	OOVR_LOGF("Num layers available: %d ", availableLayersCount);
 	std::vector<XrApiLayerProperties> layerProperties;
 	layerProperties.resize(availableLayersCount, { XR_TYPE_API_LAYER_PROPERTIES });
-	OOVR_FAILED_XR_ABORT(xrEnumerateApiLayerProperties(
-	    layerProperties.size(), &availableLayersCount, layerProperties.data()));
+	if (availableLayersCount && XR_FAILED(xrEnumerateApiLayerProperties(layerProperties.size(), &availableLayersCount, layerProperties.data())))
+		layerProperties.clear();
 	std::set<std::string> availableLayers;
 	for (const XrApiLayerProperties& layer : layerProperties) {
 		availableLayers.insert(layer.layerName);
@@ -249,7 +292,8 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo)
 
 #if ANDROID
 	if (!OpenComposite_Android_Create_Info) {
-		OOVR_ABORT("Cannot create OpenXR instance - OpenComposite_Android_Create_Info not set");
+		OOVR_LOG("Cannot create OpenXR instance - OpenComposite_Android_Create_Info not set");
+		return StartupFailed(error, vr::VRInitError_Init_Internal);
 	}
 	XrInstanceCreateInfoAndroidKHR androidInfo = *OpenComposite_Android_Create_Info;
 	androidInfo.next = nullptr;
@@ -261,7 +305,8 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo)
 		if (res == XR_ERROR_RUNTIME_FAILURE) {
 			OOVR_LOGF("Is your OpenXR runtime running?");
 		}
-		return nullptr;
+		xr_instance = XR_NULL_HANDLE;
+		return StartupFailed(error, InitErrorFor(res));
 	}
 
 #ifdef _DEBUG
@@ -272,29 +317,40 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo)
 	dbgCreateInfo.next = NULL;
 	dbgCreateInfo.userData = NULL;
 	if (dbgMessenger != NULL) {
-		OOVR_FAILED_XR_ABORT(xrDestroyDebugUtilsMessengerEXT(dbgMessenger));
+		xrDestroyDebugUtilsMessengerEXT(dbgMessenger);
 		dbgMessenger = NULL;
 	}
 	dbgCreateInfo.userCallback = debugCallback;
-	OOVR_FAILED_XR_ABORT(xrCreateDebugUtilsMessengerEXT(xr_instance, &dbgCreateInfo, &dbgMessenger));
+	// Debug builds only, and only for logging
+	if (XR_FAILED(xrCreateDebugUtilsMessengerEXT(xr_instance, &dbgCreateInfo, &dbgMessenger)))
+		dbgMessenger = NULL;
 #endif
 
 	// Load the function pointers for the extension functions
 	xr_ext = new XrExt(apiFlags, extensions);
 
-	CreateSystemID();
+	if (XrResult res = CreateSystemID(); XR_FAILED(res))
+		return StartupFailed(error, InitErrorFor(res));
 
 	// List off the views and store them locally for easy access
 	uint32_t viewCount = 0;
-	OOVR_FAILED_XR_ABORT(xrEnumerateViewConfigurationViews(xr_instance, xr_system,
-	    XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &viewCount, nullptr));
+	if (XrResult res = xrEnumerateViewConfigurationViews(xr_instance, xr_system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &viewCount, nullptr); XR_FAILED(res)) {
+		OOVR_LOGF("xrEnumerateViewConfigurationViews failed: %d", (int)res);
+		return StartupFailed(error, InitErrorFor(res));
+	}
 
 	xr_views_list = std::vector<XrViewConfigurationView>(viewCount, { XR_TYPE_VIEW_CONFIGURATION_VIEW });
 
-	OOVR_FAILED_XR_ABORT(xrEnumerateViewConfigurationViews(xr_instance, xr_system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
-	    viewCount, &viewCount, xr_views_list.data()));
+	if (XrResult res = xrEnumerateViewConfigurationViews(xr_instance, xr_system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, viewCount, &viewCount, xr_views_list.data()); XR_FAILED(res)) {
+		OOVR_LOGF("xrEnumerateViewConfigurationViews failed: %d", (int)res);
+		return StartupFailed(error, InitErrorFor(res));
+	}
 
-	OOVR_FALSE_ABORT(viewCount == xr_views_list.size());
+	if (viewCount != XruEyeCount || viewCount != xr_views_list.size()) {
+		// A stereo headset has two views; anything else isn't one OpenVR games can draw for
+		OOVR_LOGF("The OpenXR runtime has %u primary stereo views, not 2", viewCount);
+		return StartupFailed(error, vr::VRInitError_Init_HmdNotFound);
+	}
 
 	// Create a session - this tells the runtime that sooner or later we'd like to submit frames
 	// This is when we have to choose what graphics API to use
@@ -308,15 +364,20 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo)
 
 	// Build a backend that works with OpenXR
 	currentBackend = new XrBackend(useVulkanTmpGfx, useD3D11TmpGfx);
+	if (!currentBackend->HasTemporaryGraphics()) {
+		OOVR_LOG("No graphics API to start the OpenXR session with (the runtime offers neither D3D11 nor Vulkan)");
+		return StartupFailed(error, vr::VRInitError_Init_Internal);
+	}
 
 	// Setup our OpenXR session
-	SetupSession();
+	if (XrResult res = SetupSession(); XR_FAILED(res))
+		return StartupFailed(error, InitErrorFor(res));
 	handleStartupInfo(startupInfo);
 
 	return currentBackend;
 }
 
-void DrvOpenXR::SetupSession()
+XrResult DrvOpenXR::SetupSession()
 {
 	// SetupSession is used to restart the session, and as such, we want to prevent other threads from attempting to use the session
 	// while we're rebuilding it (otherwise we get gross nondescript crashes), so we will put a lock on it here.
@@ -329,7 +390,12 @@ void DrvOpenXR::SetupSession()
 	sessionInfo.type = XR_TYPE_SESSION_CREATE_INFO;
 	sessionInfo.systemId = xr_system;
 	sessionInfo.next = currentBackend->GetCurrentGraphicsBinding();
-	OOVR_FAILED_XR_ABORT(xrCreateSession(xr_instance, &sessionInfo, &xr_session.get()));
+	if (XrResult res = xrCreateSession(xr_instance, &sessionInfo, &xr_session.get()); XR_FAILED(res)) {
+		// No session: the caller decides (falls back to the temporary device, or marks the session lost)
+		OOVR_LOGF("xrCreateSession failed: %d", (int)res);
+		xr_session.reset();
+		return res;
+	}
 
 	// Setup the OpenXR globals, which uses the current session so we have to do this last
 	xr_gbl = new XrSessionGlobals();
@@ -344,6 +410,7 @@ void DrvOpenXR::SetupSession()
 		input->BindInputsForSession();
 
 	currentBackend->OnSessionCreated();
+	return XR_SUCCESS;
 }
 
 void DrvOpenXR::ShutdownSession()
@@ -362,8 +429,10 @@ void DrvOpenXR::ShutdownSession()
 	xr_gbl = nullptr;
 
 	if (currentBackend->sessionActive) {
+		currentBackend->ExpectSessionExit();
 		// Hey it turns out that xrDestroySession can be called whenever - how convenient
-		OOVR_FAILED_XR_ABORT(xrRequestExitSession(xr_session.get()));
+		if (XR_FAILED(xrRequestExitSession(xr_session.get())))
+			OOVR_LOG("xrRequestExitSession failed: destroying the session anyway");
 		int count = 0;
 		while (currentBackend->GetSessionState() != XR_SESSION_STATE_EXITING && count++ < 10) {
 			const int durationMs = 250;
@@ -377,13 +446,18 @@ void DrvOpenXR::ShutdownSession()
 			currentBackend->PumpEvents();
 		}
 	}
+	// No running session from here until the next one reaches READY, also if xrCreateSession then fails
+	currentBackend->sessionActive = false;
 
-	OOVR_FAILED_XR_ABORT(xrDestroySession(xr_session.get()));
+	if (xr_session.get() && XR_FAILED(xrDestroySession(xr_session.get())))
+		OOVR_LOG("xrDestroySession failed");
 	xr_session.reset();
+	currentBackend->sessionState = XR_SESSION_STATE_UNKNOWN;
 
 	CreateSystemID();
 }
 
+// Called by ~XrBackend, under its teardown lock
 void DrvOpenXR::FullShutdown()
 {
 	if (xr_session.get())
@@ -391,13 +465,14 @@ void DrvOpenXR::FullShutdown()
 
 #ifdef _DEBUG
 	if (dbgMessenger != NULL) {
-		OOVR_FAILED_XR_ABORT(xrDestroyDebugUtilsMessengerEXT(dbgMessenger));
+		xrDestroyDebugUtilsMessengerEXT(dbgMessenger);
 		dbgMessenger = NULL;
 	}
 #endif
 
 	if (xr_instance) {
-		OOVR_FAILED_XR_ABORT(xrDestroyInstance(xr_instance));
+		if (XR_FAILED(xrDestroyInstance(xr_instance)))
+			OOVR_LOG("xrDestroyInstance failed");
 		xr_instance = XR_NULL_HANDLE;
 	}
 

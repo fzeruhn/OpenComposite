@@ -39,7 +39,8 @@ public:
 	void _BlockInputsUntilReleased();
 
 	// These are going to be widely used elsewhere, so make them public
-	XrReferenceSpaceType currentSpace = XR_REFERENCE_SPACE_TYPE_STAGE; // The standing/stage origin is the default
+	// One per process, and static: overlay and compositor calls use it before (or without) the app asking for IVRSystem
+	inline static XrReferenceSpaceType currentSpace = XR_REFERENCE_SPACE_TYPE_STAGE; // The standing/stage origin is the default
 
 private:
 	void CheckControllerEvents(vr::TrackedDeviceIndex_t hand, vr::VRControllerState_t& last);

@@ -37,7 +37,10 @@ TemporaryD3D11::TemporaryD3D11()
 	XrGraphicsRequirementsD3D11KHR graphicsRequirements{};
 	graphicsRequirements.type = XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR;
 	XrResult res = xr_ext->xrGetD3D11GraphicsRequirementsKHR(xr_instance, xr_system, &graphicsRequirements);
-	OOVR_FAILED_XR_ABORT(res);
+	if (XR_FAILED(res)) {
+		OOVR_LOGF("xrGetD3D11GraphicsRequirementsKHR failed: %d", (int)res);
+		return;
+	}
 
 	IDXGIAdapter1* adapter = d3d_get_adapter(graphicsRequirements.adapterLuid);
 	D3D_FEATURE_LEVEL featureLevels[] = { D3D_FEATURE_LEVEL_11_0 };
@@ -50,16 +53,23 @@ TemporaryD3D11::TemporaryD3D11()
 	    featureLevels, _countof(featureLevels),
 	    D3D11_SDK_VERSION, &device, nullptr, nullptr);
 
-	OOVR_FAILED_DX_ABORT(createDeviceRes);
+	if (adapter)
+		adapter->Release();
+	if (FAILED(createDeviceRes) || !device) {
+		OOVR_LOGF("D3D11CreateDevice for the OpenXR runtime's adapter failed: 0x%08lx", (unsigned long)createDeviceRes);
+		device = nullptr;
+		return;
+	}
 
 	d3dInfo = XrGraphicsBindingD3D11KHR{ XR_TYPE_GRAPHICS_BINDING_D3D11_KHR };
 	d3dInfo.device = device;
-	adapter->Release();
+	usable = true;
 }
 
 TemporaryD3D11::~TemporaryD3D11()
 {
-	device->Release();
+	if (device)
+		device->Release();
 }
 
 #endif

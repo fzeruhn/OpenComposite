@@ -11,6 +11,7 @@
 #include "XrController.h"
 #include "XrHMD.h"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 #include <mutex>
@@ -37,12 +38,29 @@ public:
 	 * with ending the session - we're allowed to submit frames after we receive the stopping event, until
 	 * we call xrEndSession.
 	 */
-	bool sessionActive = false;
+	std::atomic<bool> sessionActive{ false };
+	std::atomic<bool> sessionLost{ false };
+	std::atomic<bool> exitExpected{ false };
+	// The app's graphics device couldn't be bound: the session stays on the temporary device
+	std::atomic<bool> appGraphicsUnusable{ false };
 
 	/**
 	 * To be called after xrCreateSession. Should only be used by DrvOpenXR.
 	 */
 	void OnSessionCreated();
+
+	/**
+	 * The session is gone or going (LOSS_PENDING, an EXITING OpenComposite didn't ask for, or a session restart
+	 * that failed): VREvent_Quit is queued once, and no more frames are begun. There's no reconnecting.
+	 */
+	void OnSessionLost();
+	bool IsSessionLost() const { return sessionLost; }
+
+	/** Called before OpenComposite asks the runtime to end the session itself, so its EXITING isn't a loss */
+	void ExpectSessionExit() { exitExpected = true; }
+
+	/** False if neither D3D11 nor Vulkan could start the session (CreateOpenXRBackend then gives up) */
+	bool HasTemporaryGraphics() const { return temporaryGraphics != nullptr; }
 
 	void PrepareForSessionShutdown();
 
@@ -70,7 +88,8 @@ private:
 	std::vector<std::shared_ptr<XrGenericTracker>> generic_trackers;
 	std::shared_mutex generic_trackers_mutex;
 
-	void CheckOrInitCompositors(const vr::Texture_t* tex);
+	// False if the texture can't be used (logged): no session switch then, or the switch was undone
+	bool CheckOrInitCompositors(const vr::Texture_t* tex);
 	std::unique_ptr<Compositor> compositors[XruEyeCount];
 	std::unique_ptr<Compositor> skybox_compositor;
 	std::vector<std::shared_ptr<Compositor>> overlay_compositors;
@@ -102,13 +121,21 @@ private:
 	void BindInfoSet();
 
 	// Whether we've restarted the session to use the application's rendering API yet
-	bool usingApplicationGraphicsAPI = false;
+	std::atomic<bool> usingApplicationGraphicsAPI{ false };
 
 	// The views for the two main eye layers
 	XrCompositionLayerProjectionView projectionViews[XruEyeCount];
 
 	// Have we started rendering a frame yet? If not, calling xrEndFrame would result in an error
 	bool renderingFrame = false;
+
+	// A frame xrWaitFrame gave whose xrBeginFrame failed: the next frame begins it again instead of waiting, as a
+	// second xrWaitFrame blocks until xrBeginFrame is called. Repeated failures lose the session.
+	bool frameAwaitingBegin = false;
+	// Consecutive frames whose xrWaitFrame or xrBeginFrame failed
+	std::atomic<int> frameCallFailures{ 0 };
+	// Drops the frame, waits about a frame and, if the session is lost or five frames failed in a row, loses the session
+	void OnFrameCallFailed(XrResult res);
 
 	// Were we supposed to start rendering a frame, but couldn't since we were on the
 	// early (pre switch to application graphics instance) OpenXR session?

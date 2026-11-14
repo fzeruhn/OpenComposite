@@ -1,0 +1,1 @@
+{ "#": "No headset: xrGetSystem answers FORM_FACTOR_UNAVAILABLE, so Init answers 108 (HmdNotFound) and VR_IsHmdPresent false", "fail": [{ "function": "xrGetSystem", "result": "XR_ERROR_FORM_FACTOR_UNAVAILABLE", "count": 1000 }] }

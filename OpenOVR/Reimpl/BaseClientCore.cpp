@@ -9,42 +9,40 @@
 
 #include "json/json.h"
 
+#include "Misc/JsonFile.h"
+
 #ifdef _WIN32
 #include <ShlObj.h>
+#else
+#include <dlfcn.h>
+#include <unistd.h>
 #endif
 
 using namespace vr;
 
 static std::wstring_convert<std::codecvt_utf8<wchar_t>> CHAR_CONV;
 
-#ifdef _WIN32
-#define APISTR(str) (str)
-#else
-#define APISTR(str) (CHAR_CONV.to_bytes(str))
-#endif
-
-static bool ReadJson(wstring path, Json::Value& result)
+// applist.json, apps-config.json and openvrpaths.vrpath are shared with other programs: a broken or half-written
+// one reads as empty instead of ending the program, and writes replace the file in one step (Misc/JsonFile.h)
+static bool ReadJson(const wstring& path, Json::Value& result)
 {
-	std::ifstream in(APISTR(path), std::ios::binary);
-	if (in) {
-		std::stringstream contents;
-		contents << in.rdbuf();
-		contents >> result;
-		return true;
-	} else {
-		result = Json::Value(Json::ValueType::objectValue);
-		return false;
-	}
+	return oc_read_json_file(std::filesystem::path(path), result);
 }
 
-static void WriteJson(wstring path, const Json::Value& value)
+// False if applist.json is there but couldn't be read: writing it back would delete every other program's entry
+static bool ReadAppList(const wstring& path, Json::Value& root)
 {
-	std::ofstream out(APISTR(path), std::ios::binary);
-	if (!out) {
-		OOVR_ABORTF("Failed to write applist json: %s", strerror(errno));
-	}
+	std::error_code ec;
+	if (oc_read_json_file(std::filesystem::path(path), root) || (!std::filesystem::exists(path, ec) && !ec))
+		return true;
+	OOVR_LOG_ONCE("applist.json couldn't be read: leaving it as it is");
+	return false;
+}
 
-	out << value;
+static void WriteJson(const wstring& path, const Json::Value& value)
+{
+	// The game goes on if it fails: the list only records which programs loaded OpenComposite
+	oc_write_json_file(std::filesystem::path(path), value);
 }
 
 enum Runtime {
@@ -85,11 +83,10 @@ bool BaseClientCore::CheckAppEnabled()
 
 	string apppath = GetAppPath();
 	Json::Value root;
-	ReadJson(listname, root);
-
-	root[apppath] = tag;
-
-	WriteJson(listname, root);
+	if (ReadAppList(listname, root)) {
+		root[apppath] = tag;
+		WriteJson(listname, root);
+	}
 
 	// Check what runtime the app should use, as set in the config menu
 	Json::Value config;
@@ -143,7 +140,9 @@ static wstring GetAppSettingsPath()
 	WCHAR rwchPath[MAX_PATH];
 
 	if (!SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA | CSIDL_FLAG_CREATE, NULL, 0, rwchPath))) {
-		OOVR_ABORT("Failed to find the appdata directory");
+		// The paths file then can't be found, which its readers handle
+		OOVR_LOG("Failed to find the appdata directory");
+		return {};
 	}
 
 	path = rwchPath;
@@ -202,13 +201,18 @@ string BaseClientCore::GetAlternativeRuntimePath()
 #error "Unsupported platform"
 #endif
 
+	// "" (logged) if there's no SteamVR to chain to: PlatformGetAlternativeCoreFactory then gives up
 	Json::Value root;
-	bool success = ReadJson(regPath, root);
-	OOVR_FALSE_ABORT(success);
+	if (!ReadJson(regPath, root)) {
+		OOVR_LOG("Cannot start SteamVR: openvrpaths.vrpath couldn't be read");
+		return {};
+	}
 
 	const Json::Value runtimes = root["runtime"];
-	if (!runtimes.isArray())
-		OOVR_ABORT("Cannot start SteamVR: malformateed runtime path");
+	if (!runtimes.isArray()) {
+		OOVR_LOG("Cannot start SteamVR: malformed runtime path");
+		return {};
+	}
 
 	for (unsigned int i = 0; i < runtimes.size(); i++) {
 		string path = runtimes[i].asString();
@@ -218,7 +222,8 @@ string BaseClientCore::GetAlternativeRuntimePath()
 			return path;
 	}
 
-	OOVR_ABORT("Could not find a usable SteamVR intallation");
+	OOVR_LOG("Could not find a usable SteamVR installation");
+	return {};
 }
 
 EVRInitError BaseClientCore::Init(vr::EVRApplicationType eApplicationType, const char* pStartupInfo)
@@ -263,7 +268,9 @@ const char* BaseClientCore::GetIDForVRInitError(vr::EVRInitError eError)
 std::string BaseClientCore::GetAppPath()
 {
 #ifndef _WIN32
-	LINUX_STUBBED();
+	char appExe[4096];
+	ssize_t len = readlink("/proc/self/exe", appExe, sizeof(appExe) - 1);
+	return len > 0 ? string(appExe, (size_t)len) : string();
 #else
 	char appExe[MAX_PATH];
 	DWORD len = GetModuleFileNameA(nullptr, appExe, sizeof(appExe));
@@ -274,7 +281,13 @@ std::string BaseClientCore::GetAppPath()
 std::wstring BaseClientCore::GetDllDir()
 {
 #ifndef _WIN32
-	LINUX_STUBBED();
+	// The folder of the shared object this function is in
+	Dl_info info{};
+	if (!dladdr((void*)&BaseClientCore::GetDllDir, &info) || !info.dli_fname)
+		return {};
+	string path = info.dli_fname;
+	path = path.substr(0, path.find_last_of('/') + 1);
+	return CHAR_CONV.from_bytes(path);
 #else
 	wchar_t buffer[MAX_PATH];
 	DWORD len = GetModuleFileNameW(openovr_module_id, buffer, MAX_PATH);
@@ -287,7 +300,8 @@ void BaseClientCore::SetManifestPath(string filename)
 {
 	wstring listname = GetDllDir() + L"applist.json";
 	Json::Value root;
-	ReadJson(listname, root);
+	if (!ReadAppList(listname, root))
+		return;
 
 	Json::Value& tag = root[GetAppPath()];
 

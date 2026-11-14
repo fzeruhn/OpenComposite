@@ -8,8 +8,10 @@ void BaseHeadsetView::SetHeadsetViewSize(uint32_t nWidth, uint32_t nHeight)
 
 void BaseHeadsetView::GetHeadsetViewSize(uint32_t* pnWidth, uint32_t* pnHeight)
 {
-	*pnWidth = 0;
-	*pnHeight = 0;
+	if (pnWidth)
+		*pnWidth = 0;
+	if (pnHeight)
+		*pnHeight = 0;
 }
 
 void BaseHeadsetView::SetHeadsetViewMode(OOVR_HeadsetViewMode_t eHeadsetViewMode)
@@ -41,5 +43,9 @@ void BaseHeadsetView::SetHeadsetViewBlendRange(float flStartPct, float flEndPct)
 
 void BaseHeadsetView::GetHeadsetViewBlendRange(float* pStartPct, float* pEndPct)
 {
-	STUBBED();
+	// SetHeadsetViewBlendRange has no effect: no blending
+	if (pStartPct)
+		*pStartPct = 0.0f;
+	if (pEndPct)
+		*pEndPct = 0.0f;
 }

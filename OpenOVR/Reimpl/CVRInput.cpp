@@ -15,12 +15,15 @@ GEN_INTERFACE("Input", "011")
 // Prior to IVRInput_005 / OpenVR 1.1.3 the input layer had a slightly different format, so adapt that
 vr::EVRInputError CVRInput_004::GetSkeletalActionData(vr::VRActionHandle_t action, vr::IVRInput_004::InputSkeletalActionData_t* pActionData, uint32_t unActionDataSize, vr::VRInputValueHandle_t ulRestrictToDevice)
 {
+	// A null or wrong-sized struct is an argument error, as the main method answers
+	if (!pActionData || unActionDataSize != sizeof(vr::IVRInput_004::InputSkeletalActionData_t))
+		return vr::VRInputError_InvalidParam;
 	// Set the size to what the main method is expecting
-	OOVR_FALSE_ABORT(unActionDataSize == sizeof(vr::IVRInput_004::InputSkeletalActionData_t));
 	unActionDataSize = sizeof(OOVR_InputSkeletalActionData_t);
 
-	// Load the required value
-	OOVR_FALSE_ABORT(base->GetBoneCount(action, &pActionData->boneCount) == vr::VRInputError_None);
+	// Load the required value (the main method's answer then says whether the action is usable)
+	pActionData->boneCount = 0;
+	base->GetBoneCount(action, &pActionData->boneCount);
 
 	return base->GetSkeletalActionData(action, (OOVR_InputSkeletalActionData_t*)pActionData, unActionDataSize, ulRestrictToDevice);
 }

@@ -93,7 +93,10 @@ class Runner:
         self.out.mkdir(parents=True, exist_ok=True)
         (self.out / "raw").mkdir(exist_ok=True)
         if self.args.ini:
-            shutil.copy(self.args.ini, Path(self.runtime).parent / "opencomposite.ini")
+            # Taken out again when the run ends (Runner.cleanup), with any file that was there put back
+            target = Path(self.runtime).parent / "opencomposite.ini"
+            self.ini_backup = target.read_bytes() if target.exists() else None
+            shutil.copy(self.args.ini, target)
         if unelevated.integrity_above_medium() and self.manifest:
             if not self.args.ci:
                 return  # children run at medium integrity (unelevated.run_medium)
@@ -101,18 +104,29 @@ class Runner:
             subprocess.run(["reg", "add", r"HKLM\SOFTWARE\Khronos\OpenXR\1", "/v", "ActiveRuntime", "/t", "REG_SZ",
                             "/d", self.manifest, "/f"], check=True, capture_output=True)
 
-    def child(self, extra, raw, timeout=TIMEOUT):
+    def child(self, extra, raw, timeout=TIMEOUT, env_extra=None):
         cmd = [self.conformance, "--runtime", self.runtime, "--out", str(raw)] + extra
         if self.args.real_runtime:
             cmd.append("--real-runtime")
         env = dict(os.environ)
         env.update(self.env)
+        env.update(env_extra or {})
         if unelevated.integrity_above_medium() and not self.args.ci:
             return unelevated.run_medium(cmd, env, None, timeout)
         try:
             return subprocess.run(cmd, env=env, timeout=timeout, capture_output=True).returncode
         except subprocess.TimeoutExpired:
             return 124
+
+    @staticmethod
+    def take_crash(raw, record):
+        """Attaches oc_conformance's crash report (crash_report.cpp), if it wrote one, to the record of the call that
+        ended it, and removes the file so the next child starts clean."""
+        report = Path(str(raw) + ".crash.txt")
+        if report.exists():
+            record["crash"] = report.read_text(encoding="utf-8", errors="replace").strip()
+            report.unlink()
+        return record
 
     @staticmethod
     def status_of(code):
@@ -133,22 +147,23 @@ class Runner:
                 r["status"] = "ok"
             results += new
             if code == 0:
+                Path(str(raw) + ".crash.txt").unlink(missing_ok=True)
                 break
             if not new and start == 0:
                 # Ended before its first record: in Init or the interface lookup
-                results.append({"interface": version, "apptype": apptype, "argset": argset, "index": -1,
-                                "method": "<init or lookup>", "status": self.status_of(code), "exit_code": code})
+                results.append(self.take_crash(raw, {"interface": version, "apptype": apptype, "argset": argset, "index": -1,
+                                "method": "<init or lookup>", "status": self.status_of(code), "exit_code": code}))
                 break
             if not new:
                 # The first call after the restart ended it again
-                results.append({"interface": version, "apptype": apptype, "argset": argset, "index": start,
-                                "method": f"<call {start}>", "status": self.status_of(code), "exit_code": code})
+                results.append(self.take_crash(raw, {"interface": version, "apptype": apptype, "argset": argset, "index": start,
+                                "method": f"<call {start}>", "status": self.status_of(code), "exit_code": code}))
                 start += 1
                 continue
             # The call after the last one recorded is the one that ended the process
             last = max([r.get("index", -1) for r in new] + [start - 1])
-            results.append({"interface": version, "apptype": apptype, "argset": argset, "index": last + 1,
-                            "method": f"<call {last + 1}>", "status": self.status_of(code), "exit_code": code})
+            results.append(self.take_crash(raw, {"interface": version, "apptype": apptype, "argset": argset, "index": last + 1,
+                            "method": f"<call {last + 1}>", "status": self.status_of(code), "exit_code": code}))
             start = last + 2
             if any(r.get("method") == "<lookup>" for r in new) or last + 1 < 0:
                 break
@@ -160,13 +175,24 @@ class Runner:
         extra = ["--case", name]
         if self.args.manifest:
             extra += ["--manifest", str(Path(self.args.manifest).resolve())]
-        code = self.child(extra, raw, CASE_TIMEOUT)
+        # The stand-in runtime's dump of what it was asked (frames ended and so on), for xr_failures.py
+        dump = self.out / "raw" / f"case-{name}.dump.json"
+        dump.unlink(missing_ok=True)
+        code = self.child(extra, raw, CASE_TIMEOUT, {"OC_TEST_RUNTIME_DUMP": str(dump)})
         records = read_jsonl(raw)
         for r in records:
             r["status"] = "ok"
         if code != 0:
-            records.append({"case": name, "method": "<end>", "status": self.status_of(code), "exit_code": code})
+            records.append(self.take_crash(raw, {"case": name, "method": "<end>", "status": self.status_of(code), "exit_code": code}))
         return records
+
+    def cleanup(self):
+        if self.args.ini:
+            target = Path(self.runtime).parent / "opencomposite.ini"
+            if getattr(self, "ini_backup", None) is not None:
+                target.write_bytes(self.ini_backup)
+            else:
+                target.unlink(missing_ok=True)
 
     def run(self):
         self.prepare()
@@ -255,7 +281,11 @@ def main():
     if args.cases and not args.only:
         args.cases_only = True
 
-    results = Runner(args).run()
+    runner = Runner(args)
+    try:
+        results = runner.run()
+    finally:
+        runner.cleanup()
     out = Path(args.out)
     (out / "results.json").write_text(json.dumps({"runtime": args.runtime, "records": results}, indent=1),
                                       encoding="utf-8")
@@ -264,7 +294,8 @@ def main():
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     bad = [r for r in results if r["status"] in ("ended", "crashed", "timeout")]
     lines = [f"{k}: {v}" for k, v in sorted(counts.items())] + [""]
-    lines += [f'{r["status"]}: {key_of(r)} (exit {r.get("exit_code")})' for r in bad]
+    lines += [f'{r["status"]}: {key_of(r)} (exit {r.get("exit_code")})'
+              + (f' - {r["crash"].splitlines()[0]}' if r.get("crash") else "") for r in bad]
     problems = len(bad)
     if args.expected:
         diffs = compare(results, args.expected, args.differences)

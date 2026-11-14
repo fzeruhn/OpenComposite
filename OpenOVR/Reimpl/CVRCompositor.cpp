@@ -34,13 +34,14 @@ using namespace vr;
 IVRCompositor_015::EVRCompositorError CVRCompositor_015::RequestScreenshot(EVRScreenshotType type,
     const char* pchDestinationFileName, const char* pchVRDestinationFileName)
 {
-
-	STUBBED();
+	// Screenshots go through IVRScreenshots in later SDKs; this old route takes none
+	OC_UNSUPPORTED(IVRCompositor_015::VRCompositorError_RequestFailed, "IVRCompositor_015::RequestScreenshot: no screenshots");
 }
 
 EVRScreenshotType CVRCompositor_015::GetCurrentScreenshotType()
 {
-	STUBBED();
+	// RequestScreenshot takes none, so none is in progress
+	return VRScreenshotType_None;
 }
 
 // Before IVRCompositor_017, Compositor_FrameTiming had other layouts than the one BaseCompositor fills, and a Linux

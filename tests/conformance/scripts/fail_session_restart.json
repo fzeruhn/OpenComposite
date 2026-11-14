@@ -1,0 +1,1 @@
+{ "#": "The runtime refuses the session for the game's own device (the second xrCreateSession): OpenComposite goes back to its temporary device and tells the game to quit (one VREvent_Quit); its calls keep working, and its Submits answer InvalidTexture", "fail": [{ "function": "xrCreateSession", "result": "XR_ERROR_GRAPHICS_DEVICE_INVALID", "after": 1, "count": 1 }] }

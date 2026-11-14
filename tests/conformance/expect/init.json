@@ -1,0 +1,89 @@
+{
+ "#": "App types, interface lookup and repeated Init (checked with run.py --expect)",
+ "init-matrix/Init(0)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(1)/-/-": {
+  "init_error": 0
+ },
+ "init-matrix/Init(2)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(3)/-/-": {
+  "init_error": 121
+ },
+ "init-matrix/Init(4)/-/-": {
+  "init_error": 0
+ },
+ "init-matrix/Init(5)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(6)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(7)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(8)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(9)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(10)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(11)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(12)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(13)/-/-": {
+  "init_error": 130
+ },
+ "init-matrix/Init(99)/-/-": {
+  "init_error": 130
+ },
+ "unknown-interface/IVRNope_001/-/-": {
+  "lookup_error": 105,
+  "found": false
+ },
+ "unknown-interface/IVRSystem_999/-/-": {
+  "lookup_error": 105,
+  "found": false
+ },
+ "unknown-interface/FnTable:IVRNope_001/-/-": {
+  "lookup_error": 105,
+  "found": false
+ },
+ "unknown-interface/FnTable:IVRSystem_022/-/-": {
+  "lookup_error": 0,
+  "found": true
+ },
+ "lookup-before-init/before Init: IVRSystem_022/-/-": {
+  "lookup_error": 109,
+  "found": false
+ },
+ "lookup-before-init/before Init: IVRApplications_008/-/-": {
+  "lookup_error": 109,
+  "found": false
+ },
+ "lookup-before-init/after Cleanup: IVRSystem_022/-/-": {
+  "lookup_error": 109,
+  "found": false
+ },
+ "init-repeat/200 rounds/-/-": {
+  "inits_ok": 200,
+  "interfaces_found": 200,
+  "status": "ok"
+ },
+ "init-other-thread/Init on another thread/-/-": {
+  "init_error": 0,
+  "status": "ok"
+ },
+ "init-other-thread/GetRecommendedRenderTargetSize on the main thread/-/-": {
+  "lookup_error": 0,
+  "status": "ok"
+ }
+}

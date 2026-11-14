@@ -1,0 +1,1 @@
+{ "#": "xrCreateInstance fails: Scene Init answers 124 (VRInitError_Init_Internal)", "fail": [{ "function": "xrCreateInstance", "result": "XR_ERROR_INITIALIZATION_FAILED", "count": 1000 }] }

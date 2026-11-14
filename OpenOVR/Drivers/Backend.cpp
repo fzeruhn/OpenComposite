@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include <chrono>
+
 #include "Backend.h"
 
 #include "Misc/Config.h"
@@ -26,9 +28,13 @@ BackendManager* BackendManager::InstancePtr()
 	return instance.get();
 }
 
+bool BackendManager::resetting = false;
+
 void BackendManager::Reset()
 {
+	resetting = true;
 	instance.reset();
+	resetting = false;
 }
 
 vr::TrackedDevicePose_t BackendManager::InvalidPose()
@@ -43,7 +49,9 @@ vr::TrackedDevicePose_t BackendManager::InvalidPose()
 float BackendManager::GetTimeInSeconds()
 {
 #ifdef OC_XR_PORT
-	XR_STUBBED();
+	// Seconds on a steady clock (only differences are used)
+	static const auto start = std::chrono::steady_clock::now();
+	return std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
 #else
 	return ovr_GetTimeInSeconds();
 #endif
@@ -78,6 +86,8 @@ void BackendManager::GetSinglePose(
     vr::TrackedDevicePose_t* pose,
     ETrackingStateType trackingState)
 {
+	if (!pose)
+		return;
 
 	std::shared_ptr<ITrackedDevice> dev = backend->GetDevice(index);
 
@@ -94,7 +104,8 @@ void BackendManager::GetDeviceToAbsoluteTrackingPose(
     vr::TrackedDevicePose_t* poseArray,
     uint32_t poseArrayCount)
 {
-
+	if (!poseArray)
+		return;
 	backend->GetDeviceToAbsoluteTrackingPose(toOrigin, predictedSecondsToPhotonsFromNow, poseArray, poseArrayCount);
 }
 
@@ -104,7 +115,7 @@ void BackendManager::WaitForTrackingData()
 	return backend->WaitForTrackingData();
 }
 
-void BackendManager::StoreEyeTexture(
+IBackend::openvr_enum_t BackendManager::StoreEyeTexture(
     vr::EVREye eye,
     const vr::Texture_t* texture,
     const vr::VRTextureBounds_t* bounds,
@@ -204,12 +215,15 @@ vr::TrackedDeviceIndex_t ITrackedDevice::DeviceIndex()
 
 void ITrackedDevice::InitialiseDevice(vr::TrackedDeviceIndex_t index)
 {
+	// Both can't happen (the backend numbers each device once): if they do, the first index stays
 	if (deviceIndex != vr::k_unTrackedDeviceIndexInvalid) {
-		OOVR_ABORTF("Cannot initialise tracked device twice - first with ID=%d, then with ID=%d", deviceIndex, index);
+		OOVR_LOGF("Cannot initialise tracked device twice - first with ID=%d, then with ID=%d", deviceIndex, index);
+		return;
 	}
 
 	if (index == vr::k_unTrackedDeviceIndexInvalid) {
-		OOVR_ABORT("Cannot initialise tracked device with ID k_unTrackedDeviceIndexInvalid");
+		OOVR_LOG("Cannot initialise tracked device with ID k_unTrackedDeviceIndexInvalid");
+		return;
 	}
 
 	deviceIndex = index;

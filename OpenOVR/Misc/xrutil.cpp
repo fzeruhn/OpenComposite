@@ -2,12 +2,15 @@
 
 #include "xrutil.h"
 
+#include <thread>
+
 #include "Drivers/Backend.h"
 #include "convert.h"
 #include "xr_ext.h"
 
 XrInstance xr_instance = XR_NULL_HANDLE;
-SessionWrapper xr_session;
+// Never destroyed: the backend's static destructor takes its lock when a game exits without VR_Shutdown
+SessionWrapper& xr_session = *new SessionWrapper();
 XrSystemId xr_system = XR_NULL_SYSTEM_ID;
 XrViewConfigurationView xr_main_views[XruEyeCount] = {};
 XrSessionGlobals* xr_gbl = nullptr;
@@ -17,8 +20,17 @@ XrExt* xr_ext = nullptr;
 std::vector<XrViewConfigurationView> xr_views_list{};
 XrViewConfigurationView& xr_main_view(XruEye view_id)
 {
-	if (xr_views_list.empty()) {
-		OOVR_ABORT("Cannot call xr_main_view before any views have been configured");
+	if (xr_views_list.size() < XruEyeCount || view_id < 0 || view_id >= XruEyeCount) {
+		// Before OpenXR has started (or without a stereo headset): a plausible default view, so sizes aren't zero
+		static XrViewConfigurationView fallback = [] {
+			XrViewConfigurationView v{ XR_TYPE_VIEW_CONFIGURATION_VIEW };
+			v.recommendedImageRectWidth = v.maxImageRectWidth = 1920;
+			v.recommendedImageRectHeight = v.maxImageRectHeight = 1920;
+			v.recommendedSwapchainSampleCount = v.maxSwapchainSampleCount = 1;
+			return v;
+		}();
+		OOVR_LOG_ONCE("xr_main_view before OpenXR has views: using 1920x1920");
+		return fallback;
 	}
 
 	return xr_views_list.at(view_id);
@@ -120,19 +132,25 @@ XrSessionGlobals::XrSessionGlobals()
 	spaceInfo.poseInReferenceSpace.position = G2X_v3f(glm::vec3());
 	spaceInfo.poseInReferenceSpace.orientation = G2X_quat(glm::identity<glm::quat>());
 
-	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
-	OOVR_FAILED_XR_ABORT(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &floorSpace));
-
+	// A space the runtime won't give stays XR_NULL_HANDLE: poses in it are then invalid, nothing ends.
+	// A runtime without a stage (some seated-only ones) gets the local space for standing too.
 	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
-	OOVR_FAILED_XR_ABORT(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &seatedSpace));
+	OC_XR_LOG(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &seatedSpace));
+
+	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+	if (XR_FAILED(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &floorSpace))) {
+		OOVR_LOG("No stage space from the runtime: standing poses use the local space");
+		spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+		OC_XR_LOG(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &floorSpace));
+	}
 
 	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-	OOVR_FAILED_XR_ABORT(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &viewSpace));
+	OC_XR_LOG(xrCreateReferenceSpace(xr_session.get(), &spaceInfo, &viewSpace));
 
 	// Read the system properties, including those for hand-tracking
 	if (xr_ext->handTrackingExtensionAvailable())
 		systemProperties.next = &handTrackingProperties;
-	OOVR_FAILED_XR_ABORT(xrGetSystemProperties(xr_instance, xr_system, &systemProperties));
+	OC_XR_LOG(xrGetSystemProperties(xr_instance, xr_system, &systemProperties));
 }
 
 XrTime XrSessionGlobals::GetBestTime()
@@ -172,20 +190,27 @@ void XrSessionGlobals::ClearCachedViews()
 
 XrSpace xr_space_from_tracking_origin(vr::ETrackingUniverseOrigin origin)
 {
+	if (!xr_gbl)
+		return XR_NULL_HANDLE;
 	switch (origin) {
 	case vr::TrackingUniverseSeated:
 		return xr_gbl->seatedSpace;
 	case vr::TrackingUniverseStanding:
 		return xr_gbl->floorSpace;
 	case vr::TrackingUniverseRawAndUncalibrated:
-		OOVR_ABORT("Tracking origin TrackingUniverseRawAndUncalibrated not supported");
+		// OpenXR has no raw tracking space; the stage is the nearest (it's what SteamVR's raw space is calibrated to)
+		OOVR_LOG_ONCE("Tracking origin TrackingUniverseRawAndUncalibrated: using the standing space");
+		return xr_gbl->floorSpace;
 	default:
-		OOVR_ABORTF("Unknown ETrackingUniverseOrigin type %d", origin);
+		OOVR_LOGF("Unknown ETrackingUniverseOrigin type %d: using the standing space", origin);
+		return xr_gbl->floorSpace;
 	}
 }
 
 XrSpace xr_space_from_ref_space_type(XrReferenceSpaceType spaceType)
 {
+	if (!xr_gbl)
+		return XR_NULL_HANDLE;
 	switch (spaceType) {
 	case XR_REFERENCE_SPACE_TYPE_VIEW:
 		return xr_gbl->viewSpace;
@@ -195,7 +220,8 @@ XrSpace xr_space_from_ref_space_type(XrReferenceSpaceType spaceType)
 	case XR_REFERENCE_SPACE_TYPE_STAGE:
 		return xr_gbl->floorSpace;
 	default:
-		OOVR_ABORTF("Unknown XrReferenceSpaceType type %d", spaceType);
+		OOVR_LOGF("Unknown XrReferenceSpaceType type %d: using the stage", spaceType);
+		return xr_gbl->floorSpace;
 	}
 }
 
@@ -261,6 +287,11 @@ SessionLock SessionWrapper::lock()
 	return SessionLock(*this, true);
 }
 
+SessionLock SessionWrapper::lock_for_teardown(std::chrono::milliseconds limit)
+{
+	return SessionLock(*this, limit);
+}
+
 void SessionWrapper::reset()
 {
 	session = XR_NULL_HANDLE;
@@ -269,21 +300,51 @@ void SessionWrapper::reset()
 SessionLock::SessionLock(SessionWrapper& p, bool exclusive)
     : parent(p)
 {
-	if (!thread_owns_lock) {
+	if (thread_lock == Held::Unlocked) {
 		if (exclusive)
 			lock = std::unique_lock(p.mutex);
 		else
 			shared_lock = std::shared_lock(p.mutex);
 
-		thread_owns_lock = true;
+		thread_lock = exclusive ? Held::Exclusive : Held::Shared;
 		owner = true;
+	} else if (exclusive && thread_lock == Held::Shared) {
+		// The outer SessionLock still owns this thread's shared hold, so the raw mutex is released here and taken back
+		// in the destructor. Releasing it before waiting lets two threads upgrading at once both get through.
+		p.mutex.unlock_shared();
+		lock = std::unique_lock(p.mutex);
+		thread_lock = Held::Exclusive;
+		upgraded = true;
 	}
+}
+
+SessionLock::SessionLock(SessionWrapper& p, std::chrono::milliseconds limit)
+    : parent(p)
+{
+	if (thread_lock != Held::Unlocked)
+		return; // this thread holds it already
+	auto deadline = std::chrono::steady_clock::now() + limit;
+	while (!p.mutex.try_lock()) {
+		if (std::chrono::steady_clock::now() >= deadline) {
+			OOVR_LOG("The session lock wasn't free in time: tearing the session down without it");
+			return;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	lock = std::unique_lock(p.mutex, std::adopt_lock);
+	thread_lock = Held::Exclusive;
+	owner = true;
 }
 
 SessionLock::~SessionLock()
 {
-	if (owner)
-		thread_owns_lock = false;
+	if (upgraded) {
+		lock.unlock();
+		parent.mutex.lock_shared();
+		thread_lock = Held::Shared;
+	} else if (owner) {
+		thread_lock = Held::Unlocked;
+	}
 }
 
 SessionLock::operator XrSession&() { return parent.session; }

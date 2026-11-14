@@ -1,0 +1,1 @@
+{ "#": "xrWaitSwapchainImage times out once (XR_TIMEOUT_EXPIRED, at call 21): that image is waited on again at the next Submit, never left acquired", "fail": [{ "function": "xrWaitSwapchainImage", "result": "XR_TIMEOUT_EXPIRED", "after": 20, "count": 1 }] }

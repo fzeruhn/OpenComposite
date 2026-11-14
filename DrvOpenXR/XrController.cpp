@@ -143,7 +143,9 @@ uint32_t XrController::GetStringTrackedDeviceProperty(vr::ETrackedDeviceProperty
 		PROP(vr::Prop_RenderModelName_String, "renderObject0");
 		break;
 	default:
-		OOVR_ABORTF("Invalid controller type %d", type);
+		// A controller type OpenComposite doesn't know: the generic properties only
+		OOVR_LOG_ONCE("GetStringTrackedDeviceProperty: unknown controller type");
+		break;
 	}
 
 	return XrTrackedDevice::GetStringTrackedDeviceProperty(prop, value, bufferSize, pErrorL);
@@ -205,7 +207,7 @@ void XrController::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevice
 
 void XrController::GetPoseFromHandTracking(BaseInput* input, vr::TrackedDevicePose_t* pose)
 {
-	if (!xr_gbl->handTrackingProperties.supportsHandTracking)
+	if (!xr_gbl || !xr_gbl->handTrackingProperties.supportsHandTracking)
 		return;
 
 	if (!input->handTrackers[(int)GetHand()])
@@ -226,7 +228,9 @@ void XrController::GetPoseFromHandTracking(BaseInput* input, vr::TrackedDevicePo
 	locations.jointLocations = jointLocations.data();
 	locations.next = &velocities;
 
-	OOVR_FAILED_XR_ABORT(xr_ext->xrLocateHandJointsEXT(input->handTrackers[(int)GetHand()], &locateInfo, &locations));
+	// On failure the pose stays as it was (the controller's), so the hand doesn't jump
+	if (XR_FAILED(xr_ext->xrLocateHandJointsEXT(input->handTrackers[(int)GetHand()], &locateInfo, &locations)))
+		return;
 
 	xr_utils::PoseFromHandTracking(pose, locations, velocities, GetHand() == HAND_RIGHT);
 }

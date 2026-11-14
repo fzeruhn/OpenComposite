@@ -119,9 +119,10 @@ that, then it looks in the working directory (usually in the same folder as the 
 the default values are used.
 
 This is it's configuration file, where you can specify a number of options. These are listed in `name=value` format, and you
-can define a comment by starting a line with `;` or a `#`. Note the option names **are** case sensitive. If you specify an invalid
-option, the game will immediately crash on startup. Any whitespace between the name, equals sign, and value is ignored, as is whitespace
-on the end of the line. Ensure your lines do not being with whitespace however.
+can define a comment by starting a line with `;` or a `#`. Note the option names **are** case sensitive. An option OpenComposite
+doesn't know, or a value it can't read, is logged as a warning (in `opencomposite.log`) and that option keeps its default; the game
+starts either way. Any whitespace between the name, equals sign, and value is ignored, as is whitespace on the end of the line.
+Ensure your lines do not being with whitespace however.
 
 The available options are:
 
@@ -138,7 +139,7 @@ The available options are:
 * `logGetTrackedProperty` - boolean, default `disabled`. 
 	* Print logging information when the app requests information about tracked devices, such as the HMD or the Touch controllers. On some games, this causes a log entry to be generated every frame, which isn't great for performance and clutters up the log. This is potentially useful for troubleshooting, and was enabled by default before the config option existed. In general, unless you've been told to enable this (or you know what you're doing while troubleshooting) you don't need to enable this.
 * `stopOnSoftAbort` - boolean, default `disabled`.
-    * Crashes the game whenever OpenComposite reaches a soft abort. Currently games can cause OpenComposite to hit a soft abort for a lot of trivial reasons, so you probably shouldn't enable this. 
+    * Ends the game at the first call OpenComposite can't answer properly, as it used to. By default such a call gets an error or an empty answer and the game goes on; each one is logged the first time, and when the game shuts OpenVR down the log ends with a compatibility summary (`OpenComposite compatibility summary: <n> unsupported calls in <m> places`, then each place with how often it was hit). That list is what's worth reporting when a game misbehaves. Only enable this to find where a game first goes wrong.
 * `dx10Mode` - booelan, default `disabled`.
     * Use DX10 instead of DX11 for games submitting DirectX textures.
 * `enableHiddenMeshFix` - boolean, default `enabled`. 

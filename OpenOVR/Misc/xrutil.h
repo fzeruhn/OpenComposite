@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 #include "generated/interfaces/vrtypes.h"
 #include <array>
 #include <mutex>
@@ -50,9 +52,9 @@ class XrSessionGlobals {
 public:
 	XrSessionGlobals();
 
-	XrSpace floorSpace;
-	XrSpace seatedSpace;
-	XrSpace viewSpace;
+	XrSpace floorSpace = XR_NULL_HANDLE;
+	XrSpace seatedSpace = XR_NULL_HANDLE;
+	XrSpace viewSpace = XR_NULL_HANDLE;
 
 	XrSystemProperties systemProperties = { XR_TYPE_SYSTEM_PROPERTIES };
 	XrSystemHandTrackingPropertiesEXT handTrackingProperties = { XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT };
@@ -121,6 +123,13 @@ public:
 	[[nodiscard]] SessionLock lock_shared();
 
 	/*
+	 * The exclusive lock for tearing down, waiting at most limit: when a game exits without VR_Shutdown, Windows has
+	 * already ended its other threads, and one may have died holding the lock. Without it, carries on unlocked.
+	 * A thread that holds the lock already (shared or exclusive) gets nothing more: no upgrade, unlike lock().
+	 */
+	[[nodiscard]] SessionLock lock_for_teardown(std::chrono::milliseconds limit);
+
+	/*
 	 * Resets the underlying XrSession to XR_NULL_HANDLE. Does not actually call xrDestroySession.
 	 */
 	void reset();
@@ -129,15 +138,22 @@ public:
 // This class is to prevent having to litter mutexes everywhere.
 // It gets a shared_lock or lock on the session mutex and the mutex gets unlocked (on destruction)
 // after whatever function call needs the session completes.
+// A request on a thread that already holds the lock is a no-op, except an exclusive request under a shared hold: that
+// releases the shared hold, waits for the exclusive lock, and takes the shared lock back when it ends. Whatever the
+// outer holder read from the session before may have been replaced by then.
 class SessionLock {
+	enum class Held { Unlocked, Shared, Exclusive };
+
 	std::shared_lock<std::shared_mutex> shared_lock;
 	std::unique_lock<std::shared_mutex> lock;
 	SessionWrapper& parent;
 	bool owner = false;
-	inline static thread_local bool thread_owns_lock = false;
+	bool upgraded = false;
+	inline static thread_local Held thread_lock = Held::Unlocked;
 
 public:
 	SessionLock(SessionWrapper& p, bool exclusive);
+	SessionLock(SessionWrapper& p, std::chrono::milliseconds limit);
 	~SessionLock();
 	operator XrSession&();
 };
@@ -149,7 +165,7 @@ XrQuaternionf yRotation(XrQuaternionf& q, XrQuaternionf& r);
 void rotate_vector_by_quaternion(const XrVector3f& v, const XrQuaternionf& q, XrVector3f& vprime);
 
 extern XrInstance xr_instance;
-extern SessionWrapper xr_session;
+extern SessionWrapper& xr_session;
 extern XrSystemId xr_system;
 XrViewConfigurationView& xr_main_view(XruEye view_id);
 extern XrSessionGlobals* xr_gbl;

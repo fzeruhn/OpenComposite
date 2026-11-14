@@ -30,6 +30,7 @@ using glm::vec4;
 
 #include "BaseClientCore.h"
 #include "Drivers/Backend.h"
+#include "Misc/Process.h"
 #include "Misc/ScopeGuard.h"
 
 using namespace vr;
@@ -54,12 +55,12 @@ void BaseCompositor::SetTrackingSpace(ETrackingUniverseOrigin eOrigin)
 		origin = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	}
 
-	GetUnsafeBaseSystem()->currentSpace = origin;
+	BaseSystem::currentSpace = origin;
 }
 
 ETrackingUniverseOrigin BaseCompositor::GetTrackingSpace()
 {
-	if (GetUnsafeBaseSystem()->currentSpace == XR_REFERENCE_SPACE_TYPE_LOCAL) {
+	if (BaseSystem::currentSpace == XR_REFERENCE_SPACE_TYPE_LOCAL) {
 		return TrackingUniverseSeated;
 	} else {
 		return TrackingUniverseStanding;
@@ -211,7 +212,7 @@ std::unique_ptr<Compositor> BaseCompositor::CreateCompositorAPI(const vr::Textur
 		dxcomp = (DX11Compositor*)comp;
 #else
 		else
-			STUBBED();
+			OOVR_LOG_ONCE("D3D10 textures aren't supported in the OpenXR port yet: no compositor");
 #endif
 
 		break;
@@ -230,8 +231,9 @@ std::unique_ptr<Compositor> BaseCompositor::CreateCompositorAPI(const vr::Textur
 	}
 #endif
 	default:
-		string err = "[BaseCompositor::Submit] Unsupported texture type: " + to_string(texture->eType);
-		OOVR_ABORT(err.c_str());
+		// No compositor: the eye is left out, and Submit answers an error
+		OOVR_LOG_ONCEF("[BaseCompositor::Submit] Unsupported texture type: %d", (int)texture->eType);
+		break;
 	}
 
 	return comp;
@@ -240,10 +242,15 @@ std::unique_ptr<Compositor> BaseCompositor::CreateCompositorAPI(const vr::Textur
 ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VRTextureBounds_t* bounds, EVRSubmitFlags submitFlags)
 {
 	if (BaseClientCore::appType == vr::VRApplication_Background) {
-		OOVR_ABORT("Error - application with type VRApplication_Background should not be submitting!");
+		// As SteamVR answers a Background app that submits
+		OOVR_LOG_ONCE("A VRApplication_Background app is submitting frames: refused");
+		return VRCompositorError_IsNotSceneApplication;
 	}
+	if (!texture || (eye != Eye_Left && eye != Eye_Right))
+		return VRCompositorError_InvalidTexture;
 
 	bool isFirstEye = !leftEyeSubmitted && !rightEyeSubmitted;
+	ovr_enum_t result = VRCompositorError_None;
 
 	bool eyeState = false;
 	if (eye == Eye_Left)
@@ -252,7 +259,9 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 		eyeState = rightEyeSubmitted;
 
 	if (eyeState) {
-		OOVR_ABORT("Eye already submitted!");
+		// The first texture for this eye stays
+		OOVR_LOG_ONCE("An eye was submitted twice in one frame: the second is refused");
+		return VRCompositorError_AlreadySubmitted;
 	}
 
 	if (eye == Eye_Left)
@@ -268,7 +277,11 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 	if (isFirstEye) {
 		isNullRender = textureNull;
 	} else if (textureNull != isNullRender) {
-		OOVR_ABORT("Cannot mismatch first and second eye renders");
+		// One eye null and the other not: this frame isn't submitted, and the next starts afresh
+		OOVR_LOG_ONCE("One eye's texture is null and the other's isn't: that frame is dropped");
+		leftEyeSubmitted = false;
+		rightEyeSubmitted = false;
+		return VRCompositorError_InvalidTexture;
 	}
 
 	{
@@ -276,7 +289,7 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 		// while they're in the middle of submitting a frame.
 		auto lock = xr_session.lock_shared();
 		if (!textureNull)
-			BackendManager::Instance().StoreEyeTexture(eye, texture, bounds, submitFlags, isFirstEye);
+			result = (ovr_enum_t)BackendManager::Instance().StoreEyeTexture(eye, texture, bounds, submitFlags, isFirstEye);
 
 		if (leftEyeSubmitted && rightEyeSubmitted) {
 			if (!isNullRender)
@@ -287,12 +300,18 @@ ovr_enum_t BaseCompositor::Submit(EVREye eye, const Texture_t* texture, const VR
 		}
 	}
 
-	return VRCompositorError_None;
+	return result;
 }
 
 ovr_enum_t BaseCompositor::SubmitWithArrayIndex(vr::EVREye eye, const vr::Texture_t* texture, uint32_t idx, const vr::VRTextureBounds_t* bounds, vr::EVRSubmitFlags submitFlags)
 {
-	return Submit(eye, &texture[idx], bounds, submitFlags);
+	// The texture is one array texture, and idx its slice (not an index into an array of Texture_t); slices beyond
+	// the first aren't supported yet, so the texture is submitted whole
+	if (!texture)
+		return VRCompositorError_InvalidTexture;
+	if (idx != 0)
+		OOVR_LOG_ONCE("SubmitWithArrayIndex: only slice 0 of array textures is used");
+	return Submit(eye, texture, bounds, submitFlags);
 }
 
 void BaseCompositor::ClearLastSubmittedFrame()
@@ -313,6 +332,8 @@ void BaseCompositor::PostPresentHandoff()
 	// calls PostPresentHandOff to signal that all data is submitted and compositor can start work. Mimick this by
 	// calling SubmitFrames with a flag to say it is called from this function.
 
+	// As in Submit: the session isn't restarted while the frame is ended
+	auto lock = xr_session.lock_shared();
 	BackendManager::Instance().SubmitFrames(isInSkybox, true);
 }
 
@@ -350,12 +371,20 @@ uint32_t BaseCompositor::GetFrameTimings(vr::Compositor_FrameTiming* pTiming, ui
 
 float BaseCompositor::GetFrameTimeRemaining()
 {
-	STUBBED();
+	// OpenXR doesn't say how long is left before the compositor needs the frame
+	return 0.0f;
 }
 
 void BaseCompositor::GetCumulativeStats(OOVR_Compositor_CumulativeStats* pStats, uint32_t nStatsSizeInBytes)
 {
-	STUBBED();
+	if (!pStats || nStatsSizeInBytes == 0)
+		return;
+	// Zeroed within the size the app gave (older SDKs have a shorter struct), with this process's id
+	size_t size = std::min<size_t>(nStatsSizeInBytes, sizeof(OOVR_Compositor_CumulativeStats));
+	memset(pStats, 0, size);
+	if (size >= sizeof(uint32_t))
+		pStats->m_nPid = oc_current_pid();
+	OC_UNSUPPORTED_VOID("GetCumulativeStats: no frame statistics, all zero");
 }
 
 void BaseCompositor::FadeToColor(float fSeconds, float fRed, float fGreen, float fBlue, float fAlpha, bool bBackground)
@@ -407,27 +436,28 @@ void BaseCompositor::CompositorBringToFront()
 
 void BaseCompositor::CompositorGoToBack()
 {
-	STUBBED();
+	// The OpenXR runtime's compositor owns the headset; there's nothing to send back
 }
 
 void BaseCompositor::CompositorQuit()
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("CompositorQuit: the OpenXR runtime's compositor isn't ours to quit");
 }
 
 bool BaseCompositor::IsFullscreen()
 {
-	STUBBED();
+	// Direct mode, as SteamVR's compositor
+	return true;
 }
 
 uint32_t BaseCompositor::GetCurrentSceneFocusProcess()
 {
-	STUBBED();
+	return oc_current_pid();
 }
 
 uint32_t BaseCompositor::GetLastFrameRenderer()
 {
-	STUBBED();
+	return oc_current_pid();
 }
 
 bool BaseCompositor::CanRenderScene()
@@ -437,22 +467,22 @@ bool BaseCompositor::CanRenderScene()
 
 void BaseCompositor::ShowMirrorWindow()
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("ShowMirrorWindow: no mirror window (the OpenXR runtime may have its own)");
 }
 
 void BaseCompositor::HideMirrorWindow()
 {
-	STUBBED();
+	// There's no mirror window to hide
 }
 
 bool BaseCompositor::IsMirrorWindowVisible()
 {
-	STUBBED();
+	return false;
 }
 
 void BaseCompositor::CompositorDumpImages()
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("CompositorDumpImages: not supported");
 }
 
 bool BaseCompositor::ShouldAppRenderWithLowResources()
@@ -484,7 +514,9 @@ ovr_enum_t BaseCompositor::GetMirrorTextureD3D11(EVREye eEye, void* pD3D11Device
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
 	return BackendManager::Instance().GetMirrorTextureD3D11(eEye, pD3D11DeviceOrResource, ppD3D11ShaderResourceView);
 #else
-	OOVR_ABORT("Cannot get D3D mirror texture - D3D support disabled");
+	if (ppD3D11ShaderResourceView)
+		*ppD3D11ShaderResourceView = nullptr;
+	OC_UNSUPPORTED(VRCompositorError_RequestFailed, "GetMirrorTextureD3D11: this build has no D3D11 support");
 #endif
 }
 
@@ -493,50 +525,65 @@ void BaseCompositor::ReleaseMirrorTextureD3D11(void* pD3D11ShaderResourceView)
 #if defined(SUPPORT_DX) && defined(SUPPORT_DX11)
 	return BackendManager::Instance().ReleaseMirrorTextureD3D11(pD3D11ShaderResourceView);
 #else
-	OOVR_ABORT("Cannot get D3D mirror texture - D3D support disabled");
+	// GetMirrorTextureD3D11 handed nothing out in this build
 #endif
 }
 
 ovr_enum_t BaseCompositor::GetMirrorTextureGL(EVREye eEye, glUInt_t* pglTextureId, glSharedTextureHandle_t* pglSharedTextureHandle)
 {
-	STUBBED();
+	if (pglTextureId)
+		*pglTextureId = 0;
+	if (pglSharedTextureHandle)
+		*pglSharedTextureHandle = nullptr;
+	OC_UNSUPPORTED(VRCompositorError_RequestFailed, "GetMirrorTextureGL: no OpenGL mirror texture");
 }
 
 bool BaseCompositor::ReleaseSharedGLTexture(glUInt_t glTextureId, glSharedTextureHandle_t glSharedTextureHandle)
 {
-	STUBBED();
+	// GetMirrorTextureGL hands nothing out
+	return false;
 }
 
 void BaseCompositor::LockGLSharedTextureForAccess(glSharedTextureHandle_t glSharedTextureHandle)
 {
-	STUBBED();
+	// GetMirrorTextureGL hands nothing out, so there's nothing to lock
 }
 
 void BaseCompositor::UnlockGLSharedTextureForAccess(glSharedTextureHandle_t glSharedTextureHandle)
 {
-	STUBBED();
+	// GetMirrorTextureGL hands nothing out, so there's nothing to unlock
 }
 
 uint32_t BaseCompositor::GetVulkanInstanceExtensionsRequired(char* pchValue, uint32_t unBufferSize)
 {
+	if (pchValue && unBufferSize)
+		pchValue[0] = 0;
 #if defined(SUPPORT_VK)
 	// Whaddya know, the OpenXR, Oculus and Valve methods work almost identically...
-	uint32_t size;
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanInstanceExtensionsKHR(xr_instance, xr_system, unBufferSize, &size, pchValue));
+	uint32_t size = 0;
+	XrResult res = xr_ext->xrGetVulkanInstanceExtensionsKHR(xr_instance, xr_system, unBufferSize, &size, pchValue);
+	if (res == XR_ERROR_SIZE_INSUFFICIENT)
+		return size; // the size needed, as SteamVR answers a buffer too small
+	OC_XR_SOFT(res, 0);
 	return size;
 #else
-	OOVR_ABORT("Vulkan support disabled");
+	OC_UNSUPPORTED(0, "GetVulkanInstanceExtensionsRequired: this build has no Vulkan support");
 #endif
 }
 
 uint32_t BaseCompositor::GetVulkanDeviceExtensionsRequired(VkPhysicalDevice_T* pPhysicalDevice, char* pchValue, uint32_t unBufferSize)
 {
+	if (pchValue && unBufferSize)
+		pchValue[0] = 0;
 #if defined(SUPPORT_VK)
-	uint32_t size;
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVulkanDeviceExtensionsKHR(xr_instance, xr_system, unBufferSize, &size, pchValue));
+	uint32_t size = 0;
+	XrResult res = xr_ext->xrGetVulkanDeviceExtensionsKHR(xr_instance, xr_system, unBufferSize, &size, pchValue);
+	if (res == XR_ERROR_SIZE_INSUFFICIENT)
+		return size; // the size needed, as SteamVR answers a buffer too small
+	OC_XR_SOFT(res, 0);
 	return size;
 #else
-	OOVR_ABORT("Vulkan support disabled");
+	OC_UNSUPPORTED(0, "GetVulkanDeviceExtensionsRequired: this build has no Vulkan support");
 #endif
 }
 
@@ -557,12 +604,12 @@ ovr_enum_t BaseCompositor::SubmitExplicitTimingData()
 
 bool BaseCompositor::IsMotionSmoothingSupported()
 {
-	STUBBED();
+	return false;
 }
 
 bool BaseCompositor::IsMotionSmoothingEnabled()
 {
-	STUBBED();
+	return false;
 }
 
 bool BaseCompositor::IsCurrentSceneFocusAppLoading()
@@ -600,7 +647,10 @@ ovr_enum_t BaseCompositor::GetLastPosePredictionIDs(uint32_t* pRenderPosePredict
 
 ovr_enum_t BaseCompositor::GetPosesForFrame(uint32_t unPosePredictionID, TrackedDevicePose_t* pPoseArray, uint32_t unPoseArrayCount)
 {
-	STUBBED();
+	// Pose prediction ids are always 0 (GetLastPosePredictionIDs), so there's no earlier frame's poses to give
+	if (pPoseArray)
+		memset(pPoseArray, 0, sizeof(TrackedDevicePose_t) * unPoseArrayCount);
+	OC_UNSUPPORTED(VRCompositorError_RequestFailed, "GetPosesForFrame: no pose prediction ids");
 }
 
 ovr_enum_t BaseCompositor::GetSubmitTexture(Texture_t* pOutTexture, bool* pNeedsFlush, OOVR_EVRCompositorTextureUsage eUsage,

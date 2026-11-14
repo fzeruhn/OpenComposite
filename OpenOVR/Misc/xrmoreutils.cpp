@@ -10,6 +10,14 @@
 bool xr_utils::PoseFromSpace(vr::TrackedDevicePose_t* pose, XrSpace space, vr::ETrackingUniverseOrigin origin,
     std::optional<glm::mat4> extraTransform)
 {
+	if (!xr_gbl) {
+		// No session: no pose
+		if (pose) {
+			*pose = {};
+			pose->eTrackingResult = vr::TrackingResult_Uninitialized;
+		}
+		return false;
+	}
 	auto baseSpace = xr_space_from_tracking_origin(origin);
 
 	XrSpaceVelocity velocity{ XR_TYPE_SPACE_VELOCITY };

@@ -3,6 +3,7 @@
 //
 
 #include "XrHMD.h"
+#include "XrBackend.h"
 
 #include "../OpenOVR/Misc/Config.h"
 #include "../OpenOVR/Misc/xrmoreutils.h"
@@ -13,10 +14,29 @@
 #include <thread>
 #include <mutex>
 
+// The session globals are briefly null while another thread restarts the session: wait up to 2 s for them. False if
+// there's still no session (it was lost, or a restart failed), so the caller answers without one.
+static bool WaitForSessionGlobals()
+{
+	// A lost session doesn't come back: no waiting for it
+	auto IsLost = []() {
+		BackendManager* manager = BackendManager::InstancePtr();
+		auto* backend = manager ? (XrBackend*)manager->GetBackendInstance() : nullptr;
+		return backend && backend->IsSessionLost();
+	};
+	for (int i = 0; !xr_gbl && !IsLost() && i < 100; i++) {
+		using namespace std::chrono_literals;
+		std::this_thread::sleep_for(20ms);
+	}
+	return xr_gbl != nullptr;
+}
+
 void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 {
-	*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * oovr_global_configuration.SupersampleRatio());
-	*height = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectHeight * oovr_global_configuration.SupersampleRatio());
+	if (width)
+		*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * oovr_global_configuration.SupersampleRatio());
+	if (height)
+		*height = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectHeight * oovr_global_configuration.SupersampleRatio());
 }
 
 // from BaseSystem
@@ -26,9 +46,15 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 	if (eEye < 0 || (int)eEye >= 2)
 		eEye = vr::Eye_Left;
 
+	if (!xr_gbl)
+		return O2S_m4(glm::mat4(1.0f));
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->seatedSpace);
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
-	OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
+	if (cachedViews.viewCount != XruEyeCount) {
+		// No views from the runtime (yet): an identity projection rather than an end
+		OOVR_LOG_ONCE("GetProjectionMatrix: the OpenXR runtime gave no views, answering identity");
+		return O2S_m4(glm::mat4(1.0f));
+	}
 
 	// Build the projection matrix
 	// It looks like there aren't any functions in glm that can take different l/r/t/b FOV values, so do it ourselves
@@ -36,7 +62,6 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 	// vector) and then transpose it back to being a column-major vector.
 	const XrFovf& fov = views[eEye].fov;
 
-	float twoNear = fNearZ * 2;
 	float tanL = tanf(fov.angleLeft);
 	float tanR = tanf(fov.angleRight);
 	float tanU = tanf(fov.angleUp);
@@ -60,15 +85,12 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 
 		// Don't transpose, since D3D uses row-major matricies anyway.
 	} else {
-		// FIXME this transform is almost certainly wrong
-		m[0] = glm::vec4(twoNear / horizontalFov, 0, (tanL + tanR) / horizontalFov, 0); // First row, determines X out multiplication with vector
-		m[1] = glm::vec4(0, twoNear / horizontalFov, (tanU + tanD) / verticalFov, 0); // Determines Y
+		// The same off-axis frustum as above (OpenVR's matrices are row-major for every API), with OpenGL's
+		// -1..1 depth range: glFrustum with l, r, t, b = near * tan(angle)
+		m[0] = glm::vec4(2 / horizontalFov, 0, (tanL + tanR) / horizontalFov, 0); // First row, determines X
+		m[1] = glm::vec4(0, 2 / verticalFov, (tanU + tanD) / verticalFov, 0); // Determines Y
 		m[2] = glm::vec4(0, 0, -(fNearZ + fFarZ) / (fFarZ - fNearZ), -(2 * fNearZ * fFarZ) / (fFarZ - fNearZ)); // Determines Z
 		m[3] = glm::vec4(0, 0, -1, 0); // Determines W
-
-		m = glm::transpose(m);
-
-		STUBBED(); // TODO make sure the OpenGL transform matrix is correct
 	}
 
 	return O2S_m4(m);
@@ -81,9 +103,22 @@ void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, flo
 		eEye = vr::Eye_Left;
 
 	// TODO deduplicate with GetProjectionMatrix
-	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->seatedSpace);
+	static const XruCachedViews noViews{};
+	const XruCachedViews& cachedViews = xr_gbl ? xr_gbl->GetCachedViews(xr_gbl->seatedSpace) : noViews;
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
-	OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
+	if (cachedViews.viewCount != XruEyeCount) {
+		// No views from the runtime (yet): a 90 degree view rather than an end
+		OOVR_LOG_ONCE("GetProjectionRaw: the OpenXR runtime gave no views, answering 90 degrees");
+		if (pfLeft)
+			*pfLeft = -1;
+		if (pfRight)
+			*pfRight = 1;
+		if (pfTop)
+			*pfTop = -1;
+		if (pfBottom)
+			*pfBottom = 1;
+		return;
+	}
 
 	const XrFovf& fov = views[eEye].fov;
 
@@ -112,10 +147,14 @@ void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, flo
 	if (fov.angleDown == 0.0f && fov.angleUp == 0.0f)
 		OOVR_LOG("Warning! FOV is 0");
 
-	*pfTop = tanf(fov.angleDown);
-	*pfBottom = tanf(fov.angleUp);
-	*pfLeft = tanf(fov.angleLeft);
-	*pfRight = tanf(fov.angleRight);
+	if (pfTop)
+		*pfTop = tanf(fov.angleDown);
+	if (pfBottom)
+		*pfBottom = tanf(fov.angleUp);
+	if (pfLeft)
+		*pfLeft = tanf(fov.angleLeft);
+	if (pfRight)
+		*pfRight = tanf(fov.angleRight);
 }
 
 bool XrHMD::ComputeDistortion(vr::EVREye eEye, float fU, float fV, vr::DistortionCoordinates_t* pDistortionCoordinates)
@@ -129,10 +168,8 @@ vr::HmdMatrix34_t XrHMD::GetEyeToHeadTransform(vr::EVREye eEye)
 	static XrTime time = ~0; // Don't set to zero by default, otherwise we'll return an identity matrix before the first frame
 	static XrView views[XruEyeCount] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
 
-	while (!xr_gbl) {
-		using namespace std::chrono_literals;
-		std::this_thread::sleep_for(20ms);
-	}
+	if (!WaitForSessionGlobals())
+		return G2S_m34(glm::identity<glm::mat4>()); // no session: the eyes at the head
 
 	// This won't exactly work for HMDs designed for spiders, but it's how SteamVR handles invalid eye numbers.
 	if (eEye < 0 || (int)eEye >= 2)
@@ -141,8 +178,9 @@ vr::HmdMatrix34_t XrHMD::GetEyeToHeadTransform(vr::EVREye eEye)
 	if (time != xr_gbl->GetBestTime()) {
 		const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->viewSpace);
 		const XrViewState& viewState = cachedViews.viewState;
-		if (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) {
-			OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
+		// Without both views the last ones stay
+		if (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT
+		    && cachedViews.viewCount == XruEyeCount) {
 			views[0] = cachedViews.views[0];
 			views[1] = cachedViews.views[1];
 			time = xr_gbl->GetBestTime();
@@ -183,7 +221,8 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 		xrType = XR_VISIBILITY_MASK_TYPE_LINE_LOOP_KHR;
 		break;
 	default:
-		OOVR_ABORTF("Invalid vr::EHiddenAreaMeshType value %d", type);
+		// As SteamVR answers a mesh type it doesn't know: no mesh
+		return vr::HiddenAreaMesh_t{ nullptr, 0 };
 	}
 
 	// Note: the OpenXR and OpenVR eye indexes are the same, so we can just cast between them.
@@ -192,9 +231,11 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 	// First find out what size we need to allocate
 	// Note that this doesn't return XR_ERROR_SIZE_INSUFFICIENT, since setting one of the input counts to zero is special-cased
 	XrVisibilityMaskKHR mask = { XR_TYPE_VISIBILITY_MASK_KHR };
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask));
-
-	// TODO handle cases where a mask isn't available
+	if (eye >= XruEyeCount || !xr_session.get() || XR_FAILED(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask))
+	    || mask.indexCountOutput == 0) {
+		// No mask from the runtime: what the docs say to return when there's none
+		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+	}
 
 	// Allocate memory for the mesh
 	mask.vertexCapacityInput = mask.vertexCountOutput;
@@ -203,7 +244,11 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 	mask.vertices = new XrVector2f[mask.vertexCapacityInput];
 
 	// Now actually request the mask data
-	OOVR_FAILED_XR_ABORT(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask));
+	if (XR_FAILED(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask))) {
+		delete[] mask.indices;
+		delete[] mask.vertices;
+		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+	}
 
 	// Convert the data into something usable by SteamVR - it doesn't use indices
 	vr::HiddenAreaMesh_t result = {};
@@ -246,39 +291,31 @@ void XrHMD::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t*
 {
 	// TODO use ETrackingStateType
 
-	/* HACK: it would be cleaner to have the xr_gbl access behind a lock_shared, however in Sairento,
-	   the game may submit its first frame while simulataneously calling GetControllerStateWithPose,
-	   resulting in the following sequence of events:
-	   1. Game calls BaseCompositor::Submit, which gets a lock_shared on the session (see the function for why)
-	   2. Submit calls XrBackend::StoreEyeTexture, which calls XrBackend::CheckOrInitCompositors, which calls
-	      DrvOpenXR::SetupSession, which attempts to get an exclusive lock on the session. However, it doesn't actually
-	      get an exclusive lock, but instead just reuses shared lock that we acquired back in BaseCompositor::Submit,
-	      because our session lock implemention only checks if the thread already has a lock on the session,
-	      not whether it is exclusive or shared.
-	   3. SetupSession deletes the session and xr_gbl, and GetPose simultaneously tries to access xr_gbl since at this point
-	      these both have shared locks on the session: segfault because xr_gbl is null right now!
-	   A solution around this would be to implement lock upgrading, but initial testing showed that that seems to be
-	   a lot of work for little gain in this small edge case, especially when we can just sleep for a little bit and
-	   still avoid the problem of xr_gbl being null, which should only happen on session restart anyway.
-	   Perhaps redesigning the locking mechanism would be a more fruitful venture in the future.
-	*/
-	while (!xr_gbl) {
-		using namespace std::chrono_literals;
-		std::this_thread::sleep_for(20ms);
+	// Held to the end: a session restart on another thread replaces xr_gbl and its spaces, and waits for this to end
+	auto lock = xr_session.lock_shared();
+	if (!xr_gbl) {
+		// No session (it was lost, or a restart failed): no pose
+		if (pose) {
+			*pose = {};
+			pose->eTrackingResult = vr::TrackingResult_Uninitialized;
+		}
+		return;
 	}
 	xr_utils::PoseFromSpace(pose, xr_gbl->viewSpace, origin);
 }
 
 float XrHMD::GetIPD()
 {
+	if (!xr_gbl)
+		return 0.0064f;
 	const XruCachedViews& cachedViews = xr_gbl->GetCachedViews(xr_gbl->viewSpace);
 	const XrViewState& state = cachedViews.viewState;
 	const std::array<XrView, XruEyeCount>& views = cachedViews.views;
-	OOVR_FALSE_ABORT(cachedViews.viewCount == XruEyeCount);
 
 	static float ipd = 0.0064;
 
-	if (state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)
+	// Without both views the last IPD stays
+	if (cachedViews.viewCount == XruEyeCount && state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT && state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)
 		ipd = views[vr::Eye_Right].pose.position.x - views[vr::Eye_Left].pose.position.x;
 
 	return ipd;

@@ -1,6 +1,9 @@
 #include "stdafx.h"
+#include "Misc/EnumNames.h"
 #define BASE_IMPL
 #include "BaseApplications.h"
+#include "BaseClientCore.h"
+#include "Misc/Process.h"
 #include <string>
 
 using namespace vr;
@@ -30,31 +33,38 @@ uint32_t BaseApplications::GetApplicationCount()
 }
 EVRApplicationError BaseApplications::GetApplicationKeyByIndex(uint32_t unApplicationIndex, VR_OUT_STRING() char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen)
 {
-	STUBBED();
+	if (pchAppKeyBuffer && unAppKeyBufferLen)
+		pchAppKeyBuffer[0] = 0;
+	// GetApplicationCount is 0
+	return VRApplicationError_InvalidIndex;
 }
 EVRApplicationError BaseApplications::GetApplicationKeyByProcessId(uint32_t unProcessId, VR_OUT_STRING() char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen)
 {
-	STUBBED();
+	if (pchAppKeyBuffer && unAppKeyBufferLen)
+		pchAppKeyBuffer[0] = 0;
+	// No application list yet (IdentifyApplication isn't recorded)
+	return VRApplicationError_UnknownApplication;
 }
 EVRApplicationError BaseApplications::LaunchApplication(const char* pchAppKey)
 {
-	STUBBED();
+	OC_UNSUPPORTED(VRApplicationError_LaunchFailed, "LaunchApplication(%s): no application list to launch from", pchAppKey ? pchAppKey : "(null)");
 }
 EVRApplicationError BaseApplications::LaunchTemplateApplication(const char* pchTemplateAppKey, const char* pchNewAppKey, VR_ARRAY_COUNT(unKeys) const AppOverrideKeys_t* pKeys, uint32_t unKeys)
 {
-	STUBBED();
+	OC_UNSUPPORTED(VRApplicationError_LaunchFailed, "LaunchTemplateApplication: no application list to launch from");
 }
 EVRApplicationError BaseApplications::LaunchApplicationFromMimeType(const char* pchMimeType, const char* pchArgs)
 {
-	STUBBED();
+	OC_UNSUPPORTED(VRApplicationError_LaunchFailed, "LaunchApplicationFromMimeType: no applications are registered for MIME types");
 }
 EVRApplicationError BaseApplications::LaunchDashboardOverlay(const char* pchAppKey)
 {
-	STUBBED();
+	OC_UNSUPPORTED(VRApplicationError_LaunchFailed, "LaunchDashboardOverlay: there's no dashboard");
 }
 bool BaseApplications::CancelApplicationLaunch(const char* pchAppKey)
 {
-	STUBBED();
+	// Nothing is ever being launched
+	return false;
 }
 EVRApplicationError BaseApplications::IdentifyApplication(uint32_t unProcessId, const char* pchAppKey)
 {
@@ -63,92 +73,122 @@ EVRApplicationError BaseApplications::IdentifyApplication(uint32_t unProcessId, 
 }
 uint32_t BaseApplications::GetApplicationProcessId(const char* pchAppKey)
 {
-	STUBBED();
+	// No application list yet
+	return 0;
 }
 const char* BaseApplications::GetApplicationsErrorNameFromEnum(EVRApplicationError error)
 {
-	STUBBED();
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRApplicationError", (int32_t)error, "Unknown VRApplicationsError (%d)");
 }
 uint32_t BaseApplications::GetApplicationPropertyString(const char* pchAppKey, EVRApplicationProperty eProperty, VR_OUT_STRING() char* pchPropertyValueBuffer, uint32_t unPropertyValueBufferLen, EVRApplicationError* peError)
 {
-	STUBBED();
+	if (pchPropertyValueBuffer && unPropertyValueBufferLen)
+		pchPropertyValueBuffer[0] = 0;
+	if (peError)
+		*peError = VRApplicationError_UnknownApplication;
+	return 0;
 }
 bool BaseApplications::GetApplicationPropertyBool(const char* pchAppKey, EVRApplicationProperty eProperty, EVRApplicationError* peError)
 {
-	STUBBED();
+	if (peError)
+		*peError = VRApplicationError_UnknownApplication;
+	return false;
 }
 uint64_t BaseApplications::GetApplicationPropertyUint64(const char* pchAppKey, EVRApplicationProperty eProperty, EVRApplicationError* peError)
 {
-	STUBBED();
+	if (peError)
+		*peError = VRApplicationError_UnknownApplication;
+	return 0;
 }
 EVRApplicationError BaseApplications::SetApplicationAutoLaunch(const char* pchAppKey, bool bAutoLaunch)
 {
-	STUBBED();
+	// No application list yet: every key is unknown
+	return VRApplicationError_UnknownApplication;
 }
 bool BaseApplications::GetApplicationAutoLaunch(const char* pchAppKey)
 {
-	STUBBED();
+	return false;
 }
 EVRApplicationError BaseApplications::SetDefaultApplicationForMimeType(const char* pchAppKey, const char* pchMimeType)
 {
-	STUBBED();
+	// No application list yet: every key is unknown
+	return VRApplicationError_UnknownApplication;
 }
 bool BaseApplications::GetDefaultApplicationForMimeType(const char* pchMimeType, VR_OUT_STRING() char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen)
 {
-	STUBBED();
+	if (pchAppKeyBuffer && unAppKeyBufferLen)
+		pchAppKeyBuffer[0] = 0;
+	return false;
 }
 bool BaseApplications::GetApplicationSupportedMimeTypes(const char* pchAppKey, VR_OUT_STRING() char* pchMimeTypesBuffer, uint32_t unMimeTypesBuffer)
 {
-	STUBBED();
+	if (pchMimeTypesBuffer && unMimeTypesBuffer)
+		pchMimeTypesBuffer[0] = 0;
+	return false;
 }
 uint32_t BaseApplications::GetApplicationsThatSupportMimeType(const char* pchMimeType, VR_OUT_STRING() char* pchAppKeysThatSupportBuffer, uint32_t unAppKeysThatSupportBuffer)
 {
-	STUBBED();
+	if (pchAppKeysThatSupportBuffer && unAppKeysThatSupportBuffer)
+		pchAppKeysThatSupportBuffer[0] = 0;
+	return 0;
 }
 uint32_t BaseApplications::GetApplicationLaunchArguments(uint32_t unHandle, VR_OUT_STRING() char* pchArgs, uint32_t unArgs)
 {
-	STUBBED();
+	if (pchArgs && unArgs)
+		pchArgs[0] = 0;
+	// Nothing launches applications with arguments
+	return 0;
 }
 EVRApplicationError BaseApplications::GetStartingApplication(VR_OUT_STRING() char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen)
 {
-	STUBBED();
+	if (pchAppKeyBuffer && unAppKeyBufferLen)
+		pchAppKeyBuffer[0] = 0;
+	// Nothing is being launched
+	return VRApplicationError_NoApplication;
 }
 BaseApplications::EVRApplicationTransitionState BaseApplications::GetTransitionState()
 {
-	STUBBED();
+	return VRApplicationTransition_None;
 }
 BaseApplications::EVRSceneApplicationState BaseApplications::GetSceneApplicationState()
 {
-	STUBBED();
+	// This program is the scene application while it has a Scene session
+	return BaseClientCore::appType == VRApplication_Scene ? EVRSceneApplicationState_Running : EVRSceneApplicationState_None;
 }
 EVRApplicationError BaseApplications::PerformApplicationPrelaunchCheck(const char* pchAppKey)
 {
-	STUBBED();
+	// No application list yet: every key is unknown
+	return VRApplicationError_UnknownApplication;
 }
 const char* BaseApplications::GetApplicationsTransitionStateNameFromEnum(EVRApplicationTransitionState state)
 {
-	STUBBED();
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRApplicationTransitionState", (int32_t)state, "Unknown EVRApplicationTransitionState");
 }
 const char* BaseApplications::GetSceneApplicationStateNameFromEnum(BaseApplications::EVRSceneApplicationState state)
 {
-	STUBBED();
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVRSceneApplicationState", (int32_t)state, "Unknown EVRSceneApplicationState (%d)");
 }
 bool BaseApplications::IsQuitUserPromptRequested()
 {
-	STUBBED();
+	return false;
 }
 EVRApplicationError BaseApplications::LaunchInternalProcess(const char* pchBinaryPath, const char* pchArguments, const char* pchWorkingDirectory)
 {
+	if (!pchBinaryPath)
+		return VRApplicationError_LaunchFailed;
 #ifndef _WIN32
 	// Only the lab uses this afaik, we should be pretty safe
-	STUBBED();
+	OC_UNSUPPORTED(VRApplicationError_LaunchFailed, "LaunchInternalProcess: not on Linux yet");
 #else
 	OOVR_LOG("Launching new app process: following values are path,args,workingDir:");
 	OOVR_LOG(pchBinaryPath);
-	OOVR_LOG(pchArguments);
-	OOVR_LOG(pchWorkingDirectory);
+	OOVR_LOG(pchArguments ? pchArguments : "");
+	OOVR_LOG(pchWorkingDirectory ? pchWorkingDirectory : "");
 
-	string cmd = "\"" + string(pchBinaryPath) + "\" " + string(pchArguments);
+	string cmd = "\"" + string(pchBinaryPath) + "\" " + string(pchArguments ? pchArguments : "");
 	size_t buff_len = cmd.length() + 1;
 	char* cmd_c = new char[buff_len];
 	strcpy_s(cmd_c, buff_len, cmd.c_str());
@@ -172,7 +212,7 @@ EVRApplicationError BaseApplications::LaunchInternalProcess(const char* pchBinar
 }
 uint32_t BaseApplications::GetCurrentSceneProcessId()
 {
-	STUBBED();
+	return BaseClientCore::appType == VRApplication_Scene ? oc_current_pid() : 0;
 }
 
 EVRApplicationError BaseApplications::RegisterSubprocess(uint32_t nPid)

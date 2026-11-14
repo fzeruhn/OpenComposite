@@ -2,10 +2,11 @@
 #define BASE_IMPL
 #include "BaseInputInternal.h"
 
-#define UKN_FUNC(id)                      \
-	void BaseInputInternal::UknFunc##id() \
-	{                                     \
-		STUBBED();                        \
+// SteamVR's own (undocumented) input calls: nothing that a game relies on
+#define UKN_FUNC(id)                                                      \
+	void BaseInputInternal::UknFunc##id()                                 \
+	{                                                                     \
+		OC_UNSUPPORTED_VOID("IVRInputInternal: unknown function " #id); \
 	}
 
 UKN_FUNC(001);

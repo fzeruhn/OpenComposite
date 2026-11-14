@@ -16,6 +16,10 @@ BaseChaperone::BaseChaperoneCalibrationState BaseChaperone::GetCalibrationState(
 }
 bool BaseChaperone::GetPlayAreaSize(float* pSizeX, float* pSizeZ)
 {
+	if (!pSizeX || !pSizeZ)
+		return false;
+	*pSizeX = 0;
+	*pSizeZ = 0;
 	vr::HmdVector3_t minPoint, maxPoint;
 	bool success = GetMinMaxPoints(minPoint, maxPoint);
 
@@ -30,6 +34,8 @@ bool BaseChaperone::GetPlayAreaSize(float* pSizeX, float* pSizeZ)
 }
 bool BaseChaperone::GetPlayAreaRect(HmdQuad_t* rect)
 {
+	if (!rect)
+		return false;
 	memset(rect, 0, sizeof(vr::HmdQuad_t));
 
 	vr::HmdVector3_t minPoint, maxPoint;
@@ -54,7 +60,7 @@ bool BaseChaperone::GetPlayAreaRect(HmdQuad_t* rect)
 }
 void BaseChaperone::ReloadInfo(void)
 {
-	STUBBED();
+	// The play area is asked of the OpenXR runtime each time, so there's nothing to reload
 }
 void BaseChaperone::SetSceneColor(HmdColor_t color)
 {
@@ -62,7 +68,12 @@ void BaseChaperone::SetSceneColor(HmdColor_t color)
 }
 void BaseChaperone::GetBoundsColor(HmdColor_t* pOutputColorArray, int nNumOutputColors, float flCollisionBoundsFadeDistance, HmdColor_t* pOutputCameraColor)
 {
-	STUBBED();
+	// The OpenXR runtime draws its own boundary: no colours to report
+	// No more than any boundary has colours for: an app's count beyond that is a bad argument, not a buffer size
+	if (pOutputColorArray && nNumOutputColors > 0)
+		memset(pOutputColorArray, 0, sizeof(HmdColor_t) * std::min(nNumOutputColors, 1024));
+	if (pOutputCameraColor)
+		*pOutputCameraColor = {};
 }
 bool BaseChaperone::AreBoundsVisible()
 {

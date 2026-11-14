@@ -5,6 +5,8 @@
 #include "../../DrvOpenXR/XrBackend.h"
 #include "BaseCompositor.h"
 #include "BaseOverlay.h"
+
+#include "Misc/EnumNames.h"
 #include "BaseSystem.h"
 #include "Compositor/compositor.h"
 #include "Drivers/Backend.h"
@@ -39,6 +41,22 @@ public:
 	uint64_t flags = 0;
 	float texelAspect = 1;
 	std::queue<VREvent_t> eventQueue;
+
+	// Kept and returned, not shown yet (drawing or using them is not implemented yet)
+	uint32_t renderingPid = 0;
+	float preCurvePitch = 0;
+	std::string renderModel;
+	HmdColor_t renderModelColor = { 1, 1, 1, 1 };
+	TrackedDeviceIndex_t componentDevice = k_unTrackedDeviceIndexInvalid;
+	std::string componentName;
+	VROverlayHandle_t relativeParent = k_ulOverlayHandleInvalid;
+	HmdMatrix34_t relativeTransform = { { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 } } };
+	HmdVector2_t cursorHotspot = { 0, 0 };
+	VROverlayHandle_t cursor = k_ulOverlayHandleInvalid;
+	bool cursorOverridden = false;
+	HmdVector2_t cursorOverride = { 0, 0 };
+	std::map<int, VROverlayHandle_t> neighbours; // EOverlayDirection → overlay
+	std::map<int, std::pair<HmdVector2_t, float>> dualAnalog; // EDualAnalogWhich → (centre, radius)
 
 	// Rendering
 	Texture_t texture = {};
@@ -79,8 +97,10 @@ public:
 	bool ComputeOverlayTransform(vr::ETrackingUniverseOrigin trackingSpace, glm::mat4& out)
 	{
 		out = overlayTransform;
-		if (transformType == VROverlayTransform_TrackedDeviceRelative) {
-			std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(transformData.deviceRelative.device);
+		// A component's overlay is placed at its device, with no offset (the component's own pose isn't known)
+		bool component = transformType == VROverlayTransform_TrackedComponent;
+		if (transformType == VROverlayTransform_TrackedDeviceRelative || component) {
+			std::shared_ptr<ITrackedDevice> dev = BackendManager::Instance().GetDevice(component ? componentDevice : transformData.deviceRelative.device);
 			if (!dev)
 				return false;
 
@@ -89,7 +109,8 @@ public:
 			if (!pose.bPoseIsValid)
 				return false;
 			// S2G_m34 makes ordinary glm (column-first) matrices, so transpose the product to overlayTransform's layout
-			out = glm::transpose(S2G_m34(pose.mDeviceToAbsoluteTracking) * S2G_m34(transformData.deviceRelative.offset));
+			glm::mat4 device = S2G_m34(pose.mDeviceToAbsoluteTracking);
+			out = glm::transpose(component ? device : device * S2G_m34(transformData.deviceRelative.offset));
 		}
 		return true;
 	}
@@ -104,11 +125,18 @@ public:
 		return VROverlayError_InvalidHandle;                                          \
 	}
 
-#define USEHB()                                           \
-	OverlayData* overlay = (OverlayData*)ulOverlayHandle; \
-	if (!overlay || !overlays.count(overlay->key)) {      \
-		return false;                                     \
+#define USEHB()                                                                       \
+	OverlayData* overlay = (OverlayData*)ulOverlayHandle;                             \
+	if (!overlay || !validOverlays.count(overlay) || !overlays.count(overlay->key)) { \
+		return false;                                                                 \
 	}
+
+// k_unVROverlayMaxKeyLength and k_unVROverlayMaxNameLength, the same in every SDK version: with the terminator
+static constexpr uint32_t kOverlayMaxKeyLength = 128;
+static constexpr uint32_t kOverlayMaxNameLength = 128;
+
+// The overlay that has gamepad focus (SetGamepadFocusOverlay)
+static VROverlayHandle_t gamepadFocusOverlay = k_ulOverlayHandleInvalid;
 
 BaseOverlay::~BaseOverlay()
 {
@@ -243,7 +271,7 @@ int BaseOverlay::_BuildLayers(XrCompositionLayerBaseHeader* sceneLayer, XrCompos
 			const float width = overlay.widthMeters * xscale;
 			const float height = overlay.widthMeters / aspect * yscale;
 			// The transform is in the current tracking space, which the app may have changed since it set the texture
-			overlay.compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+			overlay.compositionLayer.base.space = xr_space_from_ref_space_type(BaseSystem::currentSpace);
 
 			const bool curved = overlay.curvature >= minOverlayCurvature && xr_ext->CylinderKHR_Available()
 			    && std::isfinite(width) && std::isfinite(height) && width > 0 && height > 0;
@@ -304,6 +332,9 @@ bool BaseOverlay::_HandleOverlayInput(EVREye side, TrackedDeviceIndex_t index, V
 
 EVROverlayError BaseOverlay::FindOverlay(const char* pchOverlayKey, VROverlayHandle_t* pOverlayHandle)
 {
+	if (!pchOverlayKey || !pOverlayHandle)
+		return VROverlayError_InvalidParameter;
+	*pOverlayHandle = k_ulOverlayHandleInvalid;
 	if (overlays.count(pchOverlayKey)) {
 		OVL = overlays[pchOverlayKey];
 		return VROverlayError_None;
@@ -314,6 +345,14 @@ EVROverlayError BaseOverlay::FindOverlay(const char* pchOverlayKey, VROverlayHan
 }
 EVROverlayError BaseOverlay::CreateOverlay(const char* pchOverlayKey, const char* pchOverlayName, VROverlayHandle_t* pOverlayHandle)
 {
+	if (!pchOverlayKey || !pchOverlayName || !pOverlayHandle)
+		return VROverlayError_InvalidParameter;
+	*pOverlayHandle = k_ulOverlayHandleInvalid;
+	// The SDK's limits, including the terminator
+	if (strlen(pchOverlayKey) >= kOverlayMaxKeyLength)
+		return VROverlayError_KeyTooLong;
+	if (strlen(pchOverlayName) >= kOverlayMaxNameLength)
+		return VROverlayError_NameTooLong;
 	if (overlays.count(pchOverlayKey)) {
 		return VROverlayError_KeyInUse;
 	}
@@ -327,7 +366,7 @@ EVROverlayError BaseOverlay::CreateOverlay(const char* pchOverlayKey, const char
 	data->compositionLayer.base.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
 	data->compositionLayer.base.next = NULL;
 	data->compositionLayer.base.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-	data->compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+	data->compositionLayer.base.space = xr_space_from_ref_space_type(BaseSystem::currentSpace);
 
 	// Still same for quad + cylinder
 	data->compositionLayer.quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -368,59 +407,51 @@ VROverlayHandle_t BaseOverlay::GetHighQualityOverlay()
 
 	return highQualityOverlay;
 }
+// Copies value into an app's buffer of size bytes, cut short if it doesn't fit and always terminated, and returns
+// the size needed including the terminator (as SteamVR does)
+static uint32_t CopyOutString(const std::string& value, char* buffer, uint32_t size)
+{
+	if (buffer && size) {
+		size_t n = std::min<size_t>(value.size(), size - 1);
+		memcpy(buffer, value.data(), n);
+		buffer[n] = 0;
+	}
+	return (uint32_t)value.size() + 1;
+}
+
 uint32_t BaseOverlay::GetOverlayKey(VROverlayHandle_t ulOverlayHandle, char* pchValue, uint32_t unBufferSize, EVROverlayError* pError)
 {
 	OverlayData* overlay = (OverlayData*)ulOverlayHandle;
-	if (!overlays.count(overlay->key)) {
+	if (!overlay || !validOverlays.count(overlay) || !overlays.count(overlay->key)) {
 		if (pError)
 			*pError = VROverlayError_InvalidHandle;
-		if (unBufferSize != 0)
-			pchValue = 0;
+		CopyOutString("", pchValue, unBufferSize);
 		return 0;
 	}
-
-	const char* key = overlay->key.c_str();
-	strncpy_s(pchValue, unBufferSize, key, unBufferSize);
-
-	if (strlen(key) >= unBufferSize && unBufferSize != 0) {
-		pchValue[unBufferSize - 1] = 0;
-	}
-
 	if (pError)
 		*pError = VROverlayError_None;
-
-	// Is this supposed to include the NULL or not?
-	// TODO test, this could cause some very nasty bugs
-	return static_cast<uint32_t>(strlen(pchValue) + 1);
+	return CopyOutString(overlay->key, pchValue, unBufferSize);
 }
 uint32_t BaseOverlay::GetOverlayName(VROverlayHandle_t ulOverlayHandle, VR_OUT_STRING() char* pchValue, uint32_t unBufferSize, EVROverlayError* pError)
 {
-	if (pError)
-		*pError = VROverlayError_None;
-
 	OverlayData* overlay = (OverlayData*)ulOverlayHandle;
-	if (!overlays.count(overlay->key)) {
+	if (!overlay || !validOverlays.count(overlay) || !overlays.count(overlay->key)) {
 		if (pError)
 			*pError = VROverlayError_InvalidHandle;
-		if (unBufferSize != 0)
-			pchValue[0] = 0;
+		CopyOutString("", pchValue, unBufferSize);
 		return 0;
 	}
-
-	const char* name = overlay->name.c_str();
-	strncpy_s(pchValue, unBufferSize, name, unBufferSize);
-
-	if (strlen(name) >= unBufferSize && unBufferSize != 0) {
-		pchValue[unBufferSize - 1] = 0;
-	}
-
-	// Is this supposed to include the NULL or not?
-	// TODO test, this could cause some very nasty bugs
-	return static_cast<uint32_t>(strlen(pchValue) + 1);
+	if (pError)
+		*pError = VROverlayError_None;
+	return CopyOutString(overlay->name, pchValue, unBufferSize);
 }
 EVROverlayError BaseOverlay::SetOverlayName(VROverlayHandle_t ulOverlayHandle, const char* pchName)
 {
 	USEH();
+	if (!pchName)
+		return VROverlayError_InvalidParameter;
+	if (strlen(pchName) >= kOverlayMaxNameLength)
+		return VROverlayError_NameTooLong;
 
 	overlay->name = pchName;
 
@@ -428,54 +459,30 @@ EVROverlayError BaseOverlay::SetOverlayName(VROverlayHandle_t ulOverlayHandle, c
 }
 EVROverlayError BaseOverlay::GetOverlayImageData(VROverlayHandle_t ulOverlayHandle, void* pvBuffer, uint32_t unBufferSize, uint32_t* punWidth, uint32_t* punHeight)
 {
-	STUBBED();
+	USEH();
+	if (punWidth)
+		*punWidth = 0;
+	if (punHeight)
+		*punHeight = 0;
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "GetOverlayImageData: overlay images can't be read back");
 }
 const char* BaseOverlay::GetOverlayErrorNameFromEnum(EVROverlayError error)
 {
-#define ERR_CASE(name)          \
-	case VROverlayError_##name: \
-		return #name;
-	switch (error) {
-		ERR_CASE(None);
-		ERR_CASE(UnknownOverlay);
-		ERR_CASE(InvalidHandle);
-		ERR_CASE(PermissionDenied);
-		ERR_CASE(OverlayLimitExceeded);
-		ERR_CASE(WrongVisibilityType);
-		ERR_CASE(KeyTooLong);
-		ERR_CASE(NameTooLong);
-		ERR_CASE(KeyInUse);
-		ERR_CASE(WrongTransformType);
-		ERR_CASE(InvalidTrackedDevice);
-		ERR_CASE(InvalidParameter);
-		ERR_CASE(ThumbnailCantBeDestroyed);
-		ERR_CASE(ArrayTooSmall);
-		ERR_CASE(RequestFailed);
-		ERR_CASE(InvalidTexture);
-		ERR_CASE(UnableToLoadFile);
-		ERR_CASE(KeyboardAlreadyInUse);
-		ERR_CASE(NoNeighbor);
-		ERR_CASE(TooManyMaskPrimitives);
-		ERR_CASE(BadMaskPrimitive);
-		ERR_CASE(TextureAlreadyLocked);
-		ERR_CASE(TextureLockCapacityReached);
-		ERR_CASE(TextureNotLocked);
-		ERR_CASE(TimedOut);
-	}
-#undef ERR_CASE
-
-	string msg = "Unknown overlay error code: " + to_string(error);
-	OOVR_LOG(msg.c_str());
-
-	STUBBED();
+	// As SteamVR answers
+	return OC_EnumNameAsSteamVR("EVROverlayError", (int32_t)error, "Unknown EVROverlayError (%d)");
 }
 EVROverlayError BaseOverlay::SetOverlayRenderingPid(VROverlayHandle_t ulOverlayHandle, uint32_t unPID)
 {
-	STUBBED();
+	USEH();
+	overlay->renderingPid = unPID;
+	return VROverlayError_None;
 }
 uint32_t BaseOverlay::GetOverlayRenderingPid(VROverlayHandle_t ulOverlayHandle)
 {
-	STUBBED();
+	OverlayData* overlay = (OverlayData*)ulOverlayHandle;
+	if (!overlay || !validOverlays.count(overlay) || !overlays.count(overlay->key))
+		return 0;
+	return overlay->renderingPid;
 }
 EVROverlayError BaseOverlay::SetOverlayFlag(VROverlayHandle_t ulOverlayHandle, VROverlayFlags eOverlayFlag, bool bEnabled)
 {
@@ -546,7 +553,7 @@ EVROverlayError BaseOverlay::GetOverlayTexelAspect(VROverlayHandle_t ulOverlayHa
 	USEH();
 
 	if (!pfTexelAspect)
-		OOVR_ABORT("pfTexelAspect == nullptr");
+		return VROverlayError_InvalidParameter;
 
 	*pfTexelAspect = overlay->texelAspect;
 
@@ -654,14 +661,35 @@ EVROverlayError BaseOverlay::GetOverlayTextureBounds(VROverlayHandle_t ulOverlay
 }
 uint32_t BaseOverlay::GetOverlayRenderModel(VROverlayHandle_t ulOverlayHandle, char* pchValue, uint32_t unBufferSize, HmdColor_t* pColor, EVROverlayError* pError)
 {
+	auto fail = [&](EVROverlayError e) -> uint32_t {
+		if (pError)
+			*pError = e;
+		if (pchValue && unBufferSize)
+			pchValue[0] = 0;
+		return 0;
+	};
+	OverlayData* overlay = (OverlayData*)ulOverlayHandle;
+	if (!overlay || !validOverlays.count(overlay) || !overlays.count(overlay->key))
+		return fail(VROverlayError_InvalidHandle);
 	if (pError)
 		*pError = VROverlayError_None;
-
-	STUBBED();
+	if (pColor)
+		*pColor = overlay->renderModelColor;
+	uint32_t needed = (uint32_t)overlay->renderModel.size() + 1;
+	if (pchValue && unBufferSize >= needed)
+		memcpy(pchValue, overlay->renderModel.c_str(), needed);
+	else if (pchValue && unBufferSize)
+		pchValue[0] = 0;
+	return needed;
 }
 EVROverlayError BaseOverlay::SetOverlayRenderModel(VROverlayHandle_t ulOverlayHandle, const char* pchRenderModel, const HmdColor_t* pColor)
 {
-	STUBBED();
+	USEH();
+	overlay->renderModel = pchRenderModel ? pchRenderModel : "";
+	if (pColor)
+		overlay->renderModelColor = *pColor;
+	OOVR_LOG_ONCE("Overlay render models are kept but not drawn");
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlayTransformType(VROverlayHandle_t ulOverlayHandle, VROverlayTransformType* peTransformType)
 {
@@ -707,38 +735,86 @@ EVROverlayError BaseOverlay::SetOverlayTransformTrackedDeviceRelative(VROverlayH
 }
 EVROverlayError BaseOverlay::GetOverlayTransformTrackedDeviceRelative(VROverlayHandle_t ulOverlayHandle, TrackedDeviceIndex_t* punTrackedDevice, HmdMatrix34_t* pmatTrackedDeviceToOverlayTransform)
 {
-	STUBBED();
+	USEH();
+	if (!punTrackedDevice || !pmatTrackedDeviceToOverlayTransform)
+		return VROverlayError_InvalidParameter;
+	if (overlay->transformType != VROverlayTransform_TrackedDeviceRelative)
+		return VROverlayError_WrongTransformType;
+	*punTrackedDevice = overlay->transformData.deviceRelative.device;
+	*pmatTrackedDeviceToOverlayTransform = overlay->transformData.deviceRelative.offset;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayTransformTrackedDeviceComponent(VROverlayHandle_t ulOverlayHandle, TrackedDeviceIndex_t unDeviceIndex, const char* pchComponentName)
 {
-	STUBBED();
+	USEH();
+	overlay->transformType = VROverlayTransform_TrackedComponent;
+	overlay->componentDevice = unDeviceIndex;
+	overlay->componentName = pchComponentName ? pchComponentName : "";
+	OOVR_LOG_ONCE("Overlays on a tracked device's component are placed at the device itself");
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlayTransformTrackedDeviceComponent(VROverlayHandle_t ulOverlayHandle, TrackedDeviceIndex_t* punDeviceIndex, char* pchComponentName, uint32_t unComponentNameSize)
 {
-	STUBBED();
+	USEH();
+	if (overlay->transformType != VROverlayTransform_TrackedComponent)
+		return VROverlayError_WrongTransformType;
+	if (punDeviceIndex)
+		*punDeviceIndex = overlay->componentDevice;
+	if (pchComponentName && unComponentNameSize) {
+		if (overlay->componentName.size() + 1 > unComponentNameSize) {
+			pchComponentName[0] = 0;
+			return VROverlayError_ArrayTooSmall;
+		}
+		memcpy(pchComponentName, overlay->componentName.c_str(), overlay->componentName.size() + 1);
+	}
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlayTransformOverlayRelative(VROverlayHandle_t ulOverlayHandle, VROverlayHandle_t* ulOverlayHandleParent, HmdMatrix34_t* pmatParentOverlayToOverlayTransform)
 {
-	STUBBED();
+	USEH();
+	if (!ulOverlayHandleParent || !pmatParentOverlayToOverlayTransform)
+		return VROverlayError_InvalidParameter;
+	*ulOverlayHandleParent = overlay->relativeParent;
+	*pmatParentOverlayToOverlayTransform = overlay->relativeTransform;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayTransformOverlayRelative(VROverlayHandle_t ulOverlayHandle, VROverlayHandle_t ulOverlayHandleParent, const HmdMatrix34_t* pmatParentOverlayToOverlayTransform)
 {
-	// TODO
+	USEH();
+	overlay->relativeParent = ulOverlayHandleParent;
+	if (pmatParentOverlayToOverlayTransform)
+		overlay->relativeTransform = *pmatParentOverlayToOverlayTransform;
+	OOVR_LOG_ONCE("Overlay-relative transforms are kept but not placed yet");
 	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayTransformCursor(VROverlayHandle_t ulCursorOverlayHandle, const HmdVector2_t* pvHotspot)
 {
-	STUBBED();
+	OverlayData* overlay = (OverlayData*)ulCursorOverlayHandle;
+	if (!overlay || !validOverlays.count(overlay) || !overlays.count(overlay->key))
+		return VROverlayError_InvalidHandle;
+	if (pvHotspot)
+		overlay->cursorHotspot = *pvHotspot;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlayTransformCursor(VROverlayHandle_t ulOverlayHandle, HmdVector2_t* pvHotspot)
 {
-	STUBBED();
+	USEH();
+	if (!pvHotspot)
+		return VROverlayError_InvalidParameter;
+	*pvHotspot = overlay->cursorHotspot;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayTransformProjection(VROverlayHandle_t ulOverlayHandle,
     ETrackingUniverseOrigin eTrackingOrigin, const HmdMatrix34_t* pmatTrackingOriginToOverlayTransform,
     const OOVR_VROverlayProjection_t* pProjection, EVREye eEye)
 {
-	STUBBED();
+	USEH();
+	if (pmatTrackingOriginToOverlayTransform) {
+		overlay->transformType = VROverlayTransform_Absolute;
+		S2O_om44(*pmatTrackingOriginToOverlayTransform, overlay->overlayTransform);
+	}
+	OOVR_LOG_ONCE("Projection overlays are drawn as absolute ones");
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::ShowOverlay(VROverlayHandle_t ulOverlayHandle)
 {
@@ -759,7 +835,12 @@ bool BaseOverlay::IsOverlayVisible(VROverlayHandle_t ulOverlayHandle)
 }
 EVROverlayError BaseOverlay::GetTransformForOverlayCoordinates(VROverlayHandle_t ulOverlayHandle, ETrackingUniverseOrigin eTrackingOrigin, HmdVector2_t coordinatesInOverlay, HmdMatrix34_t* pmatTransform)
 {
-	STUBBED();
+	USEH();
+	if (!pmatTransform)
+		return VROverlayError_InvalidParameter;
+	// The overlay's own transform: the offset within it isn't added yet
+	O2S_om34(overlay->overlayTransform, *pmatTransform);
+	OC_UNSUPPORTED(VROverlayError_None, "GetTransformForOverlayCoordinates: answered with the overlay's own transform");
 }
 bool BaseOverlay::PollNextOverlayEvent(VROverlayHandle_t ulOverlayHandle, VREvent_t* pEvent, uint32_t eventSize)
 {
@@ -875,59 +956,105 @@ bool BaseOverlay::ComputeOverlayIntersection(VROverlayHandle_t ulOverlayHandle, 
 }
 bool BaseOverlay::HandleControllerOverlayInteractionAsMouse(VROverlayHandle_t ulOverlayHandle, TrackedDeviceIndex_t unControllerDeviceIndex)
 {
-	STUBBED();
+	OC_UNSUPPORTED(false, "HandleControllerOverlayInteractionAsMouse: no laser mouse yet");
 }
 bool BaseOverlay::IsHoverTargetOverlay(VROverlayHandle_t ulOverlayHandle)
 {
-	STUBBED();
+	OC_UNSUPPORTED(false, "IsHoverTargetOverlay: no laser mouse yet");
 }
 VROverlayHandle_t BaseOverlay::GetGamepadFocusOverlay()
 {
-	STUBBED();
+	return gamepadFocusOverlay;
 }
 EVROverlayError BaseOverlay::SetGamepadFocusOverlay(VROverlayHandle_t ulNewFocusOverlay)
 {
-	STUBBED();
+	if (ulNewFocusOverlay != k_ulOverlayHandleInvalid) {
+		OverlayData* overlay = (OverlayData*)ulNewFocusOverlay;
+		if (!validOverlays.count(overlay))
+			return VROverlayError_InvalidHandle;
+	}
+	gamepadFocusOverlay = ulNewFocusOverlay;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayNeighbor(EOverlayDirection eDirection, VROverlayHandle_t ulFrom, VROverlayHandle_t ulTo)
 {
-	STUBBED();
+	OverlayData* overlay = (OverlayData*)ulFrom;
+	if (!overlay || !validOverlays.count(overlay))
+		return VROverlayError_InvalidHandle;
+	if (ulTo == k_ulOverlayHandleInvalid)
+		overlay->neighbours.erase((int)eDirection);
+	else
+		overlay->neighbours[(int)eDirection] = ulTo;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::MoveGamepadFocusToNeighbor(EOverlayDirection eDirection, VROverlayHandle_t ulFrom)
 {
-	STUBBED();
+	OverlayData* overlay = (OverlayData*)ulFrom;
+	if (!overlay || !validOverlays.count(overlay))
+		return VROverlayError_InvalidHandle;
+	auto it = overlay->neighbours.find((int)eDirection);
+	if (it == overlay->neighbours.end())
+		return VROverlayError_NoNeighbor;
+	gamepadFocusOverlay = it->second;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayDualAnalogTransform(VROverlayHandle_t ulOverlay, EDualAnalogWhich eWhich, const HmdVector2_t& vCenter, float fRadius)
 {
-	STUBBED();
+	OverlayData* overlay = (OverlayData*)ulOverlay;
+	if (!overlay || !validOverlays.count(overlay))
+		return VROverlayError_InvalidHandle;
+	overlay->dualAnalog[(int)eWhich] = { vCenter, fRadius };
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::GetOverlayDualAnalogTransform(VROverlayHandle_t ulOverlay, EDualAnalogWhich eWhich, HmdVector2_t* pvCenter, float* pfRadius)
 {
-	STUBBED();
+	OverlayData* overlay = (OverlayData*)ulOverlay;
+	if (!overlay || !validOverlays.count(overlay))
+		return VROverlayError_InvalidHandle;
+	auto it = overlay->dualAnalog.find((int)eWhich);
+	if (pvCenter)
+		*pvCenter = it == overlay->dualAnalog.end() ? HmdVector2_t{ 0, 0 } : it->second.first;
+	if (pfRadius)
+		*pfRadius = it == overlay->dualAnalog.end() ? 0.0f : it->second.second;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayDualAnalogTransform(VROverlayHandle_t ulOverlay, EDualAnalogWhich eWhich, const HmdVector2_t* pvCenter, float fRadius)
 {
-	STUBBED();
+	if (!pvCenter)
+		return VROverlayError_InvalidParameter;
+	return SetOverlayDualAnalogTransform(ulOverlay, eWhich, *pvCenter, fRadius);
 }
 EVROverlayError BaseOverlay::TriggerLaserMouseHapticVibration(VROverlayHandle_t ulOverlayHandle, float fDurationSeconds, float fFrequency, float fAmplitude)
 {
-	STUBBED();
+	USEH();
+	OC_UNSUPPORTED(VROverlayError_None, "TriggerLaserMouseHapticVibration: no laser mouse yet");
 }
 EVROverlayError BaseOverlay::SetOverlayCursor(VROverlayHandle_t ulOverlayHandle, VROverlayHandle_t ulCursorHandle)
 {
-	STUBBED();
+	USEH();
+	overlay->cursor = ulCursorHandle;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayCursorPositionOverride(VROverlayHandle_t ulOverlayHandle, const HmdVector2_t* pvCursor)
 {
-	STUBBED();
+	USEH();
+	if (!pvCursor)
+		return VROverlayError_InvalidParameter;
+	overlay->cursorOverridden = true;
+	overlay->cursorOverride = *pvCursor;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::ClearOverlayCursorPositionOverride(VROverlayHandle_t ulOverlayHandle)
 {
-	STUBBED();
+	USEH();
+	overlay->cursorOverridden = false;
+	return VROverlayError_None;
 }
 EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle, const Texture_t* pTexture)
 {
 	USEH();
+	if (!pTexture)
+		return VROverlayError_InvalidTexture;
 	overlay->texture = *pTexture;
 
 	BackendManager::Instance().OnOverlayTexture(&overlay->texture);
@@ -937,7 +1064,11 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 
 	std::shared_ptr<Compositor> compositor = overlay->compositor.lock();
 	if (!compositor) {
-		compositor = GetUnsafeBaseCompositor()->CreateCompositorAPI(&overlay->texture);
+		// Overlay apps needn't have asked for IVRCompositor
+		compositor = BaseCompositor::CreateCompositorAPI(&overlay->texture);
+		// No compositor for this texture type: nothing to draw
+		if (!compositor)
+			OC_UNSUPPORTED(VROverlayError_InvalidTexture, "SetOverlayTexture: no compositor for texture type %d", (int)overlay->texture.eType);
 		overlay->compositor = std::weak_ptr(compositor);
 		auto* backend = (XrBackend*)BackendManager::Instance().GetBackendInstance();
 		backend->RegisterOverlayCompositor(compositor);
@@ -948,7 +1079,7 @@ EVROverlayError BaseOverlay::SetOverlayTexture(VROverlayHandle_t ulOverlayHandle
 	compositor->Invoke(&overlay->texture, &overlay->textureBounds, overlay->compositionLayer.quad.subImage);
 	compositor->ResetSubmitContext();
 
-	overlay->compositionLayer.base.space = xr_space_from_ref_space_type(GetUnsafeBaseSystem()->currentSpace);
+	overlay->compositionLayer.base.space = xr_space_from_ref_space_type(BaseSystem::currentSpace);
 
 	return VROverlayError_None;
 }
@@ -966,27 +1097,48 @@ EVROverlayError BaseOverlay::ClearOverlayTexture(VROverlayHandle_t ulOverlayHand
 }
 EVROverlayError BaseOverlay::SetOverlayRaw(VROverlayHandle_t ulOverlayHandle, void* pvBuffer, uint32_t unWidth, uint32_t unHeight, uint32_t unDepth)
 {
-	STUBBED();
+	USEH();
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "SetOverlayRaw: CPU images on overlays aren't supported yet");
 }
 EVROverlayError BaseOverlay::SetOverlayFromFile(VROverlayHandle_t ulOverlayHandle, const char* pchFilePath)
 {
-	STUBBED();
+	USEH();
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "SetOverlayFromFile: image files on overlays aren't supported yet");
 }
 EVROverlayError BaseOverlay::GetOverlayTexture(VROverlayHandle_t ulOverlayHandle, void** pNativeTextureHandle, void* pNativeTextureRef, uint32_t* pWidth, uint32_t* pHeight, uint32_t* pNativeFormat, ETextureType* pAPIType, EColorSpace* pColorSpace, VRTextureBounds_t* pTextureBounds)
 {
-	STUBBED();
+	USEH();
+	if (pNativeTextureHandle)
+		*pNativeTextureHandle = nullptr;
+	if (pWidth)
+		*pWidth = 0;
+	if (pHeight)
+		*pHeight = 0;
+	if (pNativeFormat)
+		*pNativeFormat = 0;
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "GetOverlayTexture: overlay textures can't be read back");
 }
 EVROverlayError BaseOverlay::ReleaseNativeOverlayHandle(VROverlayHandle_t ulOverlayHandle, void* pNativeTextureHandle)
 {
-	STUBBED();
+	USEH();
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "ReleaseNativeOverlayHandle: GetOverlayTexture hands out no textures");
 }
 EVROverlayError BaseOverlay::GetOverlayTextureSize(VROverlayHandle_t ulOverlayHandle, uint32_t* pWidth, uint32_t* pHeight)
 {
-	STUBBED();
+	USEH();
+	if (pWidth)
+		*pWidth = 0;
+	if (pHeight)
+		*pHeight = 0;
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "GetOverlayTextureSize: not known yet");
 }
 EVROverlayError BaseOverlay::CreateDashboardOverlay(const char* pchOverlayKey, const char* pchOverlayFriendlyName, VROverlayHandle_t* pMainHandle, VROverlayHandle_t* pThumbnailHandle)
 {
-	STUBBED();
+	if (pMainHandle)
+		*pMainHandle = k_ulOverlayHandleInvalid;
+	if (pThumbnailHandle)
+		*pThumbnailHandle = k_ulOverlayHandleInvalid;
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "CreateDashboardOverlay: there's no dashboard yet");
 }
 bool BaseOverlay::IsDashboardVisible()
 {
@@ -996,23 +1148,27 @@ bool BaseOverlay::IsDashboardVisible()
 }
 bool BaseOverlay::IsActiveDashboardOverlay(VROverlayHandle_t ulOverlayHandle)
 {
-	STUBBED();
+	OC_UNSUPPORTED(false, "IsActiveDashboardOverlay: there's no dashboard yet");
 }
 EVROverlayError BaseOverlay::SetDashboardOverlaySceneProcess(VROverlayHandle_t ulOverlayHandle, uint32_t unProcessId)
 {
-	STUBBED();
+	USEH();
+	OC_UNSUPPORTED(VROverlayError_None, "SetDashboardOverlaySceneProcess: there's no dashboard yet");
 }
 EVROverlayError BaseOverlay::GetDashboardOverlaySceneProcess(VROverlayHandle_t ulOverlayHandle, uint32_t* punProcessId)
 {
-	STUBBED();
+	USEH();
+	if (punProcessId)
+		*punProcessId = 0;
+	OC_UNSUPPORTED(VROverlayError_RequestFailed, "GetDashboardOverlaySceneProcess: there's no dashboard yet");
 }
 void BaseOverlay::ShowDashboard(const char* pchOverlayToShow)
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("ShowDashboard: there's no dashboard yet");
 }
 TrackedDeviceIndex_t BaseOverlay::GetPrimaryDashboardDevice()
 {
-	STUBBED();
+	OC_UNSUPPORTED(k_unTrackedDeviceIndexInvalid, "GetPrimaryDashboardDevice: there's no dashboard yet");
 }
 EVROverlayError BaseOverlay::ShowKeyboardWithDispatch(EGamepadTextInputMode eInputMode, EGamepadTextInputLineMode eLineInputMode,
     const char* pchDescription, uint32_t unCharMax, const char* pchExistingText, bool bUseMinimalMode, uint64_t uUserValue,
@@ -1023,10 +1179,10 @@ EVROverlayError BaseOverlay::ShowKeyboardWithDispatch(EGamepadTextInputMode eInp
 
 #ifndef OC_XR_PORT
 	if (!BaseCompositor::dxcomp)
-		OOVR_ABORT("Keyboard currently only available on DX11 and DX10 games");
+		return VROverlayError_RequestFailed;
 
 	if (eLineInputMode != k_EGamepadTextInputLineModeSingleLine)
-		OOVR_ABORTF("Only single-line keyboard entry mode is currently supported (as opposed to ID=%d)", eLineInputMode);
+		return VROverlayError_RequestFailed;
 
 	// TODO use description
 	keyboard = make_unique<VRKeyboard>(BaseCompositor::dxcomp->GetDevice(), uUserValue, unCharMax, bUseMinimalMode, eventDispatch,
@@ -1073,7 +1229,8 @@ EVROverlayError BaseOverlay::ShowKeyboard(EGamepadTextInputMode eInputMode, EGam
 EVROverlayError BaseOverlay::ShowKeyboard(EGamepadTextInputMode eInputMode, EGamepadTextInputLineMode eLineInputMode, uint32_t unFlags,
     const char* pchDescription, uint32_t unCharMax, const char* pchExistingText, uint64_t uUserValue)
 {
-	STUBBED();
+	// KeyboardFlag_Minimal = 1 (EKeyboardFlags)
+	return ShowKeyboard(eInputMode, eLineInputMode, pchDescription, unCharMax, pchExistingText, (unFlags & 1) != 0, uUserValue);
 }
 EVROverlayError BaseOverlay::ShowKeyboardForOverlay(VROverlayHandle_t ulOverlayHandle,
     EGamepadTextInputMode eInputMode, EGamepadTextInputLineMode eLineInputMode,
@@ -1093,7 +1250,8 @@ EVROverlayError BaseOverlay::ShowKeyboardForOverlay(VROverlayHandle_t ulOverlayH
     EGamepadTextInputLineMode eLineInputMode, uint32_t unFlags, const char* pchDescription, uint32_t unCharMax,
     const char* pchExistingText, uint64_t uUserValue)
 {
-	STUBBED();
+	// KeyboardFlag_Minimal = 1 (EKeyboardFlags)
+	return ShowKeyboardForOverlay(ulOverlayHandle, eInputMode, eLineInputMode, pchDescription, unCharMax, pchExistingText, (unFlags & 1) != 0, uUserValue);
 }
 uint32_t BaseOverlay::GetKeyboardText(char* pchText, uint32_t cchText)
 {
@@ -1102,13 +1260,11 @@ uint32_t BaseOverlay::GetKeyboardText(char* pchText, uint32_t cchText)
 	// Since keyboard is not functional yet, return this default text (Adventurer because this fix was made specifically for Skyrim VR)
 	str = "Adventurer";
 
-	// FFS, strncpy is secure.
-	strncpy_s(pchText, cchText, str.c_str(), cchText);
+	if (!pchText || cchText == 0)
+		return (uint32_t)str.size() + 1;
 
-	// Ensure the array always ends in a NULL
-	pchText[cchText - 1] = 0;
-
-	// TODO is this supposed to return the length of the string including or excluding the cchText limit?
+	// Within cchText, cut short and terminated if it doesn't fit; returns the length copied, without the terminator
+	CopyOutString(str, pchText, cchText);
 	return (uint32_t)strlen(pchText);
 }
 void BaseOverlay::HideKeyboard()
@@ -1128,15 +1284,17 @@ void BaseOverlay::HideKeyboard()
 }
 void BaseOverlay::SetKeyboardTransformAbsolute(ETrackingUniverseOrigin eTrackingOrigin, const HmdMatrix34_t* pmatTrackingOriginToKeyboardTransform)
 {
-	if (!keyboard)
-		OOVR_ABORT("Cannot set keyboard position when the keyboard is closed!");
+	if (!keyboard || !pmatTrackingOriginToKeyboardTransform) {
+		OOVR_LOG_ONCE("SetKeyboardTransformAbsolute with no keyboard open: ignored");
+		return;
+	}
 
 #ifdef OC_XR_PORT
-	XR_STUBBED();
+	OC_UNSUPPORTED_VOID("SetKeyboardTransformAbsolute: the keyboard isn't drawn yet");
 #else
 	BaseCompositor* compositor = GetUnsafeBaseCompositor();
 	if (compositor && eTrackingOrigin != compositor->GetTrackingSpace()) {
-		OOVR_ABORTF("Origin mismatch - current %d, requested %d", compositor->GetTrackingSpace(), eTrackingOrigin);
+		OC_UNSUPPORTED_VOID("SetKeyboardTransformAbsolute: origin %d isn't the compositor's %d", (int)eTrackingOrigin, (int)compositor->GetTrackingSpace());
 	}
 
 	keyboard->SetTransform(*pmatTrackingOriginToKeyboardTransform);
@@ -1144,38 +1302,49 @@ void BaseOverlay::SetKeyboardTransformAbsolute(ETrackingUniverseOrigin eTracking
 }
 void BaseOverlay::SetKeyboardPositionForOverlay(VROverlayHandle_t ulOverlayHandle, HmdRect2_t avoidRect)
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("SetKeyboardPositionForOverlay: the keyboard isn't drawn yet");
 }
 EVROverlayError BaseOverlay::SetOverlayIntersectionMask(VROverlayHandle_t ulOverlayHandle, OOVR_VROverlayIntersectionMaskPrimitive_t* pMaskPrimitives, uint32_t unNumMaskPrimitives, uint32_t unPrimitiveSize)
 {
-	STUBBED();
+	USEH();
+	OC_UNSUPPORTED(VROverlayError_None, "SetOverlayIntersectionMask: kept as the whole overlay");
 }
 EVROverlayError BaseOverlay::GetOverlayFlags(VROverlayHandle_t ulOverlayHandle, uint32_t* pFlags)
 {
-	STUBBED();
+	USEH();
+	if (!pFlags)
+		return VROverlayError_InvalidParameter;
+	*pFlags = (uint32_t)overlay->flags;
+	return VROverlayError_None;
 }
 BaseOverlay::VRMessageOverlayResponse BaseOverlay::ShowMessageOverlay(const char* pchText, const char* pchCaption, const char* pchButton0Text, const char* pchButton1Text, const char* pchButton2Text, const char* pchButton3Text)
 {
-	STUBBED();
+	OC_UNSUPPORTED(VRMessageOverlayResponse_CouldntFindSystemOverlay, "ShowMessageOverlay: there are no message overlays yet");
 }
 void BaseOverlay::CloseMessageOverlay()
 {
-	STUBBED();
+	OC_UNSUPPORTED_VOID("CloseMessageOverlay: there are no message overlays yet");
 }
 
 EVROverlayError BaseOverlay::SetOverlayPreCurvePitch(vr::VROverlayHandle_t ulOverlayHandle, float fRadians)
 {
-	STUBBED();
+	USEH();
+	overlay->preCurvePitch = fRadians;
+	return VROverlayError_None;
 }
 
 EVROverlayError BaseOverlay::GetOverlayPreCurvePitch(vr::VROverlayHandle_t ulOverlayHandle, float* pfRadians)
 {
-	STUBBED();
+	USEH();
+	if (!pfRadians)
+		return VROverlayError_InvalidParameter;
+	*pfRadians = overlay->preCurvePitch;
+	return VROverlayError_None;
 }
 
 EVROverlayError BaseOverlay::WaitFrameSync(uint32_t nTimeoutMs)
 {
-	STUBBED();
+	return VROverlayError_None;
 }
 
 EVROverlayError BaseOverlay::CreateSubviewOverlay(VROverlayHandle_t parentOverlayHandle, const char* pchSubviewOverlayKey,

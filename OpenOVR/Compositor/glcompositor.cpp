@@ -35,6 +35,8 @@ typedef void(APIENTRY* PFNGLFRAMEBUFFERTEXTURE2DEXTPROC)(GLenum target, GLenum a
 #endif
 
 static PFNGLGETTEXTURELEVELPARAMETERIVPROC glGetTextureLevelParameteriv = nullptr;
+// Set if the driver lacks one of the functions below (GLCompositor's constructor)
+static bool glFunctionsMissing = false;
 static PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData = nullptr;
 static PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer = nullptr;
 static PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers = nullptr;
@@ -52,9 +54,12 @@ static void* getGlProcAddr(const char* name)
 GLCompositor::GLCompositor(GLuint initialTexture)
 {
 	if (!glGetTextureLevelParameteriv) {
-#define LOAD_FUNC(x)                                \
-	if (!(*(void**)& x = (void*)getGlProcAddr(#x))) \
-	OOVR_ABORT("Could not get function " #x)
+		// A function the driver doesn't have: no OpenGL copies (Submit answers RequestFailed), nothing ends
+#define LOAD_FUNC(x)                                    \
+	if (!(*(void**)& x = (void*)getGlProcAddr(#x))) { \
+		OOVR_LOG("Could not get function " #x);         \
+		glFunctionsMissing = true;                      \
+	}
 		LOAD_FUNC(glGetTextureLevelParameteriv);
 		LOAD_FUNC(glCopyImageSubData);
 		LOAD_FUNC(glBindFramebuffer);
@@ -63,18 +68,28 @@ GLCompositor::GLCompositor(GLuint initialTexture)
 		LOAD_FUNC(glFramebufferTexture2D);
 	}
 #undef LOAD_FUNC
+	if (glFunctionsMissing)
+		return;
 	glGenFramebuffers(2, fboId);
 }
 
 void GLCompositor::ReadSwapchainImages()
 {
 	// Enumerate all the swapchain images
-	uint32_t imageCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr));
-	auto handles = std::vector<XrSwapchainImageOpenGLKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()));
-
+	uint32_t imageCount = 0;
 	images.clear();
+	bool listed = !SwapchainCallFailed(xrEnumerateSwapchainImages(chain, 0, &imageCount, nullptr), "xrEnumerateSwapchainImages");
+	auto handles = std::vector<XrSwapchainImageOpenGLKHR>(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
+	listed = listed && !SwapchainCallFailed(xrEnumerateSwapchainImages(chain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)handles.data()), "xrEnumerateSwapchainImages");
+	if (!listed || imageCount == 0) {
+		// A swapchain without images can't be used: it goes, and is made again at a later Submit
+		lastResult = XR_FAILED(lastResult) ? lastResult : XR_ERROR_RUNTIME_FAILURE;
+		xrDestroySwapchain(chain);
+		chain = XR_NULL_HANDLE;
+		createInfo = {};
+		return;
+	}
+
 	for (const XrSwapchainImageOpenGLKHR& img : handles) {
 		images.push_back(img.image);
 	}
@@ -88,6 +103,10 @@ void GLCompositor::ReadSwapchainImages()
 
 void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds, std::optional<XruEye>, vr::EVRSubmitFlags)
 {
+	if (glFunctionsMissing) {
+		lastResult = XR_ERROR_RUNTIME_FAILURE;
+		return;
+	}
 	// TODO: support array textures
 	// Clear any pre-existing OpenGL errors
 	while (glGetError() != GL_NO_ERROR) {
@@ -110,25 +129,18 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 	bool useBlit = submitVerticallyFlipped;
 
 	CheckCreateSwapChain(viewport.extent.width, viewport.extent.height, texture->eColorSpace, rawFormat);
+	if (!chain || XR_FAILED(lastResult) || images.empty()) {
+		if (!XR_FAILED(lastResult))
+			lastResult = XR_ERROR_RUNTIME_FAILURE;
+		return;
+	}
 	useBlit = useBlit || createInfo.format != createInfoFormat;
 
-	// First reserve an image from the swapchain
-	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	// Reserve an image from the swapchain and wait until the compositor is done with it (a timed-out wait is
+	// picked up again at the next Submit)
 	uint32_t currentIndex = 0;
-	OOVR_FAILED_XR_ABORT(xrAcquireSwapchainImage(chain, &acquireInfo, &currentIndex));
-
-	// Wait until the swapchain is ready - this makes sure the compositor isn't writing to it
-	// We don't have to pass in currentIndex since it uses the oldest acquired-but-not-waited-on
-	// image, so we should be careful with concurrency here.
-	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-
-	// If the compositor is being slow, keep trying until we get through. We're not allowed to just
-	// fail since the image has been acquired.
-	// TODO make this stuff common across compositors, so this logic applies to all of them.
-	XrResult res;
-	do {
-		OOVR_FAILED_XR_ABORT(res = xrWaitSwapchainImage(chain, &waitInfo));
-	} while (res == XR_TIMEOUT_EXPIRED);
+	if (!AcquireAndWait((uint32_t)images.size(), currentIndex))
+		return;
 
 	// Actually copy the image across
 	GLuint dst = images.at(currentIndex);
@@ -167,12 +179,14 @@ void GLBaseCompositor::CopyToSwapchain(const vr::Texture_t* texture, const vr::V
 
 	// Release the swapchain - OpenXR will use the last-released image in a swapchain
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-	OOVR_FAILED_XR_ABORT(xrReleaseSwapchainImage(chain, &releaseInfo));
+	SwapchainCallFailed(xrReleaseSwapchainImage(chain, &releaseInfo), "xrReleaseSwapchainImage");
 }
 
 void GLBaseCompositor::InvokeCubemap(const vr::Texture_t* textures)
 {
-	OOVR_ABORT("GLCompositor::InvokeCubemap: Not yet supported!");
+	// Not yet: SetSkyboxOverride answers RequestFailed
+	OOVR_LOG_ONCE("GLCompositor::InvokeCubemap: Not yet supported!");
+	lastResult = XR_ERROR_RUNTIME_FAILURE;
 }
 
 void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpace c_space, GLsizei rawformat)
@@ -206,10 +220,12 @@ void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpa
 	OOVR_LOGF("Creating new OpenGL swapchain: %dx%d with format %d", width, height, format);
 
 	// Make sure our format is supported
-	uint32_t formatCount;
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainFormats(xr_session.get(), 0, &formatCount, nullptr));
+	uint32_t formatCount = 0;
+	if (SwapchainCallFailed(xrEnumerateSwapchainFormats(xr_session.get(), 0, &formatCount, nullptr), "xrEnumerateSwapchainFormats"))
+		return;
 	std::vector<int64_t> formats(formatCount);
-	OOVR_FAILED_XR_ABORT(xrEnumerateSwapchainFormats(xr_session.get(), formatCount, &formatCount, formats.data()));
+	if (SwapchainCallFailed(xrEnumerateSwapchainFormats(xr_session.get(), formatCount, &formatCount, formats.data()), "xrEnumerateSwapchainFormats"))
+		return;
 
 	if (std::count(formats.begin(), formats.end(), format) == 0) {
 		OOVR_LOG("Missing format for swapchain creation, using fallback. Valid formats:");
@@ -224,14 +240,19 @@ void GLBaseCompositor::CheckCreateSwapChain(int width, int height, vr::EColorSpa
 
 	// Delete the old swapchain, if applicable
 	if (chain) {
-		OOVR_FAILED_XR_ABORT(xrDestroySwapchain(chain));
+		xrDestroySwapchain(chain);
 		chain = XR_NULL_HANDLE;
 	}
 
 	// Create the new one
 	createInfo = desc;
 
-	OOVR_FAILED_XR_ABORT(xrCreateSwapchain(xr_session.get(), &desc, &chain));
+	ForgetAcquiredImage(); // a new swapchain: no image of the old one is pending
+	if (SwapchainCallFailed(xrCreateSwapchain(xr_session.get(), &desc, &chain), "xrCreateSwapchain")) {
+		chain = XR_NULL_HANDLE; // tried again at the next Submit
+		createInfo = {};
+		return;
+	}
 
 	// Enumerate all the swapchain images
 	ReadSwapchainImages();

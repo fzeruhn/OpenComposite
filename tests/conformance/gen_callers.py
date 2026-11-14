@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"
 import libparse  # noqa: E402
 
 SIZE_NAME = re.compile(r"(SizeOf|SizeInBytes|Bytes|Size$|Size[A-Z_]|cb|BufferLen|Len$|Length$)")
-COUNT_NAME = re.compile(r"(Count|Capacity|Max)")
+COUNT_NAME = re.compile(r"(Count|Capacity|Max|Num[A-Z])")
+# A void* that is a graphics API object (pD3D11Device, pDstTexture, ...), not a buffer
+OBJECT_NAME = re.compile(r"(D3D|Device|Texture|Resource|Instance|Queue)")
 HANDLE_TYPE = re.compile(r"(Handle_t|^VRActionHandle_t$|^VRActionSetHandle_t$|^VRInputValueHandle_t$|^PropertyContainerHandle_t$|^SpatialAnchorHandle_t$|^IOBufferHandle_t$|^DriverHandle_t$|^PathHandle_t$)")
 INTEGRAL_TYPES = {"uint32_t", "int32_t", "uint64_t", "int64_t", "uint16_t", "int", "unsigned int", "size_t",
                   "TrackedDeviceIndex_t", "DriverId_t", "BoneIndex_t", "ScreenshotHandle_t", "glUInt_t"}
@@ -99,7 +101,8 @@ def plan_args(func):
         elif bt == "Texture_t" and t.endswith("*") and t.startswith("const"):
             setup.append(f"callers::Texture {var}(set, ctx);")
             call.append(f"{var}.get()")
-        elif t.endswith("*") and (bt.endswith("_T") or bt.startswith("ID3D") or bt.startswith("IDXGI")):
+        elif t.endswith("*") and (bt.endswith("_T") or bt.startswith("ID3D") or bt.startswith("IDXGI")
+                                  or (t in ("void *", "void*") and OBJECT_NAME.search(a.name))):
             # Pointers to Vulkan or D3D objects we can't make: null, or garbage for the invalid set
             setup.append(f"callers::Opaque<{t[:-1].strip()}> {var}(set);")
             call.append(f"{var}.get()")
