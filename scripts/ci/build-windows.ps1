@@ -83,7 +83,7 @@ else {
     Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=$Arch -host_arch=x64" | Out-Null
 }
 
-# 3. A clean build of the DLL only (the RuntimeSwitcher C# project isn't part of the release).
+# 3. A clean build of the DLL only (OpenComposite.exe and the installer are build-installer.ps1's).
 if (Test-Path -LiteralPath $Out) {
     Remove-Item -LiteralPath $Out -Recurse -Force
 }

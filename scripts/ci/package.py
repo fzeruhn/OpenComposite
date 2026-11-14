@@ -2,15 +2,20 @@
 """Packs OpenComposite's release archives from the release workflow's build artifacts.
 
     scripts/ci/package.py --version VERSION --artifacts DIR --out DIR [--os windows linux] [--repository OWNER/NAME]
+                          [--installer OpenComposite-Setup.exe]
+    scripts/ci/package.py --version VERSION --artifacts DIR --windows-folder DIR [--repository OWNER/NAME]
 
 DIR of --artifacts has a folder per build, named as the workflow's artifacts: windows-x64 (vrclient_x64.dll),
 windows-x86 (vrclient.dll), linux-x64 and linux-x86 (vrclient.so each). Made in --out:
 
     OpenComposite-windows.zip    OpenComposite/bin/vrclient_x64.dll and bin/vrclient.dll
-    OpenComposite-linux.tar.gz   OpenComposite/bin/linux64/vrclient.so and bin/vrclient.so
+    OpenComposite-linux.tar.gz   OpenComposite/bin/linux64/vrclient.so and bin/vrclient.so, and install.sh
     OpenComposite-source.tar.gz  this commit's source, submodules included
-    SHA256SUMS.txt               of the three
+    OpenComposite-Setup.exe      with --installer: that file (scripts/ci/build-installer.ps1 builds it)
+    SHA256SUMS.txt               of the others
     RELEASE_NOTES.md             the release's description
+
+--windows-folder writes the Windows archive's OpenComposite folder into DIR instead, unpacked, for the installer.
 
 Both binary archives also have an empty bin/version.txt (it keeps Steam from rewriting openvrpaths.vrpath while that
 names the folder), the licences of OpenComposite and of what is built into it, and SOURCE.txt. Each archive's entries
@@ -45,6 +50,8 @@ LICENCES = {
 }
 # The Linux builds have libunwind built in (the crash backtrace).
 LINUX_LICENCES = {"libs/libunwind/COPYING": "LICENSE_libunwind.txt"}
+# The Linux installer, run from the unpacked folder (installer/install.sh --help).
+LINUX_INSTALLER = "installer/install.sh"
 
 # artifact folder, file in it -> path in the archive
 BINARIES = {
@@ -91,7 +98,21 @@ def binary_files(os_name: str, artifacts: Path, version: str, commit: str, repos
             sys.exit(f"{path} is missing (are the submodules checked out?).")
         files[target] = (path.read_bytes(), 0o644)
     files["SOURCE.txt"] = (source_text(version, commit, repository).encode(), 0o644)
+    if os_name == "linux":
+        files["install.sh"] = ((ROOT / LINUX_INSTALLER).read_bytes(), 0o755)
     return files
+
+
+def write_folder(out: Path, files: dict[str, tuple[bytes, int]]) -> None:
+    """The archive's folder, unpacked: what the Windows installer installs."""
+    if out.exists() and any(out.iterdir()):
+        sys.exit(f"{out} isn't empty.")
+    for path, (data, mode) in sorted(files.items()):
+        target = out / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        if sys.platform != "win32":
+            target.chmod(mode)
 
 
 def directories(paths) -> list[str]:
@@ -162,21 +183,31 @@ def write_source_tar(out: Path, prefix: str, mtime: int) -> None:
     write_tar_gz(out, add)
 
 
-def notes(version: str, commit: str, repository: str, sums: str) -> str:
+def notes(version: str, commit: str, repository: str, sums: str, installer: bool) -> str:
+    setup_row = (
+        "| `OpenComposite-Setup.exe` | Windows installer: OpenComposite and its app to switch OpenVR games between it and SteamVR |\n"
+        if installer
+        else ""
+    )
+    windows = (
+        "**Windows:** run `OpenComposite-Setup.exe` (for your user, no administrator needed). It isn't signed, so Windows "
+        "may say it protected your PC: choose *More info*, then *Run anyway*. Its last page switches OpenVR games to "
+        "OpenComposite; the OpenComposite app in the Start menu switches them back, and updates OpenComposite.\n\n"
+        if installer
+        else ""
+    )
     return f"""OpenComposite {version}, built from [{commit[:12]}](https://github.com/{repository}/commit/{commit}).
 
 | File | What |
 |---|---|
-| `OpenComposite-windows.zip` | `bin\\vrclient_x64.dll` (64-bit games) and `bin\\vrclient.dll` (32-bit) |
-| `OpenComposite-linux.tar.gz` | `bin/linux64/vrclient.so` (64-bit games) and `bin/vrclient.so` (32-bit) |
+{setup_row}| `OpenComposite-windows.zip` | `bin\\vrclient_x64.dll` (64-bit games) and `bin\\vrclient.dll` (32-bit) |
+| `OpenComposite-linux.tar.gz` | `bin/linux64/vrclient.so` (64-bit games), `bin/vrclient.so` (32-bit) and `install.sh` |
 | `OpenComposite-source.tar.gz` | the source of this build, submodules included |
-| `SHA256SUMS.txt` | checksums of the three |
+| `SHA256SUMS.txt` | checksums of the others |
 
-**System-wide:** unpack the `OpenComposite` folder somewhere it can stay, and put that folder first in `"runtime"` of `openvrpaths.vrpath` (`%LOCALAPPDATA%\\openvr\\openvrpaths.vrpath` on Windows, `~/.config/openvr/openvrpaths.vrpath` on Linux). SteamVR, started again, can put itself back first.
+{windows}**Linux:** unpack the archive and run `OpenComposite/install.sh`: it copies OpenComposite to `~/.local/share/OpenComposite` (or Flatpak Steam's folder) and switches OpenVR games to it. `install.sh --help` lists the rest: switching back, updating, uninstalling, and Steam launch options for games in the Steam Runtime.
 
-**One game on Windows:** back up the game's `openvr_api.dll`, then put `vrclient_x64.dll` (or `vrclient.dll` for a 32-bit game) in its place, renamed to `openvr_api.dll`.
-
-**One game on Linux:** `VR_OVERRIDE=/path/to/OpenComposite %command%` in its Steam launch options. Games in the Steam Runtime need more: see the README's [Linux-specific info](https://github.com/{repository}#linux-specific-info).
+**By hand, and for one game only:** see the README's [Installing](https://github.com/{repository}#installing) section.
 
 OpenComposite is GPL-3.0-or-later; each archive has its licences and a `SOURCE.txt`.
 
@@ -189,13 +220,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--version", required=True)
     parser.add_argument("--artifacts", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    output = parser.add_mutually_exclusive_group(required=True)
+    output.add_argument("--out", type=Path)
+    output.add_argument("--windows-folder", type=Path)
     parser.add_argument("--os", nargs="+", choices=["windows", "linux"], default=["windows", "linux"])
     parser.add_argument("--repository", default="fzeruhn/OpenComposite")
+    parser.add_argument("--installer", type=Path, help="OpenComposite-Setup.exe, to put with the archives")
     args = parser.parse_args()
 
     commit = git("rev-parse", "HEAD").strip()
     mtime = int(git("log", "-1", "--format=%ct").strip())
+    if args.windows_folder:
+        write_folder(args.windows_folder, binary_files("windows", args.artifacts, args.version, commit, args.repository))
+        print(args.windows_folder)
+        return
     args.out.mkdir(parents=True, exist_ok=True)
 
     made = []
@@ -210,10 +248,14 @@ def main() -> None:
     out = args.out / "OpenComposite-source.tar.gz"
     write_source_tar(out, f"OpenComposite-{args.version}", mtime)
     made.append(out)
+    if args.installer:
+        out = args.out / "OpenComposite-Setup.exe"
+        out.write_bytes(args.installer.read_bytes())
+        made.append(out)
 
     sums = "".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in made)
     (args.out / "SHA256SUMS.txt").write_text(sums, newline="\n")
-    (args.out / "RELEASE_NOTES.md").write_text(notes(args.version, commit, args.repository, sums), newline="\n")
+    (args.out / "RELEASE_NOTES.md").write_text(notes(args.version, commit, args.repository, sums, bool(args.installer)), newline="\n")
     for path in made:
         print(f"{path} ({path.stat().st_size // 1024} KB)")
 

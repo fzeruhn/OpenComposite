@@ -73,10 +73,10 @@ if (ERROR_ON_WARNING)
 	add_compile_options(${ERROR_ON_WARNING_FLAG})
 endif()
 
-# === Runtime Switcher ===
+# === Runtime Switcher (OpenComposite.exe, for Visual Studio; scripts/ci/build-installer.ps1 builds it) ===
 include_external_msproject(
 	RuntimeSwitcher ${CMAKE_SOURCE_DIR}/RuntimeSwitcher/RuntimeSwitcher.csproj
-	TYPE FAE04EC0-301F-11D3-BF4B-00C04F79EFBC
+	TYPE 9A19103F-16F7-4668-BE54-9A1E7A4F7556
 	PLATFORM "AnyCPU"
 )
 

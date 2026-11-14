@@ -1,5 +1,5 @@
-# Builds OpenComposite for Windows and Linux, 64- and 32-bit, and packs the archives (scripts/ci; the same scripts build
-# locally). A v* tag (v2026.11.07, say) also puts them on its release: a pushed tag gets a new draft release, to check
+# Builds OpenComposite for Windows and Linux, 64- and 32-bit, the Windows installer, and packs the archives (scripts/ci;
+# the same scripts build locally). A v* tag (v2026.11.07, say) also puts them on its release: a pushed tag gets a new draft release, to check
 # and publish by hand; a tag made by publishing a release on GitHub's release page gets the files added to that release.
 name: Build
 
@@ -205,9 +205,57 @@ jobs:
           path: build/bin/${{ matrix.lib }}
           if-no-files-found: error
 
+  installer:
+    name: Windows installer
+    needs: windows
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: 'windows-*'
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          # Pinned, and installed over any other version the runner image has.
+          choco install innosetup --version=6.7.1 --allow-downgrade --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $iscc /? | Select-Object -First 1
+          dotnet --version
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { "dev-$($env:GITHUB_SHA.Substring(0, 12))" }
+          scripts/ci/build-installer.ps1 -Artifacts artifacts -Version $version -Out build/installer -Repository $env:GITHUB_REPOSITORY
+
+      # Packing is byte-reproducible, the installer included (its files carry the commit's time): build it again to check.
+      - name: Same bytes again
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { "dev-$($env:GITHUB_SHA.Substring(0, 12))" }
+          scripts/ci/build-installer.ps1 -Artifacts artifacts -Version $version -Out build/installer-again -Repository $env:GITHUB_REPOSITORY | Out-Null
+          $a = (Get-FileHash build/installer/OpenComposite-Setup.exe).Hash
+          $b = (Get-FileHash build/installer-again/OpenComposite-Setup.exe).Hash
+          if ($a -eq $b) { "::notice::OpenComposite-Setup.exe is the same bytes when built again ($a)." }
+          else { "::error::OpenComposite-Setup.exe differs when built again ($a, $b)."; exit 1 }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: build/installer/OpenComposite-Setup.exe
+          if-no-files-found: error
+
   package:
     name: Archives
-    needs: [windows, linux]
+    needs: [windows, linux, installer]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -220,10 +268,21 @@ jobs:
           path: artifacts
           pattern: '*-x*'
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer
+          path: installer-build
+
       - name: Pack
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA:0:12}; fi
-          python3 scripts/ci/package.py --version "$version" --artifacts artifacts --out dist --repository "$GITHUB_REPOSITORY"
+          python3 scripts/ci/package.py --version "$version" --artifacts artifacts --out dist --repository "$GITHUB_REPOSITORY" \
+            --installer installer-build/OpenComposite-Setup.exe
+
+      - name: Try install.sh
+        run: |
+          shellcheck -s sh installer/install.sh scripts/ci/test-install.sh
+          sh scripts/ci/test-install.sh dist/OpenComposite-linux.tar.gz
 
       - uses: actions/upload-artifact@v7
         with:
@@ -250,8 +309,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          set -- dist/OpenComposite-windows.zip dist/OpenComposite-linux.tar.gz dist/OpenComposite-source.tar.gz \
-            dist/SHA256SUMS.txt
+          set -- dist/OpenComposite-Setup.exe dist/OpenComposite-windows.zip dist/OpenComposite-linux.tar.gz \
+            dist/OpenComposite-source.tar.gz dist/SHA256SUMS.txt
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             # Made on GitHub's release page: add the files, and keep its title and notes.
             gh release upload "$GITHUB_REF_NAME" "$@" --clobber

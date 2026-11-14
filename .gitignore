@@ -40,6 +40,8 @@
 /RuntimeSwitcher/obj
 /RuntimeSwitcher/bin
 /RuntimeSwitcher/packages
+/RuntimeSwitcher/Tests/obj
+/RuntimeSwitcher/Tests/bin
 
 # Generated API headers
 /OpenOVR/API/opencomposite.gen.h

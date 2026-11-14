@@ -1,7 +1,6 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
-using OSIcon;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -85,8 +84,8 @@ namespace RuntimeSwitcher
             foreach (VRApp app in Apps)
             {
                 int imageId = imageListSmall.Images.Count;
-                imageListSmall.Images.Add(app.GetHighQualityIcon(IconSize.Large));
-                imageListLarge.Images.Add(app.GetHighQualityIcon(IconSize.ExtraLarge));
+                imageListSmall.Images.Add(app.GetIcon());
+                imageListLarge.Images.Add(app.GetIcon());
 
                 ListViewItem item = new ListViewItem(app.Name, imageId);
                 appsList.Items.Add(item);
@@ -136,7 +135,8 @@ namespace RuntimeSwitcher
             if (!File.Exists(path))
                 return new Dictionary<string, JObject>();
 
-            return JsonConvert.DeserializeObject<Dictionary<string, JObject>>(File.ReadAllText(path));
+            return JsonConvert.DeserializeObject<Dictionary<string, JObject>>(File.ReadAllText(path))
+                   ?? new Dictionary<string, JObject>();
         }
 
         private void appsList_MouseClick(object sender, MouseEventArgs e)
@@ -254,14 +254,23 @@ namespace RuntimeSwitcher
                 Path = exeName;
                 _config = config;
 
-                long timestamp = data["timestamp"].ToObject<long>();
+                long timestamp = data?["timestamp"]?.ToObject<long>() ?? 0;
                 Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
             }
 
-            public Icon GetHighQualityIcon(IconSize size)
+            /// <summary>The program's icon, or Windows' generic one if it's gone or has none.</summary>
+            public Icon GetIcon()
             {
-                IconInfo info = IconReader.ExtractIconFromFileEx(Path, size);
-                return info.Icon;
+                try
+                {
+                    if (File.Exists(Path))
+                        return Icon.ExtractAssociatedIcon(Path) ?? SystemIcons.Application;
+                }
+                catch (ArgumentException)
+                {
+                }
+
+                return SystemIcons.Application;
             }
 
             public enum Runtime
