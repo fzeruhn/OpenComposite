@@ -22,8 +22,11 @@
 
 #include "runtime_internal.h"
 
+#include "probe.h"
+
 #include <openxr/openxr_reflection.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <deque>
@@ -85,7 +88,12 @@ namespace {
 XrInstance kInstance = (XrInstance)(uintptr_t)0x1001;
 const XrSystemId kSystem = 1;
 
-XrTime Period() { return (XrTime)(1e9 / GetScript().displayHz); }
+// The frame period: the session's refresh rate (XR_FB_display_refresh_rate can change it), else the script's
+XrTime Period()
+{
+	float hz = St().session && St().session->refreshRate > 0 ? St().session->refreshRate : GetScript().displayHz;
+	return (XrTime)(1e9 / hz);
+}
 
 XrSessionState StateFromName(const std::string& n)
 {
@@ -99,8 +107,20 @@ XrSessionState StateFromName(const std::string& n)
 
 XrPosef SpaceInStage(const RtSpace* sp)
 {
-	XrPosef base = sp->isAction ? sp->actionPose : (sp->type == XR_REFERENCE_SPACE_TYPE_VIEW ? kHead : kIdentity);
-	return Compose(base, sp->offset);
+	return RtSpaceInStage(sp);
+}
+
+uint64_t FramesWaited()
+{
+	return St().session ? St().session->framesWaited : 0;
+}
+
+void CountFrameOrderError()
+{
+	Dump& d = GetDump();
+	std::lock_guard<std::mutex> dg(d.lock);
+	Json::Value& n = d.root["frame_order_errors"];
+	n = n.asInt() + 1;
 }
 
 // The dump's record of the app breaking the swapchain call order, and of images still acquired at destruction
@@ -188,6 +208,8 @@ XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* info, XrInstance*
 		d.root["instance"]["application"] = info->applicationInfo.applicationName;
 		d.root["frames_ended"] = 0;
 		d.root["layers"] = Json::Value(Json::arrayValue);
+		d.root["frame_order_errors"] = 0;
+		d.root["refresh_rate_requests"] = 0;
 	}
 	*instance = kInstance;
 	return XR_SUCCESS;
@@ -370,6 +392,7 @@ XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, X
 	if (St().session)
 		return XR_ERROR_LIMIT_REACHED;
 	auto session = std::make_unique<RtSession>();
+	session->refreshRate = GetScript().refreshRates.empty() ? GetScript().displayHz : GetScript().refreshRates[0];
 	std::string binding = "none";
 	for (auto* next = (const XrBaseInStructure*)info->next; next; next = next->next) {
 		if (next->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
@@ -504,9 +527,21 @@ XrResult XRAPI_CALL LocateSpace(XrSpace space, XrSpace base, XrTime, XrSpaceLoca
 	auto a = St().spaces.find((RtSpace*)space), b = St().spaces.find((RtSpace*)base);
 	if (a == St().spaces.end() || b == St().spaces.end())
 		return XR_ERROR_HANDLE_INVALID;
-	loc->pose = Compose(Inverse(SpaceInStage(b->second.get())), SpaceInStage(a->second.get()));
+	ScriptPose motion;
+	XrPosef baseInStage = SpaceInStage(b->second.get());
+	loc->pose = Compose(Inverse(baseInStage), RtSpaceInStage(a->second.get(), &motion));
 	loc->locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT
 	    | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+	// Velocities: the script's, in STAGE, turned into the base space (reference spaces stand still)
+	for (auto* n = (XrBaseOutStructure*)loc->next; n; n = n->next) {
+		if (n->type != XR_TYPE_SPACE_VELOCITY)
+			continue;
+		auto* v = (XrSpaceVelocity*)n;
+		XrQuaternionf toBase = QConj(baseInStage.orientation);
+		v->linearVelocity = QRotate(toBase, motion.linear);
+		v->angularVelocity = QRotate(toBase, motion.angular);
+		v->velocityFlags = XR_SPACE_VELOCITY_LINEAR_VALID_BIT | XR_SPACE_VELOCITY_ANGULAR_VALID_BIT;
+	}
 	return XR_SUCCESS;
 }
 
@@ -534,8 +569,9 @@ XrResult XRAPI_CALL LocateViews(XrSession, const XrViewLocateInfo* info, XrViewS
 		return XR_ERROR_SIZE_INSUFFICIENT;
 	XrPosef headInBase = Compose(Inverse(SpaceInStage(b->second.get())), kHead);
 	float half = GetScript().fovDeg * 3.14159265f / 180.0f;
+	float ipd = ScriptIpdAt(FramesWaited());
 	for (int i = 0; i < 2; i++) {
-		XrPosef eye{ { 0, 0, 0, 1 }, { (i == 0 ? -0.5f : 0.5f) * GetScript().ipd, 0, 0 } };
+		XrPosef eye{ { 0, 0, 0, 1 }, { (i == 0 ? -0.5f : 0.5f) * ipd, 0, 0 } };
 		views[i].pose = Compose(headInBase, eye);
 		views[i].fov = { -half, half, half, -half };
 	}
@@ -546,9 +582,18 @@ XrResult XRAPI_CALL LocateViews(XrSession, const XrViewLocateInfo* info, XrViewS
 
 // --- swapchains ---
 
+// What xrEnumerateSwapchainFormats lists without the script's swapchain_formats
+const std::vector<int64_t>& DefaultFormats()
+{
+	static const std::vector<int64_t> d3d = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM,
+		DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB };
+	return d3d;
+}
+
 XrResult XRAPI_CALL EnumerateSwapchainFormats(XrSession, uint32_t capacity, uint32_t* count, int64_t* formats)
 {
-	return TwoCall(capacity, count, formats, RtD3D11Formats());
+	const std::vector<int64_t>& scripted = GetScript().swapchainFormats;
+	return TwoCall(capacity, count, formats, scripted.empty() ? DefaultFormats() : scripted);
 }
 
 XrResult XRAPI_CALL CreateSwapchain(XrSession, const XrSwapchainCreateInfo* info, XrSwapchain* out)
@@ -558,6 +603,10 @@ XrResult XRAPI_CALL CreateSwapchain(XrSession, const XrSwapchainCreateInfo* info
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
+	// Scripted formats are the only ones; without them, any the API's code can make
+	const std::vector<int64_t>& scripted = GetScript().swapchainFormats;
+	if (!scripted.empty() && std::find(scripted.begin(), scripted.end(), info->format) == scripted.end())
+		return XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	auto sc = std::make_unique<RtSwapchain>();
 	XrResult r = RtD3D11CreateSwapchain(s, info, sc.get());
 	if (XR_FAILED(r))
@@ -611,6 +660,7 @@ XrResult XRAPI_CALL AcquireSwapchainImage(XrSwapchain swapchain, const XrSwapcha
 		return XR_ERROR_CALL_ORDER_INVALID;
 	}
 	*index = sc->next;
+	sc->acquiredOrder.push_back(sc->next);
 	sc->next = (sc->next + 1) % (uint32_t)sc->textures.size();
 	sc->acquired++;
 	sc->unwaited++;
@@ -646,6 +696,10 @@ XrResult XRAPI_CALL ReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapcha
 		return XR_ERROR_CALL_ORDER_INVALID;
 	}
 	it->second->acquired--;
+	if (!it->second->acquiredOrder.empty()) {
+		it->second->lastReleased = (int)it->second->acquiredOrder.front();
+		it->second->acquiredOrder.pop_front();
+	}
 	return XR_SUCCESS;
 }
 
@@ -660,6 +714,9 @@ XrResult XRAPI_CALL WaitFrame(XrSession, const XrFrameWaitInfo*, XrFrameState* f
 		return XR_ERROR_HANDLE_INVALID;
 	if (!s->running)
 		return XR_ERROR_SESSION_NOT_RUNNING;
+	// A second wait before the first one's frame began
+	if (s->framesWaited > s->framesBegun)
+		CountFrameOrderError();
 	s->framesWaited++;
 	if (s->framesWaited == 1)
 		QueueState(s, XR_SESSION_STATE_SYNCHRONIZED);
@@ -688,8 +745,10 @@ XrResult XRAPI_CALL BeginFrame(XrSession, const XrFrameBeginInfo*)
 		return XR_ERROR_HANDLE_INVALID;
 	if (!s->running)
 		return XR_ERROR_SESSION_NOT_RUNNING;
-	if (s->framesBegun >= s->framesWaited)
+	if (s->framesBegun >= s->framesWaited) {
+		CountFrameOrderError(); // a begin without a wait
 		return XR_ERROR_CALL_ORDER_INVALID;
+	}
 	bool discarded = s->frameOpen;
 	s->frameOpen = true;
 	s->framesBegun++;
@@ -714,6 +773,263 @@ const char* LayerTypeName(XrStructureType type)
 	}
 }
 
+// --- the dump's layer records ---
+
+Json::Value Vec(std::initializer_list<double> values)
+{
+	Json::Value v(Json::arrayValue);
+	for (double x : values)
+		v.append(x);
+	return v;
+}
+
+Json::Value PoseJson(const XrPosef& p)
+{
+	Json::Value v;
+	v["p"] = Vec({ p.position.x, p.position.y, p.position.z });
+	v["q"] = Vec({ p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w });
+	return v;
+}
+
+const char* EyeName(XrEyeVisibility eye)
+{
+	return eye == XR_EYE_VISIBILITY_LEFT ? "left" : eye == XR_EYE_VISIBILITY_RIGHT ? "right" : "both";
+}
+
+void Invalid(std::vector<std::string>& invalid, const std::string& what)
+{
+	if (std::find(invalid.begin(), invalid.end(), what) == invalid.end())
+		invalid.push_back(what);
+}
+
+Json::Value InvalidJson(const std::vector<std::string>& invalid)
+{
+	Json::Value v(Json::arrayValue);
+	for (const std::string& s : invalid)
+		v.append(s);
+	return v;
+}
+
+bool Normalized(const XrQuaternionf& q)
+{
+	float n = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+	return std::fabs(n - 1) < 0.01f;
+}
+
+// The space's name, and the spec's checks of a layer's space and orientation (q: none for projections)
+void RecordPlacement(Json::Value& entry, XrSpace space, const XrQuaternionf* q, std::vector<std::string>& invalid)
+{
+	auto it = St().spaces.find((RtSpace*)space);
+	if (it == St().spaces.end()) {
+		entry["space"] = "other";
+		Invalid(invalid, "unknown space");
+	} else if (it->second->isAction) {
+		entry["space"] = "other";
+	} else {
+		XrReferenceSpaceType t = it->second->type;
+		entry["space"] = t == XR_REFERENCE_SPACE_TYPE_LOCAL ? "local"
+		    : t == XR_REFERENCE_SPACE_TYPE_STAGE            ? "stage"
+		    : t == XR_REFERENCE_SPACE_TYPE_VIEW             ? "view"
+		                                                    : "other";
+	}
+	if (q && !Normalized(*q))
+		Invalid(invalid, "pose not normalized");
+}
+
+// rect, array_index, format and (when sample) samples of a sub-image, with the spec's checks of it; prefix names
+// the image in the checks ("depth " for a depth sub-image)
+void RecordSubImage(RtSession* s, Json::Value& entry, const XrSwapchainSubImage& sub, bool sample,
+    std::vector<std::string>& invalid, const std::string& prefix = "")
+{
+	const XrRect2Di& r = sub.imageRect;
+	entry["rect"] = Json::Value(Json::arrayValue);
+	for (int32_t v : { r.offset.x, r.offset.y, r.extent.width, r.extent.height })
+		entry["rect"].append(v);
+	entry["array_index"] = sub.imageArrayIndex;
+	auto it = St().swapchains.find((RtSwapchain*)sub.swapchain);
+	if (it == St().swapchains.end()) {
+		entry["format"] = Json::Value();
+		Invalid(invalid, prefix + "unknown swapchain");
+		return;
+	}
+	RtSwapchain* sc = it->second.get();
+	entry["format"] = (Json::Int64)sc->info.format;
+	if (r.extent.width < 0 || r.extent.height < 0)
+		Invalid(invalid, prefix + "negative extent");
+	else if (r.extent.width == 0 || r.extent.height == 0)
+		Invalid(invalid, prefix + "zero extent");
+	if (r.offset.x < 0 || r.offset.y < 0)
+		Invalid(invalid, prefix + "negative offset");
+	if ((int64_t)r.offset.x + r.extent.width > (int64_t)sc->info.width || (int64_t)r.offset.y + r.extent.height > (int64_t)sc->info.height)
+		Invalid(invalid, prefix + "rect outside image");
+	uint32_t layers = sc->info.arraySize ? sc->info.arraySize : 1;
+	if (sub.imageArrayIndex >= layers)
+		Invalid(invalid, prefix + "array index out of range");
+	if (sc->lastReleased < 0)
+		Invalid(invalid, prefix + "no image released");
+	if (!sample || sc->lastReleased < 0)
+		return;
+	SwapchainImage image{ s, sc, (uint32_t)sc->lastReleased };
+	Samples samples;
+	if (ProbeSamples(image, r, sub.imageArrayIndex, samples))
+		entry["samples"] = SamplesJson(samples);
+}
+
+void NeedExtension(const char* extension, const char* what, std::vector<std::string>& invalid)
+{
+	if (!RtExtensionEnabled(extension))
+		Invalid(invalid, std::string(what) + " without " + extension);
+}
+
+bool AngleIn(float a, float lo, float hi)
+{
+	return a >= lo - 1e-5f && a <= hi + 1e-5f;
+}
+
+Json::Value RecordProjectionView(RtSession* s, const XrCompositionLayerProjectionView& pv, bool sample)
+{
+	Json::Value view;
+	std::vector<std::string> invalid;
+	view["pose"] = PoseJson(pv.pose);
+	view["fov"] = Vec({ pv.fov.angleLeft, pv.fov.angleRight, pv.fov.angleUp, pv.fov.angleDown });
+	if (!Normalized(pv.pose.orientation))
+		Invalid(invalid, "pose not normalized");
+	RecordSubImage(s, view, pv.subImage, sample, invalid);
+	view["depth"] = Json::Value();
+	for (auto* n = (const XrBaseInStructure*)pv.next; n; n = n->next) {
+		if (n->type != XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR)
+			continue;
+		auto* di = (const XrCompositionLayerDepthInfoKHR*)n;
+		Json::Value depth;
+		depth["near"] = di->nearZ;
+		depth["far"] = di->farZ;
+		Json::Value sub;
+		RecordSubImage(s, sub, di->subImage, false, invalid, "depth ");
+		depth["format"] = sub["format"];
+		depth["rect"] = sub["rect"];
+		if (!(di->minDepth >= 0 && di->maxDepth <= 1 && di->minDepth <= di->maxDepth))
+			Invalid(invalid, "depth range");
+		if (di->nearZ == di->farZ)
+			Invalid(invalid, "depth near equals far");
+		NeedExtension("XR_KHR_composition_layer_depth", "depth", invalid);
+		view["depth"] = depth;
+	}
+	view["invalid"] = InvalidJson(invalid);
+	return view;
+}
+
+// A layer's dump record: placement, images and pixels, and every check of the spec's that it fails
+Json::Value RecordLayer(RtSession* s, const XrCompositionLayerBaseHeader* layer, bool sample)
+{
+	const float pi = 3.14159265f;
+	Json::Value entry;
+	std::vector<std::string> invalid;
+	if (!layer) {
+		entry["type"] = "null";
+		Invalid(invalid, "null layer");
+		entry["invalid"] = InvalidJson(invalid);
+		return entry;
+	}
+	entry["type"] = LayerTypeName(layer->type);
+	switch (layer->type) {
+	case XR_TYPE_COMPOSITION_LAYER_PROJECTION: {
+		auto* proj = (const XrCompositionLayerProjection*)layer;
+		entry["flags"] = (Json::UInt64)proj->layerFlags;
+		entry["eye_visibility"] = "both";
+		RecordPlacement(entry, proj->space, nullptr, invalid);
+		if (proj->viewCount != 2)
+			Invalid(invalid, "view count");
+		if (proj->viewCount && !proj->views)
+			Invalid(invalid, "null views");
+		entry["views"] = Json::Value(Json::arrayValue);
+		for (uint32_t v = 0; v < proj->viewCount && proj->views; v++) {
+			Json::Value view = RecordProjectionView(s, proj->views[v], sample);
+			for (const Json::Value& w : view["invalid"])
+				Invalid(invalid, w.asString());
+			entry["views"].append(view);
+		}
+		break;
+	}
+	case XR_TYPE_COMPOSITION_LAYER_QUAD: {
+		auto* quad = (const XrCompositionLayerQuad*)layer;
+		entry["flags"] = (Json::UInt64)quad->layerFlags;
+		entry["eye_visibility"] = EyeName(quad->eyeVisibility);
+		RecordPlacement(entry, quad->space, &quad->pose.orientation, invalid);
+		entry["pose"] = PoseJson(quad->pose);
+		entry["size"] = Vec({ quad->size.width, quad->size.height });
+		RecordSubImage(s, entry, quad->subImage, sample, invalid);
+		break;
+	}
+	case XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR: {
+		auto* cyl = (const XrCompositionLayerCylinderKHR*)layer;
+		entry["flags"] = (Json::UInt64)cyl->layerFlags;
+		entry["eye_visibility"] = EyeName(cyl->eyeVisibility);
+		RecordPlacement(entry, cyl->space, &cyl->pose.orientation, invalid);
+		entry["pose"] = PoseJson(cyl->pose);
+		entry["radius"] = cyl->radius;
+		entry["angles"] = Vec({ cyl->centralAngle });
+		entry["aspect_ratio"] = cyl->aspectRatio;
+		if (cyl->radius < 0)
+			Invalid(invalid, "negative radius");
+		if (!AngleIn(cyl->centralAngle, 0, 2 * pi))
+			Invalid(invalid, "central angle out of range");
+		if (!(cyl->aspectRatio > 0))
+			Invalid(invalid, "aspect ratio not positive");
+		NeedExtension("XR_KHR_composition_layer_cylinder", "cylinder", invalid);
+		RecordSubImage(s, entry, cyl->subImage, sample, invalid);
+		break;
+	}
+	case XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR: {
+		auto* eq = (const XrCompositionLayerEquirect2KHR*)layer;
+		entry["flags"] = (Json::UInt64)eq->layerFlags;
+		entry["eye_visibility"] = EyeName(eq->eyeVisibility);
+		RecordPlacement(entry, eq->space, &eq->pose.orientation, invalid);
+		entry["pose"] = PoseJson(eq->pose);
+		entry["radius"] = eq->radius;
+		entry["angles"] = Vec({ eq->centralHorizontalAngle, eq->upperVerticalAngle, eq->lowerVerticalAngle });
+		if (eq->radius < 0)
+			Invalid(invalid, "negative radius");
+		if (!AngleIn(eq->centralHorizontalAngle, 0, 2 * pi))
+			Invalid(invalid, "central angle out of range");
+		if (!AngleIn(eq->upperVerticalAngle, -pi / 2, pi / 2) || !AngleIn(eq->lowerVerticalAngle, -pi / 2, pi / 2)
+		    || eq->lowerVerticalAngle > eq->upperVerticalAngle)
+			Invalid(invalid, "vertical angles out of range");
+		NeedExtension("XR_KHR_composition_layer_equirect2", "equirect2", invalid);
+		RecordSubImage(s, entry, eq->subImage, sample, invalid);
+		break;
+	}
+	case XR_TYPE_COMPOSITION_LAYER_CUBE_KHR: {
+		auto* cube = (const XrCompositionLayerCubeKHR*)layer;
+		entry["flags"] = (Json::UInt64)cube->layerFlags;
+		entry["eye_visibility"] = EyeName(cube->eyeVisibility);
+		RecordPlacement(entry, cube->space, &cube->orientation, invalid);
+		entry["pose"] = PoseJson({ cube->orientation, { 0, 0, 0 } });
+		entry["array_index"] = cube->imageArrayIndex;
+		auto it = St().swapchains.find((RtSwapchain*)cube->swapchain);
+		if (it == St().swapchains.end()) {
+			entry["format"] = Json::Value();
+			Invalid(invalid, "unknown swapchain");
+		} else {
+			RtSwapchain* sc = it->second.get();
+			entry["format"] = (Json::Int64)sc->info.format;
+			if (sc->info.faceCount != 6)
+				Invalid(invalid, "not a cube swapchain");
+			if (cube->imageArrayIndex >= (sc->info.arraySize ? sc->info.arraySize : 1))
+				Invalid(invalid, "array index out of range");
+			if (sc->lastReleased < 0)
+				Invalid(invalid, "no image released");
+		}
+		NeedExtension("XR_KHR_composition_layer_cube", "cube", invalid);
+		break;
+	}
+	default:
+		Invalid(invalid, "unknown layer type");
+		break;
+	}
+	entry["invalid"] = InvalidJson(invalid);
+	return entry;
+}
+
 XrResult XRAPI_CALL EndFrame(XrSession, const XrFrameEndInfo* info)
 {
 	FAIL_POINT("xrEndFrame");
@@ -721,27 +1037,45 @@ XrResult XRAPI_CALL EndFrame(XrSession, const XrFrameEndInfo* info)
 	RtSession* s = St().session.get();
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
-	if (!s->frameOpen)
+	if (!s->frameOpen) {
+		CountFrameOrderError(); // an end without a begin
 		return XR_ERROR_CALL_ORDER_INVALID;
+	}
 	s->frameOpen = false;
 	s->framesEnded++;
 	Dump& d = GetDump();
+	if (!Dump::Enabled())
+		return XR_SUCCESS; // nothing recorded, nothing read back
+	// Whole records and pixels for the first 64 frames and every 32nd after: enough to check, and the dump stays
+	// small however many frames a loop ends. The readback happens under the runtime's lock: another thread's call
+	// waits for it, which makes the runtime more serialised than a real one.
+	bool keep = s->framesEnded <= 64 || s->framesEnded % 32 == 0;
+	std::vector<Json::Value> entries;
+	std::vector<std::string> frameInvalid;
+	if (info->layerCount > 16)
+		frameInvalid.push_back("too many layers"); // more than maxLayerCount
+	if (info->layerCount && !info->layers)
+		frameInvalid.push_back("null layers");
+	if (info->displayTime <= 0)
+		frameInvalid.push_back("display time not positive");
+	if (info->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_OPAQUE)
+		frameInvalid.push_back("blend mode unsupported");
+	for (uint32_t i = 0; i < info->layerCount && info->layers; i++)
+		entries.push_back(RecordLayer(s, info->layers[i], keep));
 	std::lock_guard<std::mutex> dg(d.lock);
 	d.root["frames_ended"] = (Json::UInt64)s->framesEnded;
-	for (uint32_t i = 0; i < info->layerCount; i++) {
-		const XrCompositionLayerBaseHeader* layer = info->layers[i];
-		Json::Value entry;
+	for (const std::string& what : frameInvalid) {
+		Json::Value& n = d.root["frame_invalid"][what];
+		n = n.asInt() + 1;
+	}
+	Json::Value& layers = d.root["layers"];
+	// The previous frame's records, kept only in case it was the last: dropped now
+	d.root["layers_dropped"] = d.root["layers_dropped"].asUInt64() + d.lastFrame.size();
+	d.lastFrame = Json::Value(Json::arrayValue);
+	keep = keep && layers.size() + entries.size() <= kDumpLayerCap;
+	for (Json::Value& entry : entries) {
 		entry["frame"] = (Json::UInt64)s->framesEnded;
-		entry["type"] = LayerTypeName(layer->type);
-		bool depth = false;
-		if (layer->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
-			auto* proj = (const XrCompositionLayerProjection*)layer;
-			for (uint32_t v = 0; v < proj->viewCount; v++)
-				for (auto* n = (const XrBaseInStructure*)proj->views[v].next; n; n = n->next)
-					depth = depth || n->type == XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
-		}
-		entry["depth"] = depth;
-		d.root["layers"].append(entry);
+		(keep ? layers : d.lastFrame).append(entry);
 	}
 	return XR_SUCCESS;
 }

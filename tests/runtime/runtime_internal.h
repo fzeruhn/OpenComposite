@@ -97,6 +97,8 @@ struct RtSpace {
 	XrPosef offset = kIdentity;
 	bool isAction = false;
 	XrPosef actionPose = kIdentity; // pose in STAGE for action spaces
+	RtAction* action = nullptr; // for action spaces: the action and subaction path, for the script's poses
+	XrPath subaction = XR_NULL_PATH;
 };
 
 struct RtSwapchain {
@@ -105,6 +107,8 @@ struct RtSwapchain {
 	uint32_t next = 0;
 	int acquired = 0; // acquired and not yet released
 	int unwaited = 0; // of those, not yet waited on (the spec: wait before writing, release only waited images)
+	std::deque<uint32_t> acquiredOrder; // indices acquired and not yet released, oldest first
+	int lastReleased = -1; // the image a layer shows (none released yet: -1)
 };
 
 struct RtSession {
@@ -151,17 +155,28 @@ void QueueState(RtSession* s, XrSessionState state);
 void QueueEvent(const XrEventDataBuffer& ev);
 bool RtExtensionEnabled(const char* name);
 
+// The pose in STAGE of a space (action spaces: the script's pose for the action's binding, if any); *velocity gets the
+// script's velocities in STAGE (zero without one), when not null. Lock held.
+XrPosef RtSpaceInStage(const RtSpace* sp, ScriptPose* velocity = nullptr);
+
 // swapchain_d3d11.cpp
 XrResult RtD3D11Requirements(XrGraphicsRequirementsD3D11KHR* reqs);
 XrResult RtD3D11CreateSwapchain(RtSession* session, const XrSwapchainCreateInfo* info, RtSwapchain* sc);
 void RtD3D11DestroySwapchain(RtSwapchain* sc);
 const std::vector<int64_t>& RtD3D11Formats();
+// Reads the texels at points (the image's own pixel coordinates) of image index, array layer arrayIndex, through a
+// staging copy on the session's device: bytesPerTexel each, in order, into out
+bool RtD3D11ReadTexels(RtSession* session, RtSwapchain* sc, uint32_t index, uint32_t arrayIndex,
+    const std::vector<XrOffset2Di>& points, uint32_t bytesPerTexel, std::vector<uint8_t>& out);
 
 // actions.cpp
 PFN_xrVoidFunction RtActionsLookup(const char* name);
 void RtActionsOnFrame(RtSession* s); // per xrWaitFrame (presence events)
 void RtActionsReset();
 void RtActionsDump(Json::Value& root);
+// The script's pose for an action space (the first binding path of its action, under its subaction path, that has
+// one: the current profile's bindings, else any suggested ones), false if none
+bool RtActionSpaceScripted(const RtSpace* sp, uint64_t frame, ScriptPose* out);
 
 // extensions.cpp: functions of optional extensions; *extension gets the extension that must be enabled
 PFN_xrVoidFunction RtExtensionsLookup(const char* name, const char** extension);

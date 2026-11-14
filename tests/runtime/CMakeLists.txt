@@ -6,6 +6,8 @@ add_library(oc_test_runtime SHARED
 	actions.cpp
 	extensions.cpp
 	swapchain_d3d11.cpp
+	probe.cpp
+	probe.h
 	script.cpp
 	script.h
 	oc_test_runtime.def
@@ -27,6 +29,8 @@ file(GENERATE OUTPUT ${OC_TEST_RUNTIME_MANIFEST} CONTENT "${manifest_template}")
 set(OC_TEST_RUNTIME_MANIFEST ${OC_TEST_RUNTIME_MANIFEST} PARENT_SCOPE)
 
 add_executable(runtime_smoke runtime_smoke.cpp)
+target_include_directories(runtime_smoke PRIVATE ${CMAKE_SOURCE_DIR}/libs/doctest)
+target_compile_definitions(runtime_smoke PRIVATE DOCTEST_CONFIG_USE_STD_HEADERS)
 target_link_libraries(runtime_smoke PRIVATE ${XrLib} jsoncpp d3d11 dxgi)
 add_dependencies(runtime_smoke oc_test_runtime)
 
@@ -34,7 +38,13 @@ add_test(NAME runtime_smoke COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tes
 	--env XR_RUNTIME_JSON=${OC_TEST_RUNTIME_MANIFEST}
 	--env OC_TEST_RUNTIME_DUMP=${CMAKE_CURRENT_BINARY_DIR}/runtime_smoke_dump.json
 	-- $<TARGET_FILE:runtime_smoke>)
-set_tests_properties(runtime_smoke PROPERTIES LABELS runtime)
+# The script's swapchain formats and poses: a process of its own, since the script is read once per process
+add_test(NAME runtime_smoke_script COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/unelevated.py
+	--env XR_RUNTIME_JSON=${OC_TEST_RUNTIME_MANIFEST}
+	--env OC_TEST_RUNTIME_DUMP=${CMAKE_CURRENT_BINARY_DIR}/runtime_smoke_script_dump.json
+	--env OC_TEST_RUNTIME_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/scripts/formats_poses.json
+	-- $<TARGET_FILE:runtime_smoke> --test-case=script_formats_and_poses)
+set_tests_properties(runtime_smoke runtime_smoke_script PROPERTIES LABELS runtime)
 
 add_executable(runtime_input_smoke runtime_input_smoke.cpp)
 target_link_libraries(runtime_input_smoke PRIVATE ${XrLib} d3d11 dxgi)

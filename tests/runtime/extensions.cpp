@@ -5,6 +5,7 @@
 
 #include "XR_MNDX_xdev_space.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -164,26 +165,74 @@ XrResult XRAPI_CALL GetVisibilityMask(XrSession, XrViewConfigurationType, uint32
 	return XR_SUCCESS;
 }
 
-// --- XR_FB_display_refresh_rate (not in the 1.0.12 headers) ---
+// --- XR_FB_display_refresh_rate (not in the 1.0.12 headers): the script's refresh_rates ---
+
+const XrResult kErrorDisplayRefreshRateUnsupported = (XrResult)-1000101000; // XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB
+const XrStructureType kTypeEventDisplayRefreshRateChanged = (XrStructureType)1000101000;
+struct EventDisplayRefreshRateChanged {
+	XrStructureType type;
+	const void* next;
+	XrSession session;
+	float fromDisplayRefreshRate;
+	float toDisplayRefreshRate;
+};
+
+std::vector<float> RefreshRates()
+{
+	const std::vector<float>& scripted = GetScript().refreshRates;
+	return scripted.empty() ? std::vector<float>{ GetScript().displayHz } : scripted;
+}
 
 XrResult XRAPI_CALL EnumerateDisplayRefreshRates(XrSession, uint32_t capacity, uint32_t* count, float* rates)
 {
-	*count = 1;
+	std::vector<float> list = RefreshRates();
+	*count = (uint32_t)list.size();
 	if (capacity == 0)
 		return XR_SUCCESS;
-	rates[0] = GetScript().displayHz;
+	if (capacity < list.size())
+		return XR_ERROR_SIZE_INSUFFICIENT;
+	for (size_t i = 0; i < list.size(); i++)
+		rates[i] = list[i];
 	return XR_SUCCESS;
 }
 
 XrResult XRAPI_CALL GetDisplayRefreshRate(XrSession, float* rate)
 {
-	*rate = GetScript().displayHz;
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	*rate = St().session ? St().session->refreshRate : RefreshRates()[0];
 	return XR_SUCCESS;
 }
 
+// Counted in the dump (refresh_rate_requests, and the last rate asked for); 0 asks for the runtime's choice, the first
+// rate. A change is announced with XrEventDataDisplayRefreshRateChangedFB.
 XrResult XRAPI_CALL RequestDisplayRefreshRate(XrSession, float rate)
 {
-	return (rate == 0 || rate == GetScript().displayHz) ? XR_SUCCESS : XR_ERROR_VALIDATION_FAILURE;
+	{
+		Dump& d = GetDump();
+		std::lock_guard<std::mutex> dg(d.lock);
+		d.root["refresh_rate_requests"] = d.root["refresh_rate_requests"].asInt() + 1;
+		d.root["refresh_rate_last_requested"] = rate;
+	}
+	std::vector<float> list = RefreshRates();
+	float to = rate == 0 ? list[0] : rate;
+	if (std::find(list.begin(), list.end(), to) == list.end())
+		return kErrorDisplayRefreshRateUnsupported;
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	RtSession* s = St().session.get();
+	if (!s)
+		return XR_ERROR_HANDLE_INVALID;
+	if (s->refreshRate != to) {
+		XrEventDataBuffer buf{ XR_TYPE_EVENT_DATA_BUFFER };
+		auto* ev = (EventDisplayRefreshRateChanged*)&buf;
+		ev->type = kTypeEventDisplayRefreshRateChanged;
+		ev->next = nullptr;
+		ev->session = (XrSession)s;
+		ev->fromDisplayRefreshRate = s->refreshRate;
+		ev->toDisplayRefreshRate = to;
+		s->refreshRate = to;
+		QueueEvent(buf);
+	}
+	return XR_SUCCESS;
 }
 
 } // namespace
