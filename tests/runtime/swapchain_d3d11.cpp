@@ -1,11 +1,26 @@
+// The stand-in runtime's D3D11 sessions (XR_KHR_D3D11_enable): swapchain images made on the app's device, read back
+// through a staging copy on its immediate context.
+
 #include "runtime_internal.h"
+
+#include "probe.h"
 
 #include <dxgi1_2.h>
 
 #include <algorithm>
+#include <cstring>
 
-XrResult RtD3D11Requirements(XrGraphicsRequirementsD3D11KHR* reqs)
+namespace {
+
+XrResult XRAPI_CALL GetD3D11GraphicsRequirements(XrInstance, XrSystemId, XrGraphicsRequirementsD3D11KHR* reqs)
 {
+	XrResult injected;
+	if (ScriptFails("xrGetD3D11GraphicsRequirementsKHR", &injected))
+		return injected;
+	{
+		std::lock_guard<std::recursive_mutex> g(St().lock);
+		St().requirementsQueried.insert(RtApi::D3D11);
+	}
 	IDXGIFactory1* factory = nullptr;
 	if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory)))
 		return XR_ERROR_RUNTIME_FAILURE;
@@ -14,16 +29,48 @@ XrResult RtD3D11Requirements(XrGraphicsRequirementsD3D11KHR* reqs)
 	if (factory->EnumAdapters1(0, &adapter) == S_OK) {
 		DXGI_ADAPTER_DESC1 desc;
 		adapter->GetDesc1(&desc);
+		// The first adapter, as Monado names it
 		reqs->adapterLuid = desc.AdapterLuid;
 		reqs->minFeatureLevel = D3D_FEATURE_LEVEL_11_0;
 		adapter->Release();
+		std::lock_guard<std::recursive_mutex> g(St().lock);
+		St().requiredLuid = desc.AdapterLuid;
 		result = XR_SUCCESS;
 	}
 	factory->Release();
 	return result;
 }
 
-const std::vector<int64_t>& RtD3D11Formats()
+XrResult Bind(const XrBaseInStructure* binding, RtSession* s)
+{
+	auto* b = (const XrGraphicsBindingD3D11KHR*)binding;
+	if (!b->device)
+		return XR_ERROR_GRAPHICS_DEVICE_INVALID;
+	// The device must be on the adapter the requirements named (Monado: XR_ERROR_GRAPHICS_DEVICE_INVALID)
+	IDXGIDevice* dxgi = nullptr;
+	IDXGIAdapter* adapter = nullptr;
+	DXGI_ADAPTER_DESC desc{};
+	bool known = SUCCEEDED(b->device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgi))
+	    && SUCCEEDED(dxgi->GetAdapter(&adapter)) && SUCCEEDED(adapter->GetDesc(&desc));
+	if (adapter)
+		adapter->Release();
+	if (dxgi)
+		dxgi->Release();
+	if (!known || std::memcmp(&desc.AdapterLuid, &St().requiredLuid, sizeof(LUID)) != 0)
+		return XR_ERROR_GRAPHICS_DEVICE_INVALID;
+	s->device = b->device;
+	s->device->AddRef();
+	return XR_SUCCESS;
+}
+
+void Unbind(RtSession* s)
+{
+	if (s->device)
+		s->device->Release();
+	s->device = nullptr;
+}
+
+const std::vector<int64_t>& Formats()
 {
 	static const std::vector<int64_t> formats = {
 		DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
@@ -36,14 +83,25 @@ const std::vector<int64_t>& RtD3D11Formats()
 	return formats;
 }
 
-XrResult RtD3D11CreateSwapchain(RtSession* session, const XrSwapchainCreateInfo* info, RtSwapchain* sc)
+const std::vector<int64_t>& DefaultFormats()
+{
+	static const std::vector<int64_t> formats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM,
+		DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB };
+	return formats;
+}
+
+void Destroy(RtSession*, RtSwapchain* sc)
+{
+	for (uint64_t tex : sc->images)
+		((ID3D11Texture2D*)(uintptr_t)tex)->Release();
+	sc->images.clear();
+}
+
+XrResult Create(RtSession* session, const XrSwapchainCreateInfo* info, RtSwapchain* sc)
 {
 	if (!session->device)
 		return XR_ERROR_VALIDATION_FAILURE;
-	bool known = false;
-	for (int64_t f : RtD3D11Formats())
-		known = known || f == info->format;
-	if (!known)
+	if (std::find(Formats().begin(), Formats().end(), info->format) == Formats().end())
 		return XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 
 	bool depth = info->format == DXGI_FORMAT_D32_FLOAT;
@@ -61,27 +119,28 @@ XrResult RtD3D11CreateSwapchain(RtSession* session, const XrSwapchainCreateInfo*
 	for (int i = 0; i < 3; i++) {
 		ID3D11Texture2D* tex = nullptr;
 		if (FAILED(session->device->CreateTexture2D(&desc, nullptr, &tex))) {
-			RtD3D11DestroySwapchain(sc);
+			Destroy(session, sc);
 			return XR_ERROR_RUNTIME_FAILURE;
 		}
-		sc->textures.push_back(tex);
+		sc->images.push_back((uint64_t)(uintptr_t)tex);
 	}
 	return XR_SUCCESS;
 }
 
-void RtD3D11DestroySwapchain(RtSwapchain* sc)
+void Enumerate(const RtSwapchain* sc, XrSwapchainImageBaseHeader* images)
 {
-	for (ID3D11Texture2D* tex : sc->textures)
-		tex->Release();
-	sc->textures.clear();
+	auto* out = (XrSwapchainImageD3D11KHR*)images;
+	for (size_t i = 0; i < sc->images.size(); i++)
+		out[i].texture = (ID3D11Texture2D*)(uintptr_t)sc->images[i];
 }
 
-bool RtD3D11ReadTexels(RtSession* session, RtSwapchain* sc, uint32_t index, uint32_t arrayIndex,
-    const std::vector<XrOffset2Di>& points, uint32_t bytesPerTexel, std::vector<uint8_t>& out)
+bool Read(RtSession* session, RtSwapchain* sc, uint32_t index, uint32_t arrayIndex,
+    const std::vector<XrOffset2Di>& points, uint32_t bytesPerTexel, std::vector<uint8_t>& out, std::string* why)
 {
-	if (!session->device || index >= sc->textures.size() || points.empty())
+	*why = "the D3D11 readback failed";
+	if (!session->device || index >= sc->images.size() || points.empty())
 		return false;
-	ID3D11Texture2D* tex = sc->textures[index];
+	auto* tex = (ID3D11Texture2D*)(uintptr_t)sc->images[index];
 	D3D11_TEXTURE2D_DESC desc;
 	tex->GetDesc(&desc);
 	if (arrayIndex >= desc.ArraySize)
@@ -142,4 +201,22 @@ bool RtD3D11ReadTexels(RtSession* session, RtSwapchain* sc, uint32_t index, uint
 		resolved->Release();
 	ctx->Release();
 	return ok;
+}
+
+} // namespace
+
+const RtGfx& RtD3D11Gfx()
+{
+	static const RtGfx gfx = {
+		RtApi::D3D11, "d3d11", "XR_KHR_D3D11_enable", nullptr, XR_TYPE_GRAPHICS_BINDING_D3D11_KHR, XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR,
+		Bind, Unbind, Formats, DefaultFormats, Create, Destroy, Enumerate, LayoutOfDxgi, false, Read,
+	};
+	return gfx;
+}
+
+PFN_xrVoidFunction RtD3D11Lookup(const char* name)
+{
+	if (!std::strcmp(name, "xrGetD3D11GraphicsRequirementsKHR"))
+		return (PFN_xrVoidFunction)GetD3D11GraphicsRequirements;
+	return nullptr;
 }

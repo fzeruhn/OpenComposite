@@ -291,7 +291,7 @@ bool RtExtensionsSessionInfo(const XrSessionCreateInfo* info, RtSession* session
 				return false;
 			session->overlay = true;
 		}
-		if (n->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR)
+		if (RtGfxForBinding(n->type))
 			hasBinding = true;
 	}
 	if (!hasBinding && RtExtensionEnabled("XR_MND_headless"))

@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <string>
 
-// RGBA8 values, 0xRRGGBBAA, of the rect as shown: tl is its top-left corner whatever the API's row order
+// RGBA8 values, 0xRRGGBBAA, of the rect as shown: tl is its top-left corner whatever the API's row order. They are
+// the bytes the image stores: an sRGB format's sRGB-encoded bytes, a UNORM one's linear bytes, with no conversion
+// between them; float and 10-bit channels are scaled to 8 bits. The record's format says how to read them.
 struct Samples {
 	uint32_t tl = 0, tr = 0, bl = 0, br = 0, c = 0;
 };
@@ -18,13 +20,13 @@ struct SwapchainImage {
 	uint32_t index = 0;
 };
 
-// The layout of a swapchain format's texels, whatever the API's enum for it
-enum class PixelLayout { Unknown, RGBA8, BGRA8, RGBA16F, RGB10A2, Depth };
+// The layout of a DXGI format's texels (D3D11 and D3D12)
 PixelLayout LayoutOfDxgi(int64_t format);
 
-// Reads the samples of rect in layer arrayIndex of the image, converted to RGBA8. False when it can't be read (no
-// such image, a depth or unknown format, an empty rect).
-bool ProbeSamples(SwapchainImage& image, XrRect2Di rect, uint32_t arrayIndex, Samples& out);
+// Reads the samples of rect in layer arrayIndex of the image, converted to RGBA8, through the session's API (each
+// API's staging path, RtGfx::read). False when it can't be read (no such image, a depth or unknown format, an empty
+// rect, a multisampled image on D3D12, Vulkan or OpenGL).
+bool ProbeSamples(SwapchainImage& image, XrRect2Di rect, uint32_t arrayIndex, Samples& out, std::string* why = nullptr);
 
 // {"tl": "ff0000ff", "tr": ..., "bl": ..., "br": ..., "c": ...}
 Json::Value SamplesJson(const Samples& s);

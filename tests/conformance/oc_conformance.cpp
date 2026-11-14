@@ -9,6 +9,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#pragma comment(lib, "dxgi.lib") // CreateDXGIFactory1
 #else
 #include <dlfcn.h>
 #endif
@@ -104,7 +105,19 @@ int main(int argc, char** argv)
 	ctx.againstRealRuntime = args.count("--real-runtime") != 0;
 	ctx.dataDir = args.count("--data") ? args["--data"] : OC_TEST_DATA_DIR;
 #ifdef _WIN32
-	D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &ctx.d3d11, nullptr, nullptr);
+	// The first adapter's, as an OpenXR runtime names it for D3D (one on another adapter is refused); WARP without one
+	{
+		IDXGIFactory1* factory = nullptr;
+		IDXGIAdapter1* adapter = nullptr;
+		if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory)) && factory->EnumAdapters1(0, &adapter) == S_OK) {
+			D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &ctx.d3d11, nullptr, nullptr);
+			adapter->Release();
+		}
+		if (factory)
+			factory->Release();
+	}
+	if (!ctx.d3d11)
+		D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &ctx.d3d11, nullptr, nullptr);
 #endif
 
 	VRClientCoreFactoryFn factory = LoadFactory(args["--runtime"]);

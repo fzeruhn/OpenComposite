@@ -1,5 +1,6 @@
 // oc_test_runtime: a stand-in OpenXR runtime for OpenComposite's tests. One instance, one session at a time, a
-// simulated HMD standing still at (0, 1.7, 0), D3D11 swapchains, scripted failures and events (script.h).
+// simulated HMD standing still at (0, 1.7, 0), D3D11, D3D12, Vulkan and OpenGL swapchains (each API offered when the
+// script's extensions name it), scripted failures and events (script.h).
 //
 // OpenComposite calls (grep -rhoE "\bxr[A-Z][A-Za-z0-9]+\b" DrvOpenXR OpenOVR OCOVR):
 //   xrAcquireSwapchainImage xrApplyHapticFeedback xrAttachSessionActionSets xrBeginFrame xrBeginSession
@@ -83,6 +84,52 @@ bool RtExtensionEnabled(const char* name)
 	return St().enabledExtensions.count(name) != 0;
 }
 
+const RtGfx* RtGfxOf(RtApi api)
+{
+	switch (api) {
+	case RtApi::D3D11:
+		return &RtD3D11Gfx();
+	case RtApi::D3D12:
+		return &RtD3D12Gfx();
+	case RtApi::Vulkan:
+		return &RtVulkanGfx();
+	case RtApi::OpenGL:
+		return &RtOpenGLGfx();
+	default:
+		return nullptr;
+	}
+}
+
+const RtGfx* RtGfxForBinding(XrStructureType type)
+{
+	for (RtApi api : { RtApi::D3D11, RtApi::D3D12, RtApi::Vulkan, RtApi::OpenGL })
+		if (RtGfxOf(api)->bindingType == type)
+			return RtGfxOf(api);
+	return nullptr;
+}
+
+bool RtGfxEnabled(const RtGfx& gfx)
+{
+	return RtExtensionEnabled(gfx.extension) || (gfx.extension2 && RtExtensionEnabled(gfx.extension2));
+}
+
+PFN_xrVoidFunction RtGfxLookup(const char* name, const char** extension)
+{
+	if (PFN_xrVoidFunction fn = RtD3D11Lookup(name)) {
+		*extension = "XR_KHR_D3D11_enable";
+		return fn;
+	}
+	if (PFN_xrVoidFunction fn = RtD3D12Lookup(name)) {
+		*extension = "XR_KHR_D3D12_enable";
+		return fn;
+	}
+	if (PFN_xrVoidFunction fn = RtOpenGLLookup(name)) {
+		*extension = "XR_KHR_opengl_enable";
+		return fn;
+	}
+	return RtVulkanLookup(name, extension);
+}
+
 namespace {
 
 XrInstance kInstance = (XrInstance)(uintptr_t)0x1001;
@@ -138,6 +185,21 @@ static void NoteSwapchainDestroyed(const RtSwapchain* sc)
 	std::lock_guard<std::mutex> dg(d.lock);
 	Json::Value& n = d.root["images_left_acquired"];
 	n = n.asInt() + sc->acquired;
+}
+
+// Destroys every swapchain and space of the session, and lets go of its graphics device (lock held)
+void ReleaseSession(RtSession* s)
+{
+	const RtGfx* gfx = s ? RtGfxOf(s->api) : nullptr;
+	for (auto& [p, sc] : St().swapchains) {
+		NoteSwapchainDestroyed(sc.get());
+		if (gfx)
+			gfx->destroy(s, sc.get());
+	}
+	St().swapchains.clear();
+	St().spaces.clear();
+	if (gfx)
+		gfx->unbind(s);
 }
 
 #define FAIL_POINT(name)                       \
@@ -196,7 +258,7 @@ XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* info, XrInstance*
 		enabled.insert(name);
 	}
 	St().instanceAlive = true;
-	St().d3d11RequirementsQueried = false;
+	St().requirementsQueried.clear();
 	St().enabledExtensions = enabled;
 	{
 		Dump& d = GetDump();
@@ -219,14 +281,7 @@ XrResult XRAPI_CALL DestroyInstance(XrInstance)
 {
 	{
 		std::lock_guard<std::recursive_mutex> g(St().lock);
-		for (auto& [p, sc] : St().swapchains) {
-			NoteSwapchainDestroyed(sc.get());
-			RtD3D11DestroySwapchain(sc.get());
-		}
-		St().swapchains.clear();
-		St().spaces.clear();
-		if (St().session && St().session->device)
-			St().session->device->Release();
+		ReleaseSession(St().session.get());
 		St().session.reset();
 		St().events.clear();
 		St().instanceAlive = false;
@@ -373,16 +428,6 @@ XrResult XRAPI_CALL EnumerateViewConfigurationViews(XrInstance, XrSystemId, XrVi
 	return XR_SUCCESS;
 }
 
-XrResult XRAPI_CALL GetD3D11GraphicsRequirements(XrInstance, XrSystemId, XrGraphicsRequirementsD3D11KHR* reqs)
-{
-	FAIL_POINT("xrGetD3D11GraphicsRequirementsKHR");
-	{
-		std::lock_guard<std::recursive_mutex> g(St().lock);
-		St().d3d11RequirementsQueried = true;
-	}
-	return RtD3D11Requirements(reqs);
-}
-
 // --- session ---
 
 XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, XrSession* out)
@@ -394,22 +439,33 @@ XrResult XRAPI_CALL CreateSession(XrInstance, const XrSessionCreateInfo* info, X
 	auto session = std::make_unique<RtSession>();
 	session->refreshRate = GetScript().refreshRates.empty() ? GetScript().displayHz : GetScript().refreshRates[0];
 	std::string binding = "none";
+	const RtGfx* gfx = nullptr;
+	const XrBaseInStructure* graphicsBinding = nullptr;
 	for (auto* next = (const XrBaseInStructure*)info->next; next; next = next->next) {
-		if (next->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
-			session->device = ((const XrGraphicsBindingD3D11KHR*)next)->device;
-			binding = "d3d11";
+		if (const RtGfx* g2 = RtGfxForBinding(next->type)) {
+			gfx = g2;
+			graphicsBinding = next;
 		}
 	}
-	if (binding == "d3d11" && !St().d3d11RequirementsQueried)
-		return XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING;
+	if (gfx) {
+		// A binding of an API whose extension isn't enabled is invalid
+		if (!RtGfxEnabled(*gfx))
+			return XR_ERROR_VALIDATION_FAILURE;
+		if (!St().requirementsQueried.count(gfx->api))
+			return XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING;
+	}
 	if (!RtExtensionsSessionInfo(info, session.get()))
 		return XR_ERROR_VALIDATION_FAILURE;
-	if (session->headless)
+	if (gfx) {
+		if (XrResult refused = gfx->bind(graphicsBinding, session.get()); XR_FAILED(refused))
+			return refused;
+		session->api = gfx->api;
+		binding = gfx->binding;
+	} else if (session->headless) {
 		binding = "headless";
-	if (!session->device && !session->headless)
+	} else {
 		return XR_ERROR_GRAPHICS_DEVICE_INVALID;
-	if (session->device)
-		session->device->AddRef();
+	}
 	{
 		Dump& d = GetDump();
 		std::lock_guard<std::mutex> dg(d.lock);
@@ -430,14 +486,7 @@ XrResult XRAPI_CALL DestroySession(XrSession session)
 	RtSession* s = St().session.get();
 	if (!s || (XrSession)s != session)
 		return XR_ERROR_HANDLE_INVALID;
-	for (auto& [p, sc] : St().swapchains) {
-		NoteSwapchainDestroyed(sc.get());
-		RtD3D11DestroySwapchain(sc.get());
-	}
-	St().swapchains.clear();
-	St().spaces.clear();
-	if (s->device)
-		s->device->Release();
+	ReleaseSession(s);
 	St().session.reset();
 	return XR_SUCCESS;
 }
@@ -582,18 +631,14 @@ XrResult XRAPI_CALL LocateViews(XrSession, const XrViewLocateInfo* info, XrViewS
 
 // --- swapchains ---
 
-// What xrEnumerateSwapchainFormats lists without the script's swapchain_formats
-const std::vector<int64_t>& DefaultFormats()
-{
-	static const std::vector<int64_t> d3d = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM,
-		DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB };
-	return d3d;
-}
-
+// The script's swapchain_formats, else the session's API's own list (none for a headless session)
 XrResult XRAPI_CALL EnumerateSwapchainFormats(XrSession, uint32_t capacity, uint32_t* count, int64_t* formats)
 {
-	const std::vector<int64_t>& scripted = GetScript().swapchainFormats;
-	return TwoCall(capacity, count, formats, scripted.empty() ? DefaultFormats() : scripted);
+	std::lock_guard<std::recursive_mutex> g(St().lock);
+	const RtGfx* gfx = St().session ? RtGfxOf(St().session->api) : nullptr;
+	const std::vector<int64_t>* scripted = gfx ? ScriptSwapchainFormats(gfx->binding) : nullptr;
+	static const std::vector<int64_t> none;
+	return TwoCall(capacity, count, formats, scripted ? *scripted : gfx ? gfx->defaultFormats() : none);
 }
 
 XrResult XRAPI_CALL CreateSwapchain(XrSession, const XrSwapchainCreateInfo* info, XrSwapchain* out)
@@ -604,11 +649,15 @@ XrResult XRAPI_CALL CreateSwapchain(XrSession, const XrSwapchainCreateInfo* info
 	if (!s)
 		return XR_ERROR_HANDLE_INVALID;
 	// Scripted formats are the only ones; without them, any the API's code can make
-	const std::vector<int64_t>& scripted = GetScript().swapchainFormats;
-	if (!scripted.empty() && std::find(scripted.begin(), scripted.end(), info->format) == scripted.end())
+	const RtGfx* sessionGfx = RtGfxOf(s->api);
+	const std::vector<int64_t>* scripted = sessionGfx ? ScriptSwapchainFormats(sessionGfx->binding) : nullptr;
+	if (scripted && std::find(scripted->begin(), scripted->end(), info->format) == scripted->end())
 		return XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	auto sc = std::make_unique<RtSwapchain>();
-	XrResult r = RtD3D11CreateSwapchain(s, info, sc.get());
+	const RtGfx* gfx = RtGfxOf(s->api);
+	if (!gfx)
+		return XR_ERROR_VALIDATION_FAILURE; // a headless session has no swapchains
+	XrResult r = gfx->create(s, info, sc.get());
 	if (XR_FAILED(r))
 		return r;
 	RtSwapchain* raw = sc.get();
@@ -624,7 +673,8 @@ XrResult XRAPI_CALL DestroySwapchain(XrSwapchain swapchain)
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
 	NoteSwapchainDestroyed(it->second.get());
-	RtD3D11DestroySwapchain(it->second.get());
+	if (const RtGfx* gfx = St().session ? RtGfxOf(St().session->api) : nullptr)
+		gfx->destroy(St().session.get(), it->second.get());
 	St().swapchains.erase(it);
 	return XR_SUCCESS;
 }
@@ -636,14 +686,17 @@ XrResult XRAPI_CALL EnumerateSwapchainImages(XrSwapchain swapchain, uint32_t cap
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
 	RtSwapchain* sc = it->second.get();
-	*count = (uint32_t)sc->textures.size();
+	*count = (uint32_t)sc->images.size();
 	if (capacity == 0)
 		return XR_SUCCESS;
 	if (capacity < *count)
 		return XR_ERROR_SIZE_INSUFFICIENT;
-	auto* out = (XrSwapchainImageD3D11KHR*)images;
-	for (uint32_t i = 0; i < *count; i++)
-		out[i].texture = sc->textures[i];
+	const RtGfx* gfx = St().session ? RtGfxOf(St().session->api) : nullptr;
+	if (!gfx)
+		return XR_ERROR_HANDLE_INVALID;
+	if (images[0].type != gfx->imageType)
+		return XR_ERROR_VALIDATION_FAILURE; // not the session's API's image structure
+	gfx->enumerate(sc, images);
 	return XR_SUCCESS;
 }
 
@@ -655,13 +708,13 @@ XrResult XRAPI_CALL AcquireSwapchainImage(XrSwapchain swapchain, const XrSwapcha
 	if (it == St().swapchains.end())
 		return XR_ERROR_HANDLE_INVALID;
 	RtSwapchain* sc = it->second.get();
-	if (sc->acquired >= (int)sc->textures.size()) {
+	if (sc->acquired >= (int)sc->images.size()) {
 		NoteSwapchainMisuse("acquire");
 		return XR_ERROR_CALL_ORDER_INVALID;
 	}
 	*index = sc->next;
 	sc->acquiredOrder.push_back(sc->next);
-	sc->next = (sc->next + 1) % (uint32_t)sc->textures.size();
+	sc->next = (sc->next + 1) % (uint32_t)sc->images.size();
 	sc->acquired++;
 	sc->unwaited++;
 	return XR_SUCCESS;
@@ -871,8 +924,11 @@ void RecordSubImage(RtSession* s, Json::Value& entry, const XrSwapchainSubImage&
 		return;
 	SwapchainImage image{ s, sc, (uint32_t)sc->lastReleased };
 	Samples samples;
-	if (ProbeSamples(image, r, sub.imageArrayIndex, samples))
+	std::string why;
+	if (ProbeSamples(image, r, sub.imageArrayIndex, samples, &why))
 		entry["samples"] = SamplesJson(samples);
+	else
+		entry["samples_error"] = why; // a frame that should have pixels says why it hasn't
 }
 
 void NeedExtension(const char* extension, const char* what, std::vector<std::string>& invalid)
@@ -1131,7 +1187,6 @@ const Entry kEntries[] = {
 	E("xrWaitFrame", WaitFrame),
 	E("xrBeginFrame", BeginFrame),
 	E("xrEndFrame", EndFrame),
-	X("xrGetD3D11GraphicsRequirementsKHR", GetD3D11GraphicsRequirements, "XR_KHR_D3D11_enable"),
 };
 #undef E
 #undef X
@@ -1162,7 +1217,10 @@ XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, P
 		return XR_SUCCESS;
 	}
 	const char* extension = nullptr;
-	if (PFN_xrVoidFunction fn = RtExtensionsLookup(name, &extension)) {
+	PFN_xrVoidFunction fn = RtGfxLookup(name, &extension);
+	if (!fn)
+		fn = RtExtensionsLookup(name, &extension);
+	if (fn) {
 		if (instance == XR_NULL_HANDLE)
 			return XR_ERROR_HANDLE_INVALID;
 		if (extension && !RtExtensionEnabled(extension))

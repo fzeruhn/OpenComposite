@@ -32,9 +32,7 @@ PixelLayout LayoutOfDxgi(int64_t format)
 	}
 }
 
-namespace {
-
-uint32_t BytesOf(PixelLayout layout)
+uint32_t RtBytesOf(PixelLayout layout)
 {
 	switch (layout) {
 	case PixelLayout::RGBA8:
@@ -47,6 +45,8 @@ uint32_t BytesOf(PixelLayout layout)
 		return 0;
 	}
 }
+
+namespace {
 
 float HalfToFloat(uint16_t h)
 {
@@ -108,33 +108,67 @@ std::string Hex(uint32_t v)
 
 } // namespace
 
-bool ProbeSamples(SwapchainImage& image, XrRect2Di rect, uint32_t arrayIndex, Samples& out)
+void RtNoteReadbackTimeout()
 {
+	Dump& d = GetDump();
+	std::lock_guard<std::mutex> dg(d.lock);
+	d.root["readback_timeouts"] = d.root["readback_timeouts"].asInt() + 1;
+}
+
+bool ProbeSamples(SwapchainImage& image, XrRect2Di rect, uint32_t arrayIndex, Samples& out, std::string* why)
+{
+	std::string ignored;
+	if (!why)
+		why = &ignored;
 	RtSwapchain* sc = image.swapchain;
-	if (!sc || !image.session || image.index >= sc->textures.size())
+	const RtGfx* gfx = image.session ? RtGfxOf(image.session->api) : nullptr;
+	if (!sc || !gfx || image.index >= sc->images.size()) {
+		*why = "no such image";
 		return false;
-	PixelLayout layout = LayoutOfDxgi(sc->info.format);
-	uint32_t bytes = BytesOf(layout);
-	if (!bytes)
+	}
+	PixelLayout layout = gfx->layout(sc->info.format);
+	uint32_t bytes = RtBytesOf(layout);
+	if (!bytes) {
+		*why = layout == PixelLayout::Depth ? "a depth format isn't read back" : "a format the runtime can't read back";
 		return false;
+	}
+	if (sc->info.sampleCount > 1 && gfx->api != RtApi::D3D11) {
+		*why = "a multisampled image is read back on D3D11 only";
+		return false;
+	}
 	// The part of the rect inside the image
 	int32_t w = (int32_t)sc->info.width, h = (int32_t)sc->info.height;
 	int32_t x0 = std::max(rect.offset.x, 0), y0 = std::max(rect.offset.y, 0);
 	int32_t x1 = std::min(rect.offset.x + rect.extent.width, w), y1 = std::min(rect.offset.y + rect.extent.height, h);
-	if (x1 <= x0 || y1 <= y0)
+	if (x1 <= x0 || y1 <= y0) {
+		*why = "the rect has no pixels inside the image";
 		return false;
+	}
 	uint32_t layers = (sc->info.arraySize ? sc->info.arraySize : 1) * (sc->info.faceCount ? sc->info.faceCount : 1);
-	if (arrayIndex >= layers)
+	if (arrayIndex >= layers) {
+		*why = "array index out of range";
 		return false;
-	// 2 pixels in from each edge, or as far as a small rect allows
+	}
+	// 2 pixels in from each edge, or as far as a small rect allows. The top as shown is the rect's last row in an image
+	// whose row 0 is its bottom one (OpenGL), and its first row otherwise.
 	int32_t ix = std::min(2, (x1 - x0 - 1) / 2), iy = std::min(2, (y1 - y0 - 1) / 2);
 	int32_t left = x0 + ix, right = x1 - 1 - ix, top = y0 + iy, bottom = y1 - 1 - iy;
+	// The centre: half the height down from the top as shown, the same texel on every API
+	int32_t centreY = y0 + (y1 - y0) / 2;
+	if (gfx->bottomUp) {
+		std::swap(top, bottom);
+		centreY = y1 - 1 - (y1 - y0) / 2;
+	}
 	std::vector<XrOffset2Di> points = {
-		{ left, top }, { right, top }, { left, bottom }, { right, bottom }, { (x0 + x1) / 2, (y0 + y1) / 2 },
+		{ left, top }, { right, top }, { left, bottom }, { right, bottom }, { (x0 + x1) / 2, centreY },
 	};
 	std::vector<uint8_t> texels;
-	if (!RtD3D11ReadTexels(image.session, sc, image.index, arrayIndex, points, bytes, texels) || texels.size() < 5 * bytes)
+	if (!gfx->read(image.session, sc, image.index, arrayIndex, points, bytes, texels, why))
 		return false;
+	if (texels.size() < 5 * bytes) {
+		*why = "the readback returned too little";
+		return false;
+	}
 	out.tl = ToRgba8(layout, &texels[0 * bytes]);
 	out.tr = ToRgba8(layout, &texels[1 * bytes]);
 	out.bl = ToRgba8(layout, &texels[2 * bytes]);
