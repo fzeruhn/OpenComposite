@@ -83,6 +83,10 @@ error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that not
 (case `old-events`): nothing may be written past it. The script
 format is described at the top of `tests/runtime/script.h`.
 
+A debug build of the DLL (`-DCMAKE_BUILD_TYPE=Debug -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug`) with
+`OC_CRT_LEAK_REPORT_DIR=<dir>` set writes the debug C runtime's report of what was never freed to `<dir>/<pid>.txt`
+when it unloads, so a run such as `xr_failures.py --only fail_session` shows what a failed start-up leaves behind.
+
 ## Elevated shells
 
 An elevated process's OpenXR loader ignores `XR_RUNTIME_JSON`. From an elevated shell `run.py` starts every child at

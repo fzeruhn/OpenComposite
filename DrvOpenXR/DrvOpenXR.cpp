@@ -106,11 +106,18 @@ static IBackend* StartupFailed(vr::EVRInitError* error, vr::EVRInitError e)
 		// Its destructor shuts the session and the instance down (FullShutdown)
 		delete currentBackend;
 	} else {
-		delete xr_ext;
+#ifdef _DEBUG
+		// Destroyed with the instance; the next start-up mustn't destroy it again
+		if (dbgMessenger != NULL)
+			xrDestroyDebugUtilsMessengerEXT(dbgMessenger);
+		dbgMessenger = NULL;
+#endif
 		if (xr_instance)
 			xrDestroyInstance(xr_instance);
 		xr_instance = XR_NULL_HANDLE;
 	}
+	// The extension functions, with or without a backend (FullShutdown leaves them)
+	delete xr_ext;
 	xr_ext = nullptr;
 	currentBackend = nullptr;
 	initialised = false;
@@ -326,7 +333,8 @@ IBackend* DrvOpenXR::CreateOpenXRBackend(const char* startupInfo, vr::EVRInitErr
 		dbgMessenger = NULL;
 #endif
 
-	// Load the function pointers for the extension functions
+	// Load the function pointers for the extension functions (in place of the last start-up's, whose instance is gone)
+	delete xr_ext;
 	xr_ext = new XrExt(apiFlags, extensions);
 
 	if (XrResult res = CreateSystemID(); XR_FAILED(res))

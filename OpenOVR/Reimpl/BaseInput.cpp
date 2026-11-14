@@ -366,7 +366,7 @@ BaseInput::BaseInput()
 BaseInput::~BaseInput()
 {
 	for (XrHandTrackerEXT& handTracker : handTrackers) {
-		if (handTracker != XR_NULL_HANDLE)
+		if (handTracker != XR_NULL_HANDLE && xr_ext)
 			xr_ext->xrDestroyHandTrackerEXT(handTracker);
 		handTracker = XR_NULL_HANDLE;
 	}
