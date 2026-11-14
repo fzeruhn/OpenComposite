@@ -67,7 +67,8 @@ shipped, app-facing or C API only) has a `GEN_INTERFACE` line or a reason in `no
 
 `regress.py --results <dir>/results.json --baseline baseline/<file>` fails when a record that was ok in the baseline
 isn't any more, or when an answer changes (except the run-to-run fields in `volatile.json`); `--accept` writes a new
-baseline. CI keeps `none.json` (no runtime) and `stand-in.json`. A later `--baseline` overrides the earlier ones per
+baseline, which keeps a hash of each answer and the answer itself where it is under 200 bytes, so a regression shows
+the old and the new value (`--self-test` checks that). CI keeps `none.json` (no runtime) and `stand-in.json`. A later `--baseline` overrides the earlier ones per
 record: `stand-in-x86.json` holds only the records a 32-bit run answers differently (the pointer-sized ones), and CI
 passes it after `stand-in.json`. With several, `--accept` writes the last one, so after accepting `stand-in.json` from a
 64-bit run, accept the 32-bit one with `--baseline baseline/stand-in.json --baseline baseline/stand-in-x86.json` from

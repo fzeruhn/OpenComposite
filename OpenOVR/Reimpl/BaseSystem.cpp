@@ -931,6 +931,7 @@ struct VREvent_0914_t {
 };
 #pragma pack(pop)
 static_assert(offsetof(VREvent_0914_t, data) == 8, "0.9.x events have their data at 8");
+static_assert(offsetof(VREvent_0914_t, eventAgeSeconds) == 24, "0.9.x events have their age at 24");
 #if defined(__linux__) || defined(__APPLE__)
 static_assert(sizeof(VREvent_0914_t) == 28, "0.9.x events are 28 bytes on Linux");
 #else

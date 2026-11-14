@@ -89,7 +89,7 @@ jobs:
           # Exact answers for chosen cases (expect/)
           python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases submit-edges --expect tests/conformance/expect/submit.json --out conformance/submit-edges
           if ($LASTEXITCODE) { $failed++ }
-          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-calls --expect tests/conformance/expect/old_calls.json --out conformance/old-calls
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-calls,old-events --script tests/conformance/scripts/legacy_click.json --expect tests/conformance/expect/old_calls.json --out conformance/old-calls
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases old-submit --expect tests/conformance/expect/old_submit.json --out conformance/old-submit
           if ($LASTEXITCODE) { $failed++ }
@@ -193,6 +193,13 @@ jobs:
         run: |
           python3 scripts/abort_sites.py --self-test
           python3 scripts/abort_sites.py --check
+
+      # The test tools' own checks: the game lister's fixtures, and the regression run's output
+      - name: Tool self-tests
+        if: matrix.tests
+        run: |
+          python3 tests/conformance/list_games.py --self-test
+          python3 tests/conformance/regress.py --self-test
 
       - name: Build
         run: sh scripts/ci/build-linux.sh ${{ matrix.tests && '--tests' || '' }} ${{ matrix.arch }} build "$GITHUB_SHA ($GITHUB_REF_NAME)"

@@ -1,5 +1,5 @@
 {
- "#": "The old IVRSystem calls on the stand-in (run.py --cases old-calls --expect expect/old_calls.json)",
+ "#": "The old IVRSystem and IVRTrackedCamera_001 calls on the stand-in (run.py --cases old-calls,old-events --script scripts/legacy_click.json --expect expect/old_calls.json); old-events' last frame wrote nothing past the old 32-byte event, and the right trigger's press and unpress (200, 201) read as the old struct has them: device 2 at offset 4, the button (33, the trigger) at 8, eventAgeSeconds (OpenComposite answers 0) at 24",
  "old-calls/ApplyTransform/-/-": {
   "position": [
    13.0,
@@ -57,5 +57,37 @@
  "old-calls/LoadRenderModel unknown/-/-": {
   "ret": false,
   "handle": 0
+ },
+ "old-calls/IVRTrackedCamera_001/-/-": {
+  "found": true,
+  "HasCamera": false,
+  "GetCameraFirmwareDescription": false,
+  "firmware": "xxxxxxxxxxxxxxx",
+  "GetCameraFrameDimensions": false,
+  "size": "7x7",
+  "GetCameraVideoStreamFormat": 0,
+  "GetVideoStreamElapsedTime": 0.0,
+  "GetVideoStreamFrame": "null",
+  "SupportsPauseResume": false,
+  "IsVideoStreamPaused": false,
+  "GetCameraDistortion": false,
+  "distortion": "7.000000,7.000000",
+  "GetCameraProjection": false,
+  "projection_zeroed": false
+ },
+ "old-events/frame 120/-/-": {
+  "overrun": 0
+ },
+ "old-events/event 200/-/-": {
+  "device": 2,
+  "data": "21000000000000000000000000000000",
+  "age": 0.0,
+  "age_is_finite": true
+ },
+ "old-events/event 201/-/-": {
+  "device": 2,
+  "data": "21000000000000000000000000000000",
+  "age": 0.0,
+  "age_is_finite": true
  }
 }

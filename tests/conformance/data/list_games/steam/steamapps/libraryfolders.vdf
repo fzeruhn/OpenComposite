@@ -1,0 +1,7 @@
+// The libraries, as Steam before 2021 wrote it ("LibraryFolders"); list_games.py --self-test fills in the paths
+"LibraryFolders"
+{
+	"0" { "path" "%STEAM%" }
+	"1" { "path" "%LIB2%" "label" "tab\there" }
+	"2" { "Path" "%LIB2_AGAIN%" }
+}
