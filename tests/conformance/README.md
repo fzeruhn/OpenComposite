@@ -16,10 +16,21 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
 
 - `--xr-runtime stand-in` runs OpenComposite on `oc_test_runtime` (`tests/runtime`), which needs no headset and can
   be scripted with `--script` (examples in `scripts/`). `none` gives it no OpenXR runtime at all. A manifest path
-  uses that runtime (Monado's, say).
+  uses that runtime (Monado's, say). `monado:<manifest>` runs on a Monado service that is already running (the run
+  stops at once if none is), and keeps the manifest with `--real-runtime`; there's no stand-in dump to join then.
 - `--only <regex>` limits the interface versions, `--cases a,b` runs only those cases.
 - `--expected expected/steamvr-<version>.json --differences differences.json` compares every answer with SteamVR's
   recorded ones (`record-steamvr.ps1`); `--expect <file>` checks exact values for chosen records (`expect/`).
+- `--known-failures <file>` lists records (keyed as in `--expect`) that may fail today; any other failure still fails
+  the run, and a listed record that passes is named in the summary. `--allow-skip <regex>` lets the cases it matches
+  pass `--expect` with a `skipped` record (an API this machine has no driver for).
+- The frame cases (`gfx-<api>-<what>`, `gfx_cases.cpp`) submit a test pattern through each graphics API
+  (`gfx/GfxApi.h`); a record with `"dump_join"` gets the stand-in runtime's dump joined in as `dump` (`join_dump` in
+  `run.py`), which `--expect` fields named `dump:<path>` (`dump:views[0].samples.tl`) check. Samples are the bytes
+  the swapchain image stores, as RGBA8 (`rrggbbaa`): an sRGB format's sRGB-encoded bytes, a UNORM one's linear
+  bytes, with no conversion; the record's `format` says which. A sampled view that couldn't be read says why in
+  `samples_error`. The dump keeps whole records for frames 1-64, every 32nd after and the last one
+  (`tests/runtime/script.h`).
 - Each child gets `OC_NO_MESSAGE_BOX=1` (OpenComposite ending a program exits with code 70, without a box),
   `OC_LOG_DIR` and `OC_STORE_DIR` under `--out`, so a run never touches the user's own logs or state.
 

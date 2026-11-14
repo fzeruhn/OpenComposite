@@ -80,13 +80,90 @@ static Script LoadScript()
 		pr.worn = p["worn"].asBool();
 		s.presence.push_back(pr);
 	}
+	const Json::Value& formats = root["swapchain_formats"];
+	if (formats.isArray()) {
+		for (const Json::Value& f : formats)
+			s.swapchainFormats.push_back(f.asInt64());
+	} else if (formats.isObject()) {
+		for (const std::string& api : formats.getMemberNames())
+			for (const Json::Value& f : formats[api])
+				s.swapchainFormatsByApi[api].push_back(f.asInt64());
+	}
+	if (root["poses"].isObject()) {
+		for (const std::string& path : root["poses"].getMemberNames()) {
+			const Json::Value& v = root["poses"][path];
+			auto add = [&](const Json::Value& e) {
+				ScriptPose p;
+				p.fromFrame = e["from_frame"].asUInt64();
+				if (e["p"].size() == 3)
+					p.pose.position = { e["p"][0].asFloat(), e["p"][1].asFloat(), e["p"][2].asFloat() };
+				if (e["q"].size() == 4)
+					p.pose.orientation = { e["q"][0].asFloat(), e["q"][1].asFloat(), e["q"][2].asFloat(), e["q"][3].asFloat() };
+				if (e["v"].size() == 3)
+					p.linear = { e["v"][0].asFloat(), e["v"][1].asFloat(), e["v"][2].asFloat() };
+				if (e["w"].size() == 3)
+					p.angular = { e["w"][0].asFloat(), e["w"][1].asFloat(), e["w"][2].asFloat() };
+				s.poses[path].push_back(p);
+			};
+			if (v.isArray())
+				for (const Json::Value& e : v)
+					add(e);
+			else if (v.isObject())
+				add(v);
+		}
+	}
+	for (const Json::Value& r : root["refresh_rates"])
+		s.refreshRates.push_back(r.asFloat());
+	auto addIpd = [&](const Json::Value& e) {
+		ScriptIpd c;
+		c.frame = e["frame"].asUInt64();
+		c.ipd = e["ipd"].asFloat();
+		s.ipdChanges.push_back(c);
+	};
+	if (root["ipd_change"].isArray())
+		for (const Json::Value& e : root["ipd_change"])
+			addIpd(e);
+	else if (root["ipd_change"].isObject())
+		addIpd(root["ipd_change"]);
 	return s;
+}
+
+const ScriptPose* ScriptPoseAt(const std::string& path, uint64_t frame)
+{
+	auto it = GetScript().poses.find(path);
+	if (it == GetScript().poses.end())
+		return nullptr;
+	const ScriptPose* best = nullptr;
+	for (const ScriptPose& p : it->second)
+		if (p.fromFrame <= frame && (!best || p.fromFrame >= best->fromFrame))
+			best = &p;
+	return best;
+}
+
+float ScriptIpdAt(uint64_t frame)
+{
+	float ipd = GetScript().ipd;
+	uint64_t at = 0;
+	for (const ScriptIpd& c : GetScript().ipdChanges)
+		if (c.frame <= frame && c.frame >= at) {
+			ipd = c.ipd;
+			at = c.frame;
+		}
+	return ipd;
 }
 
 const Script& GetScript()
 {
 	static Script script = LoadScript();
 	return script;
+}
+
+const std::vector<int64_t>* ScriptSwapchainFormats(const std::string& binding)
+{
+	auto it = GetScript().swapchainFormatsByApi.find(binding);
+	if (it != GetScript().swapchainFormatsByApi.end())
+		return &it->second;
+	return GetScript().swapchainFormats.empty() ? nullptr : &GetScript().swapchainFormats;
 }
 
 bool ScriptFails(const char* function, XrResult* result)
@@ -125,13 +202,24 @@ Dump& GetDump()
 	return dump;
 }
 
+bool Dump::Enabled()
+{
+	static const bool enabled = [] {
+		const char* path = std::getenv("OC_TEST_RUNTIME_DUMP");
+		return path && *path;
+	}();
+	return enabled;
+}
+
 void Dump::Write()
 {
-	const char* path = std::getenv("OC_TEST_RUNTIME_DUMP");
-	if (!path || !*path)
+	if (!Enabled())
 		return;
 	std::lock_guard<std::mutex> guard(lock);
-	std::ofstream out(path, std::ios::trunc);
+	for (const Json::Value& entry : lastFrame)
+		root["layers"].append(entry);
+	lastFrame = Json::Value(Json::arrayValue);
+	std::ofstream out(std::getenv("OC_TEST_RUNTIME_DUMP"), std::ios::trunc);
 	Json::StreamWriterBuilder wb;
 	wb["indentation"] = " ";
 	out << Json::writeString(wb, root) << "\n";

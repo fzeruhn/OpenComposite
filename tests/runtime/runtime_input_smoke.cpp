@@ -21,6 +21,7 @@
 #include <openxr/openxr_platform.h>
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 static int failures = 0;
@@ -67,8 +68,25 @@ int main(int argc, char** argv)
 	XR_OK(xrGetInstanceProcAddr(instance, "xrGetD3D11GraphicsRequirementsKHR", (PFN_xrVoidFunction*)&getReqs));
 	XrGraphicsRequirementsD3D11KHR reqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR };
 	XR_OK(getReqs(instance, system, &reqs));
+	// On the requirements' adapter (the runtime refuses a device on another one)
 	ID3D11Device* device = nullptr;
-	D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, nullptr);
+	IDXGIFactory1* factory = nullptr;
+	CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&factory);
+	IDXGIAdapter1* adapter = nullptr;
+	for (UINT i = 0; factory && factory->EnumAdapters1(i, &adapter) == S_OK; i++) {
+		DXGI_ADAPTER_DESC1 desc;
+		adapter->GetDesc1(&desc);
+		if (std::memcmp(&desc.AdapterLuid, &reqs.adapterLuid, sizeof(LUID)) == 0)
+			break;
+		adapter->Release();
+		adapter = nullptr;
+	}
+	if (factory)
+		factory->Release();
+	if (adapter) {
+		D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, nullptr);
+		adapter->Release();
+	}
 	CHECK(device != nullptr);
 	XrGraphicsBindingD3D11KHR binding{ XR_TYPE_GRAPHICS_BINDING_D3D11_KHR };
 	binding.device = device;

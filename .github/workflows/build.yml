@@ -109,6 +109,10 @@ jobs:
           if ($LASTEXITCODE) { $failed++ }
           python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events-listen,events-commit --jobs 2 --expect tests/conformance/expect/events_two_processes.json --out conformance/events-two-processes
           if ($LASTEXITCODE) { $failed++ }
+          # A frame from each graphics API, as the stand-in reads it back (expect/gfx.json; the records that fail today
+          # are in expect/gfx_known.json). D3D11 and D3D12 run on WARP; with no Vulkan or OpenGL driver here, those skip
+          python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases gfx-d3d11-basic,gfx-d3d12-basic,gfx-vk-basic,gfx-gl-basic --script tests/conformance/scripts/gfx_all_apis.json --expect tests/conformance/expect/gfx.json --known-failures tests/conformance/expect/gfx_known.json --allow-skip "gfx-(vk|gl)-.*" --out conformance/gfx
+          if ($LASTEXITCODE) { $failed++ }
           # The old input as SteamVR's legacy binding files map it, under inputEvaluator=steamvr
           python tests/conformance/run.py --runtime build/bin/${{ matrix.dll }} --conformance build/tests/oc_conformance.exe --xr-runtime stand-in --ci --cases events --script tests/conformance/scripts/legacy_click.json --ini tests/conformance/ini/steamvr_evaluator.ini --expect tests/conformance/expect/events_steamvr.json --out conformance/events-steamvr
           if ($LASTEXITCODE) { $failed++ }

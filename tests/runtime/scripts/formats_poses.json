@@ -1,0 +1,7 @@
+// runtime_smoke's script_formats_and_poses: one swapchain format, and the left aim pose with its velocities
+{
+	"swapchain_formats": [29],
+	"poses": {
+		"/user/hand/left/input/aim/pose": { "p": [0.1, 1.2, -0.4], "q": [0, 0, 0, 1], "v": [1, 0, 0], "w": [0, 2, 0] }
+	}
+}

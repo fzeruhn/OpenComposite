@@ -1,0 +1,59 @@
+{
+ "#": "The frame cases (run.py --cases gfx-d3d11-basic,gfx-d3d12-basic,gfx-vk-basic,gfx-gl-basic --script scripts/gfx_all_apis.json --expect expect/gfx.json): the test pattern of gfx/GfxApi.h, 1024 x 1024 RGBA8 sRGB per eye with full bounds, as the stand-in runtime read back the last projection layer's views (dump:). Eye 1's quadrants are rotated once clockwise. Known failures are in expect/gfx_known.json.",
+ "gfx-d3d11-basic/frame/-/-": {
+  "left": 0,
+  "right": 0,
+  "dump:views[0].invalid": [],
+  "dump:views[1].invalid": [],
+  "dump:views[0].samples.tl": "ff0000ff",
+  "dump:views[0].samples.tr": "00ff00ff",
+  "dump:views[0].samples.bl": "0000ffff",
+  "dump:views[0].samples.br": "ffffffff",
+  "dump:views[1].samples.tl": "0000ffff",
+  "dump:views[1].samples.tr": "ff0000ff",
+  "dump:views[1].samples.bl": "ffffffff",
+  "dump:views[1].samples.br": "00ff00ff"
+ },
+ "gfx-d3d12-basic/frame/-/-": {
+  "left": 0,
+  "right": 0,
+  "dump:views[0].invalid": [],
+  "dump:views[1].invalid": [],
+  "dump:views[0].samples.tl": "ff0000ff",
+  "dump:views[0].samples.tr": "00ff00ff",
+  "dump:views[0].samples.bl": "0000ffff",
+  "dump:views[0].samples.br": "ffffffff",
+  "dump:views[1].samples.tl": "0000ffff",
+  "dump:views[1].samples.tr": "ff0000ff",
+  "dump:views[1].samples.bl": "ffffffff",
+  "dump:views[1].samples.br": "00ff00ff"
+ },
+ "gfx-vk-basic/frame/-/-": {
+  "left": 0,
+  "right": 0,
+  "dump:views[0].invalid": [],
+  "dump:views[1].invalid": [],
+  "dump:views[0].samples.tl": "ff0000ff",
+  "dump:views[0].samples.tr": "00ff00ff",
+  "dump:views[0].samples.bl": "0000ffff",
+  "dump:views[0].samples.br": "ffffffff",
+  "dump:views[1].samples.tl": "0000ffff",
+  "dump:views[1].samples.tr": "ff0000ff",
+  "dump:views[1].samples.bl": "ffffffff",
+  "dump:views[1].samples.br": "00ff00ff"
+ },
+ "gfx-gl-basic/frame/-/-": {
+  "left": 0,
+  "right": 0,
+  "dump:views[0].invalid": [],
+  "dump:views[1].invalid": [],
+  "dump:views[0].samples.tl": "ff0000ff",
+  "dump:views[0].samples.tr": "00ff00ff",
+  "dump:views[0].samples.bl": "0000ffff",
+  "dump:views[0].samples.br": "ffffffff",
+  "dump:views[1].samples.tl": "0000ffff",
+  "dump:views[1].samples.tr": "ff0000ff",
+  "dump:views[1].samples.bl": "ffffffff",
+  "dump:views[1].samples.br": "00ff00ff"
+ }
+}

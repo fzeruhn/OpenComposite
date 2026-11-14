@@ -48,5 +48,6 @@ struct CaseContext {
 
 using CaseFn = void (*)(CaseContext& ctx);
 const std::map<std::string, CaseFn>& Cases();
+const std::map<std::string, CaseFn>& GfxCases(); // gfx_cases.cpp, part of Cases()
 
 } // namespace conformance
