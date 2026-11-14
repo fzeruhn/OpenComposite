@@ -111,9 +111,25 @@ struct OOVR_Compositor_StageRenderSettings {
 	bool m_bWireframe = false;
 };
 
+// IVRCompositor_005 and 006 (SDK 0.9.0 and 0.9.2): the device SetGraphicsDevice names, which says what Submit's bare
+// texture pointers are
+enum OOVR_Compositor_DeviceType {
+	OOVR_Compositor_DeviceType_None,
+	OOVR_Compositor_DeviceType_D3D9,
+	OOVR_Compositor_DeviceType_D3D9Ex,
+	OOVR_Compositor_DeviceType_D3D10,
+	OOVR_Compositor_DeviceType_D3D11,
+	OOVR_Compositor_DeviceType_OpenGL,
+};
+
 class BaseCompositor {
 private:
 	bool leftEyeSubmitted = false, rightEyeSubmitted = false;
+
+	// The old compositor window calls (IVRCompositor_005-008) and SetGraphicsDevice (005, 006)
+	bool oldVSync = true;
+	float oldGamma = 1.0f;
+	OOVR_Compositor_DeviceType oldDeviceType = OOVR_Compositor_DeviceType_None;
 
 	vr::HmdColor_t fadeColour = { 0, 0, 0, 0 };
 	float fadeTime = 0;
@@ -374,4 +390,43 @@ public:
 
 	/** Get the most up-to-date predicted (or recorded - up to 100ms old) set of poses for a given frame id. */
 	ovr_enum_t GetPosesForFrame(uint32_t unPosePredictionID, vr::TrackedDevicePose_t* pPoseArray, uint32_t unPoseArrayCount);
+
+	// ------------------------------------
+	// IVRCompositor_005-008 (SDK 0.9.0 to 0.9.11)
+	// ------------------------------------
+
+	/** Returns the last error that occurred in the compositor (none is kept: an empty string, 0) */
+	uint32_t GetLastError(VR_OUT_STRING() char* pchBuffer, uint32_t unBufferSize);
+
+	/** The compositor window's vsync and gamma: there's no window on OpenXR, so these are only remembered */
+	void SetVSync(bool bVSync);
+	bool GetVSync();
+	void SetGamma(float fGamma);
+	float GetGamma();
+
+	/** IVRCompositor_005 and 006: what Submit's texture pointers are (D3D11 or OpenGL; D3D9 and D3D10 can't be shown) */
+	void SetGraphicsDevice(OOVR_Compositor_DeviceType eType, void* pDevice);
+
+	/** The texture type of the device SetGraphicsDevice named: false unless D3D11 or OpenGL (also IVROverlay_001's) */
+	bool OldDeviceTextureType(vr::ETextureType* pType) const;
+
+	/** IVRCompositor_005 and 006's Submit: a bare texture of the API SetGraphicsDevice named */
+	ovr_enum_t SubmitForDevice(vr::EVREye eEye, void* pTexture, const vr::VRTextureBounds_t* pBounds);
+
+	/** IVRCompositor_007 and 008's Submit and SetSkyboxOverride: a bare texture of the API given (DirectX 0, OpenGL 1,
+	 * as ETextureType) */
+	ovr_enum_t SubmitWithConvention(vr::EVREye eEye, EGraphicsAPIConvention eTextureType, void* pTexture,
+	    const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags);
+	ovr_enum_t SetSkyboxOverrideWithConvention(EGraphicsAPIConvention eTextureType, void* pFront, void* pBack,
+	    void* pLeft, void* pRight, void* pTop, void* pBottom);
+
+	/** IVRCompositor_005's scene overlay: a quad drawn over the scene. OpenComposite draws none (OC_UNSUPPORTED). */
+	void GetOverlayDefaults(vr::Compositor_OverlaySettings* pSettings);
+	void SetOverlay(void* pTexture, vr::Compositor_OverlaySettings* pSettings);
+	void SetOverlayRaw(void* buffer, uint32_t width, uint32_t height, uint32_t depth, vr::Compositor_OverlaySettings* pSettings);
+	void SetOverlayFromFile(const char* pchFilePath, vr::Compositor_OverlaySettings* pSettings);
+	void ClearOverlay();
+	bool ComputeOverlayIntersection(const vr::Compositor_OverlaySettings* pSettings, float fAspectRatio,
+	    vr::ETrackingUniverseOrigin eOrigin, vr::HmdVector3_t vSource, vr::HmdVector3_t vDirection,
+	    vr::HmdVector2_t* pvecIntersectionUV, vr::HmdVector3_t* pvecIntersectionTrackingSpace);
 };

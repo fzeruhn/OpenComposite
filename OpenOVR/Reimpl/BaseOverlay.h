@@ -7,6 +7,16 @@
 #include <set>
 #include <vector>
 
+// IVROverlay_001-003 (SDK 0.9.2 to 0.9.5) declare their own handle and error types, the same as today's
+typedef vr::VROverlayHandle_t OOVR_VROverlayHandle_t;
+typedef vr::EVROverlayError OOVR_VROverlayError;
+
+// IVROverlay_001 (0.9.2): whether the system button shows the overlay
+enum OOVR_VROverlayVisibility {
+	OOVR_VROverlayVisibility_Manual = 0, // There is no automatic visibility for the overlay
+	OOVR_VROverlayVisibility_SystemOverlay = 1, // Visibility, input, and transform are controlled by the system button
+};
+
 enum OOVR_VROverlayInputMethod {
 	VROverlayInputMethod_None = 0, // No input events will be generated automatically for this overlay
 	VROverlayInputMethod_Mouse = 1, // Tracked controllers will get mouse events automatically
@@ -432,6 +442,40 @@ public:
 	/** Returns true if the specified overlay is the hover target. An overlay is the hover target when it is the last overlay "moused over"
 	 * by the virtual mouse pointer */
 	bool IsHoverTargetOverlay(vr::VROverlayHandle_t ulOverlayHandle);
+
+	// ------------------------------------
+	// Old versions
+	// ------------------------------------
+
+	/** IVROverlay_021 and later (SDK 1.8.19 on) pass a flag as its mask (1 << n); the versions before passed n, which
+	 * SetOverlayFlag takes. The flags are kept as masks either way, so GetOverlayFlags answers the same. */
+	vr::EVROverlayError SetOverlayFlagMask(vr::VROverlayHandle_t ulOverlayHandle, uint32_t flagMask, bool bEnabled);
+	vr::EVROverlayError GetOverlayFlagMask(vr::VROverlayHandle_t ulOverlayHandle, uint32_t flagMask, bool* pbEnabled);
+
+	/** IVROverlay_001-006 (SDK 0.9.2 to 0.9.11): the overlay's gamma, kept and answered (2.2 for a linear texture) */
+	vr::EVROverlayError SetOverlayGamma(vr::VROverlayHandle_t ulOverlayHandle, float fGamma);
+	vr::EVROverlayError GetOverlayGamma(vr::VROverlayHandle_t ulOverlayHandle, float* pfGamma);
+
+	/** IVROverlay_001: system overlays, shown by the system button. There's no system button menu on OpenXR, so none is
+	 * visible; the settings are kept and answered. */
+	vr::EVROverlayError SetOverlayVisibility(vr::VROverlayHandle_t ulOverlayHandle, OOVR_VROverlayVisibility eOverlayVisibility);
+	vr::EVROverlayError GetOverlayVisibility(vr::VROverlayHandle_t ulOverlayHandle, OOVR_VROverlayVisibility* peOverlayVisibility);
+	bool IsSystemOverlayVisible();
+	bool IsActiveSystemOverlay(vr::VROverlayHandle_t ulOverlayHandle);
+	vr::EVROverlayError SetSystemOverlaySceneProcess(vr::VROverlayHandle_t ulOverlayHandle, uint32_t unProcessId);
+	vr::EVROverlayError GetSystemOverlaySceneProcess(vr::VROverlayHandle_t ulOverlayHandle, uint32_t* punProcessId);
+
+	/** IVROverlay_001-008 (SDK 0.9.2 to 0.9.14) poll into the 32-byte VREvent_t of then (BaseSystem::WriteOldEvent) */
+	bool PollNextOverlayEventOld(vr::VROverlayHandle_t ulOverlayHandle, vr::VREvent_t* pEvent);
+
+	/** IVROverlay_001: a bare texture of the device IVRCompositor::SetGraphicsDevice named */
+	vr::EVROverlayError SetOverlayTextureForDevice(vr::VROverlayHandle_t ulOverlayHandle, void* pTexture);
+
+	/** IVROverlay_002-006: a bare texture of the API given (DirectX 0, OpenGL 1, as ETextureType) */
+	vr::EVROverlayError SetOverlayTextureWithConvention(vr::VROverlayHandle_t ulOverlayHandle, EGraphicsAPIConvention eTextureType, void* pTexture);
+
+	/** IVROverlay_005 (0.9.9): the overlay last "moused over", today's hover target */
+	bool IsFocusOverlay(vr::VROverlayHandle_t ulOverlayHandle);
 
 	/** Returns the current Gamepad focus overlay */
 	vr::VROverlayHandle_t GetGamepadFocusOverlay();

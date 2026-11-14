@@ -40,14 +40,20 @@ match; `-WhatIf` only lists them. Close SteamVR, Monado and anything VR first.
 `differences.json` lists the differences that are expected between SteamVR's null HMD and OpenComposite (display
 geometry, timing and poses, device properties, handle numbers, the PC's own apps and settings, and the app types
 OpenComposite doesn't support yet), each with its reason. Every other difference is a bug to fix or to explain there.
-Records SteamVR answered while restarting between children (init errors 115, 117, 119) aren't compared.
+An entry matches `interface` and `method` (regexes) and `field`, and, if it has one, `apptype` (a regex of the app type
+numbers). Records SteamVR answered while restarting between children (init errors 115, 117, 119) aren't compared.
+
+`scripts/openvr_inventory.py --check` (run by CI) fails unless every version in `interfaces.txt` (every one Valve has
+shipped, app-facing or C API only) has a `GEN_INTERFACE` line or a reason in `not_implemented.txt`.
 
 ## Failed OpenXR calls
 
 `xr_failures.py --runtime <dll> --conformance <exe> --out <dir>` runs the stand-in runtime with each script in
 `scripts/` (a failing `xrCreateInstance`, no headset, a dropped frame, a lost or exiting session, a failed swapchain,
 refused binding suggestions) and checks what `expect/xr_failures.json` says OpenComposite does for each: the init
-error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that nothing ends or crashes. The script
+error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that nothing ends or crashes.
+`exiting_old_events` polls that quit through IVRSystem_009, whose game passes SDK 0.9.x's 32-byte `VREvent_t`
+(case `old-events`): nothing may be written past it. The script
 format is described at the top of `tests/runtime/script.h`.
 
 ## Elevated shells

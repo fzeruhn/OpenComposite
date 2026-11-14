@@ -231,8 +231,10 @@ def compare(results, expected_path, differences_path):
         for field in ("ret", "out", "init_error", "lookup_error"):
             if r.get(field) == e.get(field):
                 continue
+            # An entry may also name the app types it's for ("apptype": a regex of their numbers)
             if any(re.fullmatch(d["interface"], r.get("interface", r.get("case", ""))) and re.fullmatch(d["method"], r.get("method", ""))
-                   and d["field"] == field for d in allowed):
+                   and d["field"] == field and ("apptype" not in d or re.fullmatch(d["apptype"], str(r.get("apptype", ""))))
+                   for d in allowed):
                 continue
             diffs.append(f'{key_of(r)} {field}: got {json.dumps(r.get(field))}, SteamVR {json.dumps(e.get(field))}')
     return diffs

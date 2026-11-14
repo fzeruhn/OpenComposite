@@ -2,3 +2,9 @@
 IVRIPCResourceManagerClient_001 SteamVR-internal
 IVRIPCResourceManagerClient_002 SteamVR-internal
 IVRIPCResourceManagerClient_003 SteamVR-internal
+IVRBlockQueue_004 C API only: SteamVR's shared-memory queues between its processes and drivers, none of which are here
+IVRBlockQueue_005 C API only: as IVRBlockQueue_004
+IVRCameraAccess_001 C API only (SDK 0.9.2 to 0.9.10): the camera calls IVRTrackedCamera took over; no camera here either
+IVRChaperoneSetup_001 C API only (SDK 0.9.2 to 0.9.8): never in openvr.h, so no C++ app uses it; IVRChaperoneSetup_004 on are offered
+IVRChaperoneSetup_002 C API only (SDK 0.9.9 to 0.9.10): as IVRChaperoneSetup_001
+IVRChaperoneSetup_003 C API only (SDK 0.9.11): as IVRChaperoneSetup_001

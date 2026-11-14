@@ -5,8 +5,26 @@
  * 0,0,0 is the preferred standing area center.
  * 0Y is the floor height.
  * -Z is the preferred forward facing direction. */
+// IVRChaperone_002 (SDK 0.9.0 to 0.9.10)'s bounds
+struct OOVR_ChaperoneSoftBoundsInfo_t {
+	vr::HmdQuad_t quadCorners;
+};
+struct OOVR_ChaperoneSeatedBoundsInfo_t {
+	vr::HmdVector3_t vSeatedHeadPosition;
+	vr::HmdVector3_t vDeskEdgePositions[2];
+};
+
 class BaseChaperone {
 public:
+	/** IVRChaperone_002: the soft bounds are today's play area */
+	bool GetSoftBoundsInfo(OOVR_ChaperoneSoftBoundsInfo_t* pInfo);
+
+	/** IVRChaperone_002: the hard bounds are today's collision bounds */
+	bool GetHardBoundsInfo(VR_OUT_ARRAY_COUNT(punQuadsCount) vr::HmdQuad_t* pQuadsBuffer, uint32_t* punQuadsCount);
+
+	/** IVRChaperone_002: the seated position and desk edge, which the OpenXR runtime doesn't record: none */
+	bool GetSeatedBoundsInfo(OOVR_ChaperoneSeatedBoundsInfo_t* pInfo);
+
 	enum BaseChaperoneCalibrationState : int;
 
 	/** Get the current state of Chaperone calibration. This state can change at any time during a session due to physical base station changes. **/
@@ -32,6 +50,9 @@ public:
 
 	/** Get the current chaperone bounds draw color and brightness **/
 	void GetBoundsColor(vr::HmdColor_t* pOutputColorArray, int nNumOutputColors, float flCollisionBoundsFadeDistance, vr::HmdColor_t* pOutputCameraColor);
+
+	/** IVRChaperone_002: the colours alone, as today's call answers them */
+	void GetBoundsColor(vr::HmdColor_t* pOutputColorArray, int nNumOutputColors);
 
 	/** Determine whether the bounds are showing right now **/
 	bool AreBoundsVisible();

@@ -38,8 +38,11 @@ public:
 	VROverlayInputMethod inputMethod = VROverlayInputMethod_None; // TODO fire events
 	HmdVector2_t mouseScale = { 1.0f, 1.0f };
 	bool highQuality = false;
-	uint64_t flags = 0;
+	uint64_t flags = 0; // as masks: flag n is 1 << n
 	float texelAspect = 1;
+	float gamma = 1.0f; // IVROverlay_001-006
+	int visibility = 0; // IVROverlay_001's VROverlayVisibility
+	uint32_t systemOverlaySceneProcess = 0; // IVROverlay_001
 	std::queue<VREvent_t> eventQueue;
 
 	// Kept and returned, not shown yet (drawing or using them is not implemented yet)
@@ -958,6 +961,118 @@ bool BaseOverlay::HandleControllerOverlayInteractionAsMouse(VROverlayHandle_t ul
 {
 	OC_UNSUPPORTED(false, "HandleControllerOverlayInteractionAsMouse: no laser mouse yet");
 }
+EVROverlayError BaseOverlay::SetOverlayFlagMask(VROverlayHandle_t ulOverlayHandle, uint32_t flagMask, bool bEnabled)
+{
+	USEH();
+	if (bEnabled)
+		overlay->flags |= flagMask;
+	else
+		overlay->flags &= ~(uint64_t)flagMask;
+	return VROverlayError_None;
+}
+
+EVROverlayError BaseOverlay::GetOverlayFlagMask(VROverlayHandle_t ulOverlayHandle, uint32_t flagMask, bool* pbEnabled)
+{
+	USEH();
+	if (!pbEnabled)
+		return VROverlayError_InvalidParameter;
+	*pbEnabled = flagMask != 0 && (overlay->flags & flagMask) == flagMask;
+	return VROverlayError_None;
+}
+
+EVROverlayError BaseOverlay::SetOverlayGamma(VROverlayHandle_t ulOverlayHandle, float fGamma)
+{
+	USEH();
+	overlay->gamma = fGamma;
+	return VROverlayError_None;
+}
+
+EVROverlayError BaseOverlay::GetOverlayGamma(VROverlayHandle_t ulOverlayHandle, float* pfGamma)
+{
+	USEH();
+	if (!pfGamma)
+		return VROverlayError_InvalidParameter;
+	*pfGamma = overlay->gamma;
+	return VROverlayError_None;
+}
+
+EVROverlayError BaseOverlay::SetOverlayVisibility(VROverlayHandle_t ulOverlayHandle, OOVR_VROverlayVisibility eOverlayVisibility)
+{
+	USEH();
+	overlay->visibility = (int)eOverlayVisibility;
+	return VROverlayError_None;
+}
+
+EVROverlayError BaseOverlay::GetOverlayVisibility(VROverlayHandle_t ulOverlayHandle, OOVR_VROverlayVisibility* peOverlayVisibility)
+{
+	USEH();
+	if (!peOverlayVisibility)
+		return VROverlayError_InvalidParameter;
+	*peOverlayVisibility = (OOVR_VROverlayVisibility)overlay->visibility;
+	return VROverlayError_None;
+}
+
+bool BaseOverlay::IsSystemOverlayVisible()
+{
+	// The system button opens the OpenXR runtime's own menu, not one of these
+	return false;
+}
+
+bool BaseOverlay::IsActiveSystemOverlay(VROverlayHandle_t ulOverlayHandle)
+{
+	return false;
+}
+
+EVROverlayError BaseOverlay::SetSystemOverlaySceneProcess(VROverlayHandle_t ulOverlayHandle, uint32_t unProcessId)
+{
+	USEH();
+	overlay->systemOverlaySceneProcess = unProcessId;
+	return VROverlayError_None;
+}
+
+EVROverlayError BaseOverlay::GetSystemOverlaySceneProcess(VROverlayHandle_t ulOverlayHandle, uint32_t* punProcessId)
+{
+	USEH();
+	if (!punProcessId)
+		return VROverlayError_InvalidParameter;
+	*punProcessId = overlay->systemOverlaySceneProcess;
+	return VROverlayError_None;
+}
+
+bool BaseOverlay::PollNextOverlayEventOld(VROverlayHandle_t ulOverlayHandle, VREvent_t* pEvent)
+{
+	if (!pEvent)
+		return false;
+	memset(pEvent, 0, BaseSystem::kOldEventSize);
+	VREvent_t event = {};
+	if (!PollNextOverlayEvent(ulOverlayHandle, &event, sizeof(event)))
+		return false;
+	BaseSystem::WriteOldEvent(event, pEvent);
+	return true;
+}
+
+EVROverlayError BaseOverlay::SetOverlayTextureForDevice(VROverlayHandle_t ulOverlayHandle, void* pTexture)
+{
+	Texture_t texture = { pTexture, TextureType_DirectX, ColorSpace_Auto };
+	BaseCompositor* compositor = GetUnsafeBaseCompositor();
+	if (!compositor || !compositor->OldDeviceTextureType(&texture.eType))
+		OC_UNSUPPORTED(VROverlayError_InvalidTexture, "SetOverlayTexture (IVROverlay_001): IVRCompositor::SetGraphicsDevice "
+		                                              "named no D3D11 or OpenGL device");
+	return SetOverlayTexture(ulOverlayHandle, &texture);
+}
+
+EVROverlayError BaseOverlay::SetOverlayTextureWithConvention(VROverlayHandle_t ulOverlayHandle, EGraphicsAPIConvention eTextureType, void* pTexture)
+{
+	// API_DirectX and API_OpenGL are TextureType_DirectX and TextureType_OpenGL
+	Texture_t texture = { pTexture, (ETextureType)eTextureType, ColorSpace_Auto };
+	return SetOverlayTexture(ulOverlayHandle, &texture);
+}
+
+bool BaseOverlay::IsFocusOverlay(VROverlayHandle_t ulOverlayHandle)
+{
+	return IsHoverTargetOverlay(ulOverlayHandle);
+}
+
 bool BaseOverlay::IsHoverTargetOverlay(VROverlayHandle_t ulOverlayHandle)
 {
 	OC_UNSUPPORTED(false, "IsHoverTargetOverlay: no laser mouse yet");

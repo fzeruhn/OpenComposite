@@ -1,0 +1,40 @@
+{
+ "#": "The old overlay calls on the stand-in (run.py --cases old-overlay --expect expect/old_overlay.json). Events in SDK 0.9.x's 32-byte layout (keyboard user value at 16, nothing past 32); NoDashboardTab as 007's bit number 3 is GetOverlayFlags 8; SideBySide_Parallel as 028's mask 1 << 10 is 1024 and 007's bit 10; 001's SetOverlayTexture with no SetGraphicsDevice is 24 (InvalidTexture).",
+ "old-overlay/CreateOverlay/-/-": {
+  "ret": 0
+ },
+ "old-overlay/IVROverlay_007 PollNextOverlayEvent/-/-": {
+  "polled": true,
+  "type": 1202,
+  "user value": 1234605616436508552,
+  "overrun": 0
+ },
+ "old-overlay/IVRSystem_009 PollNextEvent/-/-": {
+  "polled": true,
+  "type": 1202,
+  "user value": 21930,
+  "overrun": 0
+ },
+ "old-overlay/flags/-/-": {
+  "set 007": 0,
+  "after 007": 8,
+  "set 028": 0,
+  "028 enabled": true,
+  "after 028": 1024,
+  "007 sees it": true
+ },
+ "old-overlay/IVROverlay_006 gamma/-/-": {
+  "set": 0,
+  "get": 0,
+  "value": 0.5
+ },
+ "old-overlay/IVROverlay_001 visibility/-/-": {
+  "set": 0,
+  "get": 0,
+  "value": 1,
+  "system overlay visible": false
+ },
+ "old-overlay/IVROverlay_001 SetOverlayTexture/-/-": {
+  "ret": 24
+ }
+}

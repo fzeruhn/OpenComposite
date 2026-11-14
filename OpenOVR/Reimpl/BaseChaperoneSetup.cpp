@@ -164,3 +164,12 @@ void BaseChaperoneSetup::RoomSetupStarting()
 {
 	// The OpenXR runtime has its own room setup
 }
+
+void BaseChaperoneSetup::SetWorkingWallTagInfo(VR_ARRAY_COUNT(unTagCount) uint8_t* pTagsBuffer, uint32_t unTagCount)
+{
+	SetWorkingCollisionBoundsTagsInfo(pTagsBuffer, unTagCount);
+}
+bool BaseChaperoneSetup::GetLiveWallTagInfo(VR_OUT_ARRAY_COUNT(punTagCount) uint8_t* pTagsBuffer, uint32_t* punTagCount)
+{
+	return GetLiveCollisionBoundsTagsInfo(pTagsBuffer, punTagCount);
+}

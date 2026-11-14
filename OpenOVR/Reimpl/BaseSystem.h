@@ -102,6 +102,8 @@ public:
 	 * and swap chain in DX10 and DX11. If an error occurs the index will be set to -1.
 	 */
 	void GetDXGIOutputInfo(int32_t* pnAdapterIndex);
+	// IVRSystem_003-010: also the output index, which is 0 (the headset isn't a desktop output)
+	void GetDXGIOutputInfo(int32_t* pnAdapterIndex, int32_t* pnAdapterOutputIndex);
 
 	/**
 	 * Returns platform- and texture-type specific adapter identification so that applications and the
@@ -192,6 +194,8 @@ public:
 	 *   This properly transforms all pose components, including velocity and angular velocity
 	 */
 	void ApplyTransform(vr::TrackedDevicePose_t* pOutputPose, const vr::TrackedDevicePose_t* pTrackedDevicePose, const vr::HmdMatrix34_t* pTransform);
+	// IVRSystem_007 (0.9.11) took the pose and transform by reference
+	void ApplyTransform(vr::TrackedDevicePose_t* pOutputPose, const vr::TrackedDevicePose_t& trackedDevicePose, const vr::HmdMatrix34_t& transform);
 
 	/** Returns the device index associated with a specific role, for example the left hand or the right hand. */
 	vr::TrackedDeviceIndex_t GetTrackedDeviceIndexForControllerRole(vr::ETrackedControllerRole unDeviceType);
@@ -395,6 +399,32 @@ public:
 
 	vr::DistortionCoordinates_t ComputeDistortion(vr::EVREye eEye, float fU, float fV);
 	vr::HmdMatrix44_t GetProjectionMatrix(vr::EVREye eEye, float fNearZ, float fFarZ, EGraphicsAPIConvention convention);
+
+	/**
+	 * IVRSystem_003-010 (SDK 0.9.0 to 0.9.14) poll events in the VREvent_t of then: 32 bytes, with a 16-byte data
+	 * union before eventAgeSeconds (today's is 64 bytes with the age first). The game's buffer is that size.
+	 */
+	bool PollNextEventOld(vr::ETrackingUniverseOrigin eOrigin, vr::VREvent_t* pEvent, vr::TrackedDevicePose_t* pTrackedDevicePose);
+
+	/** Writes event into pOld as SDK 0.9.x laid VREvent_t out, no more than kOldEventSize (also IVROverlay_001-008's) */
+	static void WriteOldEvent(const vr::VREvent_t& event, vr::VREvent_t* pOld);
+#if defined(__linux__) || defined(__APPLE__)
+	static constexpr size_t kOldEventSize = 28; // the SDK packs its structs to 4 there
+#else
+	static constexpr size_t kOldEventSize = 32;
+#endif
+
+	// IVRSystem_003-007 (0.9.0 to 0.9.11): the extended-display calls, answered as IVRExtendedDisplay answers them
+	void GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight);
+	void GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight);
+	bool AttachToWindow(void* hWnd);
+
+	// IVRSystem_003 (0.9.0): render models with the texture inline, as IVRRenderModels_001 has them
+	bool LoadRenderModel(const char* pchRenderModelName, vr::IVRRenderModels_001::RenderModel_t* pRenderModel);
+	void FreeRenderModel(vr::IVRRenderModels_001::RenderModel_t* pRenderModel);
+	bool HandleControllerOverlayInteractionAsMouse(const vr::Compositor_OverlaySettings& overlaySettings,
+	    vr::HmdVector2_t vecWindowClientPositionOnScreen, vr::HmdVector2_t vecWindowClientSize,
+	    vr::TrackedDeviceIndex_t unControllerDeviceIndex, vr::EVRControllerEventOutputType eOutputType);
 
 	// ------------------------------------
 	// Performance Test methods

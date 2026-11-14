@@ -1,7 +1,7 @@
 import re
 from typing import List
 
-from stubs.interface import InterfaceDef
+from stubs.interface import InterfaceDef, deleted_types_context
 from stubs.interface_spec import InterfaceSpec
 
 cflag_spec = re.compile(r"\[(?P<name>\w+)\]\s*=\s*(?P<value>.*)")
@@ -38,7 +38,8 @@ public:
     fi.write("\n")
 
     for func in iface.functions:
-        fi.write(f"\t{func.return_type} {func.name}({func.args_str()}) override;\n")
+        const = " const" if func.const else ""
+        fi.write(f"\t{func.return_type} {func.name}({func.args_str()}){const} override;\n")
 
     fi.write("};\n")
 
@@ -88,7 +89,9 @@ std::shared_ptr<{cls}> GetCreate{getter_name}() {{
             # Generate an argument string with casts as appropriate
             nargs = []
             for a in f.args:
-                if namespace in a.type:
+                # A type from the version's own namespace is cast to the Base class's copy of it (OOVR_Name), except
+                # those deleted_types.h puts there, which the Base class takes as they are
+                if namespace in a.type and not is_deleted_type(ver, a.type):
                     casttype = a.type.replace(namespace + "::", "OOVR_")
                     nargs.append("(%s) %s" % (casttype, a.name))
                 else:
@@ -101,7 +104,8 @@ std::shared_ptr<{cls}> GetCreate{getter_name}() {{
             if namespace in f.return_type:
                 return_str += f" ({f.return_type})"
 
-            fi.write(f"{f.return_type} {cname}::{f.name}({f.args_str()}) {{\n"
+            const = " const" if f.const else ""
+            fi.write(f"{f.return_type} {cname}::{f.name}({f.args_str()}){const} {{\n"
                      "\tif (oovr_global_configuration.LogAllOpenVRCalls())\n"
                      f"\t\tOOVR_LOG(\"Entered function (from interface {ver.namespace()})\");\n"
                      f"\t{return_str} base->{f.name}({nargs});\n}}\n")
@@ -111,6 +115,12 @@ std::shared_ptr<{cls}> GetCreate{getter_name}() {{
 
         # Generate the deleter (see BaseCommon.h for the rationale here)
         fi.write(f"void {cname}::Delete() {{ delete this; }}\n")
+
+
+def is_deleted_type(ver: InterfaceDef, arg_type: str) -> bool:
+    """True for a (const, pointer or reference to a) type deleted_types.h defines in ver's own namespace."""
+    bare = arg_type.replace("const ", "").rstrip("*& ").strip()
+    return bare in deleted_types_context().get(ver.interface_v(), {}).values()
 
 
 def _build_fntable(fi, ver: InterfaceDef):

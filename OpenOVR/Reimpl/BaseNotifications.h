@@ -17,4 +17,7 @@ public:
 	    const OOVR_NotificationBitmap_t* pImage, VRNotificationId* pNotificationId);
 
 	vr::EVRNotificationError RemoveNotification(OOVR_VRNotificationId notificationId);
+
+	/** IVRNotifications_001 (SDK 0.9.x): its error names (OK, Fail, InvalidParam), as SteamVR spelt them */
+	uint32_t GetErrorString(int error, VR_OUT_STRING() char* pchBuffer, uint32_t unBufferSize);
 };

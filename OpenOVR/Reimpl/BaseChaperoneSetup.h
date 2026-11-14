@@ -70,6 +70,11 @@ public:
 	void SetWorkingCollisionBoundsTagsInfo(VR_ARRAY_COUNT(unTagCount) uint8_t* pTagsBuffer, uint32_t unTagCount);
 	bool GetLiveCollisionBoundsTagsInfo(VR_OUT_ARRAY_COUNT(punTagCount) uint8_t* pTagsBuffer, uint32_t* punTagCount);
 
+	// 0.9.14 and 0.9.15's IVRChaperoneSetup_004 (Valve added these to it without a new version, then renamed them
+	// *CollisionBoundsTagsInfo in 005)
+	void SetWorkingWallTagInfo(VR_ARRAY_COUNT(unTagCount) uint8_t* pTagsBuffer, uint32_t unTagCount);
+	bool GetLiveWallTagInfo(VR_OUT_ARRAY_COUNT(punTagCount) uint8_t* pTagsBuffer, uint32_t* punTagCount);
+
 	bool SetWorkingPhysicalBoundsInfo(VR_ARRAY_COUNT(unQuadsCount) vr::HmdQuad_t* pQuadsBuffer, uint32_t unQuadsCount);
 	bool GetLivePhysicalBoundsInfo(VR_OUT_ARRAY_COUNT(punQuadsCount) vr::HmdQuad_t* pQuadsBuffer, uint32_t* punQuadsCount);
 

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #define BASE_IMPL
 #include "BaseChaperone.h"
+#include "BaseChaperoneSetup.h"
 #include "BaseSystem.h"
 #include "generated/static_bases.gen.h"
 
@@ -32,6 +33,31 @@ bool BaseChaperone::GetPlayAreaSize(float* pSizeX, float* pSizeZ)
 	// TODO verify return value
 	return true;
 }
+void BaseChaperone::GetBoundsColor(HmdColor_t* pOutputColorArray, int nNumOutputColors)
+{
+	HmdColor_t camera;
+	GetBoundsColor(pOutputColorArray, nNumOutputColors, 0.0f, &camera);
+}
+
+bool BaseChaperone::GetSoftBoundsInfo(OOVR_ChaperoneSoftBoundsInfo_t* pInfo)
+{
+	if (!pInfo)
+		return false;
+	return GetPlayAreaRect(&pInfo->quadCorners);
+}
+
+bool BaseChaperone::GetHardBoundsInfo(HmdQuad_t* pQuadsBuffer, uint32_t* punQuadsCount)
+{
+	return GetCreateBaseChaperoneSetup()->GetLiveCollisionBoundsInfo(pQuadsBuffer, punQuadsCount);
+}
+
+bool BaseChaperone::GetSeatedBoundsInfo(OOVR_ChaperoneSeatedBoundsInfo_t* pInfo)
+{
+	if (pInfo)
+		*pInfo = {};
+	return false;
+}
+
 bool BaseChaperone::GetPlayAreaRect(HmdQuad_t* rect)
 {
 	if (!rect)

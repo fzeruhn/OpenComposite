@@ -80,5 +80,11 @@
    "count": 240
   },
   "other_submits": 0
+ },
+ "exiting_old_events": {
+  "cases": [
+   "old-events"
+  ],
+  "old_event_quits": 1
  }
 }

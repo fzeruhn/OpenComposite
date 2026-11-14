@@ -3,10 +3,32 @@
 
 #include "conformance.h"
 
+#include "IVRApplications_001.h"
+#include "IVRChaperone_002.h"
+#include "IVRChaperone_004.h"
+#include "IVRCompositor_005.h"
+#include "IVRControlPanel_001.h"
+#include "IVRDriverManager_001.h"
+#include "custom_interfaces/IVRPaths_002.h"
+#include "IVRSpatialAnchors_001.h"
+#include "IVRTrackedCamera_006.h"
+#include "IVRInput_003.h"
+#include "IVRNotifications_001.h"
+#include "IVRRenderModels_001.h"
+#include "IVRCompositor_006.h"
+#include "IVRCompositor_008.h"
 #include "IVRCompositor_029.h"
 #include "IVRInput_010.h"
+#include "IVROverlay_001.h"
+#include "IVROverlay_006.h"
+#include "IVROverlay_007.h"
 #include "IVROverlay_028.h"
+#include "IVRSystem_003.h"
+#include "IVRSystem_007.h"
+#include "IVRSystem_009.h"
 #include "IVRSystem_022.h"
+
+#include <cstring>
 
 #include <thread>
 
@@ -294,6 +316,474 @@ void FrameLoop(CaseContext& c)
 	c.core->Cleanup();
 }
 
+// IVRSystem_003-010 poll into SDK 0.9.x's 32-byte VREvent_t, not today's 64-byte one. 120 frames as frame-loop, polling
+// through IVRSystem_009 into a 64-byte buffer: each frame records its events and how many bytes past 32 were written
+void OldEvents(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* old = (vr::IVRSystem_009::IVRSystem*)c.core->GetGenericInterface("IVRSystem_009", &le);
+	if (!old) {
+		c.Record("no IVRSystem_009", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	for (int frame = 1; frame <= 120; frame++) {
+		vr::TrackedDevicePose_t poses[16];
+		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		Json::Value r;
+		Json::Value events(Json::arrayValue);
+		int overrun = 0;
+		for (int n = 0; n < 64; n++) {
+			alignas(8) uint8_t buffer[64];
+			memset(buffer, 0xCD, sizeof(buffer));
+			if (!old->PollNextEvent((vr::VREvent_t*)buffer))
+				break;
+			uint32_t type;
+			memcpy(&type, buffer, sizeof(type));
+			events.append((int)type);
+			for (int i = 32; i < 64; i++)
+				overrun += buffer[i] != 0xCD;
+		}
+		r["events"] = events;
+		r["overrun"] = overrun;
+		c.Record("frame " + std::to_string(frame), r);
+	}
+	c.core->Cleanup();
+}
+
+Json::Value PoseRecord(const vr::TrackedDevicePose_t& p)
+{
+	Json::Value r;
+	for (int i = 0; i < 3; i++)
+		r["position"].append(p.mDeviceToAbsoluteTracking.m[i][3]);
+	for (int i = 0; i < 3; i++)
+		r["velocity"].append(p.vVelocity.v[i]);
+	for (int i = 0; i < 3; i++)
+		r["angular_velocity"].append(p.vAngularVelocity.v[i]);
+	r["valid"] = p.bPoseIsValid;
+	return r;
+}
+
+// The old IVRSystem calls whose answers can be checked without frames (expect/old_calls.json)
+void OldCalls(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* sys = (vr::IVRSystem_022::IVRSystem*)c.core->GetGenericInterface("IVRSystem_022", &le);
+	auto* sys007 = (vr::IVRSystem_007::IVRSystem*)c.core->GetGenericInterface("IVRSystem_007", &le);
+	auto* sys003 = (vr::IVRSystem_003::IVRSystem*)c.core->GetGenericInterface("IVRSystem_003", &le);
+	if (!sys || !sys007 || !sys003) {
+		c.Record("no IVRSystem_022, 007 or 003", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	// A pose at (1, 2, 3) moving along +x and turning about +y, moved by a quarter turn about +y then 10 m along +x
+	vr::TrackedDevicePose_t pose = {};
+	pose.mDeviceToAbsoluteTracking = { { { 1, 0, 0, 1 }, { 0, 1, 0, 2 }, { 0, 0, 1, 3 } } };
+	pose.vVelocity = { { 1, 0, 0 } };
+	pose.vAngularVelocity = { { 0, 1, 0 } };
+	pose.bPoseIsValid = true;
+	vr::HmdMatrix34_t transform = { { { 0, 0, 1, 10 }, { 0, 1, 0, 0 }, { -1, 0, 0, 0 } } };
+	vr::TrackedDevicePose_t out = {};
+	sys->ApplyTransform(&out, &pose, &transform);
+	c.Record("ApplyTransform", PoseRecord(out));
+	vr::TrackedDevicePose_t byRef = {};
+	sys007->ApplyTransform(&byRef, pose, transform);
+	c.Record("ApplyTransform IVRSystem_007", PoseRecord(byRef));
+
+	int32_t adapter = -2, output = -2;
+	sys003->GetDXGIOutputInfo(&adapter, &output);
+	Json::Value dxgi;
+	dxgi["output"] = output;
+	dxgi["adapter_set"] = adapter != -2;
+	c.Record("GetDXGIOutputInfo IVRSystem_003", dxgi);
+
+	Json::Value attach;
+	attach["ret"] = sys003->AttachToWindow(nullptr);
+	c.Record("AttachToWindow", attach);
+
+	vr::IVRSystem_003::RenderModel_t model;
+	memset(&model, 0xCD, sizeof(model));
+	Json::Value load;
+	load["ret"] = sys003->LoadRenderModel("renderLeftHand", &model);
+	load["has_vertices"] = model.unVertexCount > 0 && model.rVertexData != nullptr;
+	load["has_triangles"] = model.unTriangleCount > 0 && model.rIndexData != nullptr;
+	load["texture"] = std::to_string(model.diffuseTexture.unWidth) + "x" + std::to_string(model.diffuseTexture.unHeight);
+	load["has_texture_data"] = model.diffuseTexture.rubTextureMapData != nullptr;
+	c.Record("LoadRenderModel renderLeftHand", load);
+	sys003->FreeRenderModel(&model);
+	Json::Value freed;
+	freed["handle"] = (Json::UInt64)model.ulInternalHandle;
+	freed["vertices"] = model.unVertexCount;
+	c.Record("FreeRenderModel", freed);
+	sys003->FreeRenderModel(&model); // again: ignored
+
+	memset(&model, 0xCD, sizeof(model));
+	Json::Value unknown;
+	unknown["ret"] = sys003->LoadRenderModel("no such model", &model);
+	unknown["handle"] = (Json::UInt64)model.ulInternalHandle;
+	c.Record("LoadRenderModel unknown", unknown);
+
+	c.core->Cleanup();
+}
+
+// The old compositors' Submit forms on a D3D11 texture (expect/old_submit.json): IVRCompositor_005 and 006 name the
+// device with SetGraphicsDevice, 008 passes the API with each texture. And GetFrameTiming writes only the old struct.
+void OldSubmit(CaseContext& c)
+{
+	Frames f;
+	if (!OpenFrames(c, f))
+		return;
+	vr::EVRInitError le;
+	auto* c005 = (vr::IVRCompositor_005::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_005", &le);
+	auto* c006 = (vr::IVRCompositor_006::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_006", &le);
+	auto* c008 = (vr::IVRCompositor_008::IVRCompositor*)c.core->GetGenericInterface("IVRCompositor_008", &le);
+	if (!c005 || !c006 || !c008) {
+		c.Record("no IVRCompositor_005, 006 or 008", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	callers::Texture tex(ArgSet::Valid, *c.call);
+	void* handle = tex.get() ? tex.get()->handle : nullptr;
+	vr::TrackedDevicePose_t poses[16];
+
+	// 008: the API with each texture
+	Json::Value r;
+	r["wait"] = (int)c008->WaitGetPoses(poses, 16, nullptr, 0);
+	r["left"] = (int)c008->Submit(vr::Eye_Left, API_DirectX, handle, nullptr, vr::Submit_Default);
+	r["right"] = (int)c008->Submit(vr::Eye_Right, API_DirectX, handle, nullptr, vr::Submit_Default);
+	c.Record("IVRCompositor_008 frame", r);
+
+	// 006: no device named yet, so the texture can't be read; then D3D11
+	r = Json::Value();
+	r["wait"] = (int)c006->WaitGetPoses(poses, 16, nullptr, 0);
+	r["left before SetGraphicsDevice"] = (int)c006->Submit(vr::Eye_Left, handle, nullptr);
+	c006->SetGraphicsDevice(vr::IVRCompositor_006::Compositor_DeviceType_D3D11, c.call->d3d11);
+	r["left"] = (int)c006->Submit(vr::Eye_Left, handle, nullptr);
+	r["right"] = (int)c006->Submit(vr::Eye_Right, handle, nullptr);
+	c.Record("IVRCompositor_006 frame", r);
+
+	// 005: the same, with its own bounds struct and no answers; a frame after it still works
+	c005->SetGraphicsDevice(vr::IVRCompositor_005::Compositor_DeviceType_D3D11, c.call->d3d11);
+	c005->WaitGetPoses(poses, 16);
+	vr::IVRCompositor_005::Compositor_TextureBounds bounds = { 0, 0, 1, 1 };
+	c005->Submit(vr::Eye_Left, handle, &bounds);
+	c005->Submit(vr::Eye_Right, handle, &bounds);
+	r = Json::Value();
+	r["wait after"] = (int)f.comp->WaitGetPoses(poses, 16, nullptr, 0);
+	r["left after"] = (int)f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
+	c.Record("IVRCompositor_005 frame", r);
+
+	// Frame timing in 005's and 008's own layouts: nothing written past the struct
+	alignas(8) uint8_t buffer[512];
+	memset(buffer, 0xCD, sizeof(buffer));
+	auto* t005 = (vr::IVRCompositor_005::Compositor_FrameTiming*)buffer;
+	t005->size = sizeof(*t005);
+	r = Json::Value();
+	r["ret"] = c005->GetFrameTiming(t005, 0);
+	int overrun = 0;
+	for (size_t i = sizeof(*t005); i < sizeof(buffer); i++)
+		overrun += buffer[i] != 0xCD;
+	r["overrun"] = overrun;
+	r["size kept"] = t005->size == sizeof(*t005);
+	c.Record("IVRCompositor_005 GetFrameTiming", r);
+
+	memset(buffer, 0xCD, sizeof(buffer));
+	auto* t008 = (vr::IVRCompositor_008::Compositor_FrameTiming*)buffer;
+	t008->size = sizeof(*t008);
+	r = Json::Value();
+	r["ret"] = c008->GetFrameTiming(t008, 0);
+	overrun = 0;
+	for (size_t i = sizeof(*t008); i < sizeof(buffer); i++)
+		overrun += buffer[i] != 0xCD;
+	r["overrun"] = overrun;
+	r["size kept"] = t008->size == sizeof(*t008);
+	c.Record("IVRCompositor_008 GetFrameTiming", r);
+
+	c.core->Cleanup();
+}
+
+// An event polled into SDK 0.9.x's 32-byte VREvent_t: its type, the keyboard user value at its data's offset 8 (16), and
+// how many bytes past 32 were written
+Json::Value OldEventRecord(bool polled, const uint8_t* buffer)
+{
+	Json::Value r;
+	r["polled"] = polled;
+	uint32_t type;
+	uint64_t userValue;
+	memcpy(&type, buffer, sizeof(type));
+	memcpy(&userValue, buffer + 16, sizeof(userValue));
+	r["type"] = (int)type;
+	r["user value"] = (Json::UInt64)userValue;
+	int overrun = 0;
+	for (int i = 32; i < 64; i++)
+		overrun += buffer[i] != 0xCD;
+	r["overrun"] = overrun;
+	return r;
+}
+
+// The old overlay calls (expect/old_overlay.json): events in the old layout, flags as bit numbers (up to 020) and as
+// masks (021 on), the 0.9.x gamma and visibility calls, and 001's texture of the device SetGraphicsDevice named
+void OldOverlay(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* ov = (vr::IVROverlay_028::IVROverlay*)c.core->GetGenericInterface("IVROverlay_028", &le);
+	auto* ov007 = (vr::IVROverlay_007::IVROverlay*)c.core->GetGenericInterface("IVROverlay_007", &le);
+	auto* ov006 = (vr::IVROverlay_006::IVROverlay*)c.core->GetGenericInterface("IVROverlay_006", &le);
+	auto* ov001 = (vr::IVROverlay_001::IVROverlay*)c.core->GetGenericInterface("IVROverlay_001", &le);
+	auto* sys009 = (vr::IVRSystem_009::IVRSystem*)c.core->GetGenericInterface("IVRSystem_009", &le);
+	if (!ov || !ov007 || !ov006 || !ov001 || !sys009) {
+		c.Record("no IVROverlay_028, 007, 006, 001 or IVRSystem_009", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+	vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
+	c.Record("CreateOverlay", Err(ov->CreateOverlay("oc.old", "Old", &h)));
+
+	// The keyboard sends KeyboardDone at once: polled through 007 (the overlay's) and IVRSystem_009 (the system's)
+	alignas(8) uint8_t buffer[64];
+	ov007->ShowKeyboardForOverlay(h, vr::IVROverlay_007::k_EGamepadTextInputModeNormal, vr::IVROverlay_007::k_EGamepadTextInputLineModeSingleLine, "", 8, "",
+	    false, 0x1122334455667788ull);
+	memset(buffer, 0xCD, sizeof(buffer));
+	c.Record("IVROverlay_007 PollNextOverlayEvent", OldEventRecord(ov007->PollNextOverlayEvent(h, (vr::VREvent_t*)buffer), buffer));
+	ov007->HideKeyboard();
+	ov007->ShowKeyboard(vr::IVROverlay_007::k_EGamepadTextInputModeNormal, vr::IVROverlay_007::k_EGamepadTextInputLineModeSingleLine, "", 8, "", false, 0x55aaull);
+	memset(buffer, 0xCD, sizeof(buffer));
+	c.Record("IVRSystem_009 PollNextEvent", OldEventRecord(sys009->PollNextEvent((vr::VREvent_t*)buffer), buffer));
+	ov007->HideKeyboard();
+
+	// Flags: 007 passes NoDashboardTab as 3, 028 as 1 << 3; both are bit 3 of GetOverlayFlags
+	Json::Value flags;
+	flags["set 007"] = (int)ov007->SetOverlayFlag(h, (vr::IVROverlay_007::VROverlayFlags)3, true);
+	uint32_t all = 0;
+	ov->GetOverlayFlags(h, &all);
+	flags["after 007"] = all;
+	ov007->SetOverlayFlag(h, (vr::IVROverlay_007::VROverlayFlags)3, false);
+	flags["set 028"] = (int)ov->SetOverlayFlag(h, vr::IVROverlay_028::VROverlayFlags_SideBySide_Parallel, true);
+	bool enabled = false;
+	ov->GetOverlayFlag(h, vr::IVROverlay_028::VROverlayFlags_SideBySide_Parallel, &enabled);
+	flags["028 enabled"] = enabled;
+	all = 0;
+	ov->GetOverlayFlags(h, &all);
+	flags["after 028"] = all;
+	enabled = false;
+	ov007->GetOverlayFlag(h, (vr::IVROverlay_007::VROverlayFlags)10, &enabled); // SideBySide_Parallel's bit number
+	flags["007 sees it"] = enabled;
+	c.Record("flags", flags);
+
+	Json::Value gamma;
+	gamma["set"] = (int)ov006->SetOverlayGamma(h, 0.5f);
+	float got = -1;
+	gamma["get"] = (int)ov006->GetOverlayGamma(h, &got);
+	gamma["value"] = got;
+	c.Record("IVROverlay_006 gamma", gamma);
+
+	Json::Value vis;
+	vis["set"] = (int)ov001->SetOverlayVisibility(h, vr::IVROverlay_001::VROverlayVisibility_SystemOverlay);
+	vr::IVROverlay_001::VROverlayVisibility v = vr::IVROverlay_001::VROverlayVisibility_Manual;
+	vis["get"] = (int)ov001->GetOverlayVisibility(h, &v);
+	vis["value"] = (int)v;
+	vis["system overlay visible"] = ov001->IsSystemOverlayVisible();
+	c.Record("IVROverlay_001 visibility", vis);
+
+	// No IVRCompositor::SetGraphicsDevice: 001 can't tell what the texture is
+	Json::Value tex;
+	tex["ret"] = (int)ov001->SetOverlayTexture(h, nullptr);
+	c.Record("IVROverlay_001 SetOverlayTexture", tex);
+
+	ov->DestroyOverlay(h);
+	c.core->Cleanup();
+}
+
+// The remaining old versions (expect/old_misc.json): IVRApplications_001, IVRChaperone_002, IVRRenderModels_001,
+// IVRNotifications_001, IVRControlPanel_001 and IVRInput_003
+void OldMisc(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* apps = (vr::IVRApplications_001::IVRApplications*)c.core->GetGenericInterface("IVRApplications_001", &le);
+	auto* chap = (vr::IVRChaperone_002::IVRChaperone*)c.core->GetGenericInterface("IVRChaperone_002", &le);
+	auto* chap4 = (vr::IVRChaperone_004::IVRChaperone*)c.core->GetGenericInterface("IVRChaperone_004", &le);
+	auto* models = (vr::IVRRenderModels_001::IVRRenderModels*)c.core->GetGenericInterface("IVRRenderModels_001", &le);
+	auto* notes = (vr::IVRNotifications_001::IVRNotifications*)c.core->GetGenericInterface("IVRNotifications_001", &le);
+	auto* panel = (vr::IVRControlPanel_001::IVRControlPanel*)c.core->GetGenericInterface("IVRControlPanel_001", &le);
+	auto* input = (vr::IVRInput_003::IVRInput*)c.core->GetGenericInterface("IVRInput_003", &le);
+	void* sys = c.core->GetGenericInterface("IVRSystem_022", &le);
+	if (!apps || !chap || !chap4 || !models || !notes || !panel || !input || !sys) {
+		c.Record("an old interface is missing", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	Json::Value r;
+	char key[64] = "x";
+	r["ret"] = (int)apps->GetHomeApplication(key, sizeof(key));
+	r["key"] = key;
+	c.Record("IVRApplications_001 GetHomeApplication", r);
+
+	r = Json::Value();
+	vr::IVRChaperone_002::ChaperoneSoftBoundsInfo_t soft = {};
+	vr::HmdQuad_t rect = {};
+	r["ret"] = chap->GetSoftBoundsInfo(&soft);
+	r["play area ret"] = chap4->GetPlayAreaRect(&rect);
+	r["same as play area"] = memcmp(&soft.quadCorners, &rect, sizeof(rect)) == 0;
+	vr::IVRChaperone_002::ChaperoneSeatedBoundsInfo_t seated;
+	memset(&seated, 0xCD, sizeof(seated));
+	r["seated ret"] = chap->GetSeatedBoundsInfo(&seated);
+	r["seated zeroed"] = seated.vSeatedHeadPosition.v[0] == 0.0f;
+	c.Record("IVRChaperone_002 bounds", r);
+
+	r = Json::Value();
+	vr::IVRRenderModels_001::RenderModel_t model;
+	memset(&model, 0xCD, sizeof(model));
+	r["ret"] = models->LoadRenderModel("renderLeftHand", &model);
+	r["has_vertices"] = model.unVertexCount > 0 && model.rVertexData != nullptr;
+	r["texture"] = std::to_string(model.diffuseTexture.unWidth) + "x" + std::to_string(model.diffuseTexture.unHeight);
+	models->FreeRenderModel(&model);
+	r["freed handle"] = (Json::UInt64)model.ulInternalHandle;
+	c.Record("IVRRenderModels_001 LoadRenderModel", r);
+
+	r = Json::Value();
+	char name[64] = {};
+	r["size"] = notes->GetErrorString(vr::IVRNotifications_001::k_ENotificationError_Fail, name, sizeof(name));
+	r["name"] = name;
+	vr::IVRNotifications_001::VRNotificationId id = 0;
+	r["create"] = (int)notes->CreateNotification(vr::k_ulOverlayHandleInvalid, 0, "type", "text", "category", nullptr, &id);
+	r["id set"] = id != 0;
+	r["dismiss"] = (int)notes->DismissNotification(id);
+	c.Record("IVRNotifications_001", r);
+
+	r = Json::Value();
+	r["drivers"] = panel->GetDriverCount();
+	r["display interface"] = (void*)panel->GetCurrentDisplayInterface("IVRSystem_022") == sys;
+	r["unknown interface null"] = panel->GetCurrentDisplayInterface("IVRNoSuchThing_001") == nullptr;
+	r["ipd positive"] = panel->GetIPD() > 0.0f;
+	c.Record("IVRControlPanel_001", r);
+
+	// IVRInput_003's action sets are 24 bytes (today's 32)
+	r = Json::Value();
+	vr::IVRInput_003::VRActiveActionSet_t set = {};
+	r["24 bytes"] = (int)input->UpdateActionState(&set, 24, 0);
+	r["32 bytes"] = (int)input->UpdateActionState(&set, 32, 0);
+	c.Record("IVRInput_003 UpdateActionState", r);
+
+	c.core->Cleanup();
+}
+
+// The interfaces the fork never had (expect/new_interfaces.json): an anchor kept and given back through its descriptor,
+// the one driver (the OpenXR runtime), and no camera
+void NewInterfaces(CaseContext& c)
+{
+	if (c.core->Init(vr::VRApplication_Scene, nullptr) != vr::VRInitError_None) {
+		c.Record("Init failed");
+		return;
+	}
+	vr::EVRInitError le;
+	auto* anchors = (vr::IVRSpatialAnchors_001::IVRSpatialAnchors*)c.core->GetGenericInterface("IVRSpatialAnchors_001", &le);
+	auto* drivers = (vr::IVRDriverManager_001::IVRDriverManager*)c.core->GetGenericInterface("IVRDriverManager_001", &le);
+	auto* camera = (vr::IVRTrackedCamera_006::IVRTrackedCamera*)c.core->GetGenericInterface("IVRTrackedCamera_006", &le);
+	if (!anchors || !drivers || !camera) {
+		c.Record("a new interface is missing", Err(le));
+		c.core->Cleanup();
+		return;
+	}
+
+	vr::IVRSpatialAnchors_001::SpatialAnchorPose_t pose = { { { { 1, 0, 0, 0.5f }, { 0, 1, 0, 1.25f }, { 0, 0, 1, -2 } } } };
+	vr::SpatialAnchorHandle_t handle = 0;
+	Json::Value r;
+	r["create"] = (int)anchors->CreateSpatialAnchorFromPose(0, vr::TrackingUniverseStanding, &pose, &handle);
+	vr::IVRSpatialAnchors_001::SpatialAnchorPose_t back = {};
+	r["get"] = (int)anchors->GetSpatialAnchorPose(handle, vr::TrackingUniverseStanding, &back);
+	r["same pose"] = memcmp(&back, &pose, sizeof(pose)) == 0;
+	uint32_t length = 0;
+	r["descriptor size asked"] = (int)anchors->GetSpatialAnchorDescriptor(handle, nullptr, &length);
+	std::string descriptor(length, '\0');
+	r["descriptor"] = (int)anchors->GetSpatialAnchorDescriptor(handle, descriptor.data(), &length);
+	vr::SpatialAnchorHandle_t again = 0;
+	r["from descriptor"] = (int)anchors->CreateSpatialAnchorFromDescriptor(descriptor.c_str(), &again);
+	back = {};
+	anchors->GetSpatialAnchorPose(again, vr::TrackingUniverseStanding, &back);
+	r["descriptor pose same"] = memcmp(&back, &pose, sizeof(pose)) == 0;
+	r["new handle"] = again != handle && again != 0;
+	r["unknown handle"] = (int)anchors->GetSpatialAnchorPose(handle + 1000, vr::TrackingUniverseStanding, &back);
+	c.Record("IVRSpatialAnchors_001 round trip", r);
+
+	r = Json::Value();
+	char name[64] = {};
+	r["count"] = drivers->GetDriverCount();
+	r["name size"] = drivers->GetDriverName(0, name, sizeof(name));
+	r["name"] = name;
+	r["handle"] = (Json::UInt64)drivers->GetDriverHandle(name);
+	r["enabled"] = drivers->IsEnabled(0);
+	c.Record("IVRDriverManager_001", r);
+
+	r = Json::Value();
+	bool has = true;
+	r["ret"] = (int)camera->HasCamera(vr::k_unTrackedDeviceIndex_Hmd, &has);
+	r["has camera"] = has;
+	c.Record("IVRTrackedCamera_006 HasCamera", r);
+
+	// IVRPaths through the C API, as Valve offers it: openvr_capi.h's VR_IVRPaths_FnTable
+#ifdef _WIN32
+#define OC_FNTABLE __stdcall
+#else
+#define OC_FNTABLE
+#endif
+	using namespace vr::IVRPaths_002;
+	struct PathsFnTable {
+		vr::ETrackedPropertyError(OC_FNTABLE* ReadPathBatch)(vr::PropertyContainerHandle_t, PathRead_t*, uint32_t);
+		vr::ETrackedPropertyError(OC_FNTABLE* WritePathBatch)(vr::PropertyContainerHandle_t, PathWrite_t*, uint32_t);
+		vr::ETrackedPropertyError(OC_FNTABLE* StringToHandle)(PathHandle_t*, const char*);
+		vr::ETrackedPropertyError(OC_FNTABLE* HandleToString)(PathHandle_t, char*, uint32_t, uint32_t*);
+	};
+#undef OC_FNTABLE
+	auto* paths = (PathsFnTable*)c.core->GetGenericInterface("FnTable:IVRPaths_002", &le);
+	r = Json::Value();
+	r["found"] = paths != nullptr;
+	if (paths) {
+		PathHandle_t first = 0, second = 0;
+		r["to handle"] = (int)paths->StringToHandle(&first, "/user/head/proximity");
+		paths->StringToHandle(&second, "/user/head/proximity");
+		r["same handle"] = first == second && first != 0;
+		char path[64] = {};
+		uint32_t used = 0;
+		r["to string"] = (int)paths->HandleToString(first, path, sizeof(path), &used);
+		r["path"] = path;
+		r["used"] = used;
+		r["small buffer"] = (int)paths->HandleToString(first, path, 4, &used);
+		PathRead_t read[2] = {};
+		read[0].ulPath = first;
+		read[1].ulPath = first;
+		r["read"] = (int)paths->ReadPathBatch(0, read, 2);
+		r["entry errors"] = (int)read[0].eError * 10 + (int)read[1].eError;
+		PathWrite_t write[2] = {};
+		write[1].bValueChanged = true; // 002's last field, past 001's struct: the stride is 002's
+		r["write"] = (int)paths->WritePathBatch(0, write, 2);
+		r["write entry errors"] = (int)write[0].eError * 10 + (int)write[1].eError;
+		r["stride kept"] = write[1].bValueChanged;
+	}
+	c.Record("FnTable:IVRPaths_002", r);
+
+	c.core->Cleanup();
+}
+
 void SubmitEdges(CaseContext& c)
 {
 	Frames f;
@@ -365,6 +855,12 @@ const std::map<std::string, CaseFn>& conformance::Cases()
 		{ "overlay-lifecycle", OverlayLifecycle },
 		{ "input-manifest", InputManifest },
 		{ "frame-loop", FrameLoop },
+		{ "old-events", OldEvents },
+		{ "old-calls", OldCalls },
+		{ "old-submit", OldSubmit },
+		{ "old-overlay", OldOverlay },
+		{ "old-misc", OldMisc },
+		{ "new-interfaces", NewInterfaces },
 		{ "submit-edges", SubmitEdges },
 	};
 	return cases;

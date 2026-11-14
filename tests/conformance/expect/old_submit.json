@@ -1,0 +1,28 @@
+{
+ "#": "The old compositors' Submit forms and frame timing on the stand-in (run.py --cases old-submit --expect expect/old_submit.json). 006's Submit before SetGraphicsDevice can't tell what the texture is: 102 (InvalidTexture).",
+ "old-submit/IVRCompositor_008 frame/-/-": {
+  "wait": 0,
+  "left": 0,
+  "right": 0
+ },
+ "old-submit/IVRCompositor_006 frame/-/-": {
+  "wait": 0,
+  "left before SetGraphicsDevice": 102,
+  "left": 0,
+  "right": 0
+ },
+ "old-submit/IVRCompositor_005 frame/-/-": {
+  "wait after": 0,
+  "left after": 0
+ },
+ "old-submit/IVRCompositor_005 GetFrameTiming/-/-": {
+  "ret": true,
+  "overrun": 0,
+  "size kept": true
+ },
+ "old-submit/IVRCompositor_008 GetFrameTiming/-/-": {
+  "ret": true,
+  "overrun": 0,
+  "size kept": true
+ }
+}

@@ -221,3 +221,16 @@ EVRApplicationError BaseApplications::RegisterSubprocess(uint32_t nPid)
 	// loads OpenComposite itself and calls VR_Init on its own, and there's no transition UI to hide.
 	return VRApplicationError_None;
 }
+
+EVRApplicationError BaseApplications::GetHomeApplication(char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen)
+{
+	if (pchAppKeyBuffer && unAppKeyBufferLen)
+		pchAppKeyBuffer[0] = '\0';
+	return VRApplicationError_UnknownApplication;
+}
+
+EVRApplicationError BaseApplications::SetHomeApplication(const char* pchAppKey)
+{
+	OC_UNSUPPORTED(VRApplicationError_UnknownApplication, "SetHomeApplication (IVRApplications_001): there's no home "
+	                                                      "application on OpenXR");
+}

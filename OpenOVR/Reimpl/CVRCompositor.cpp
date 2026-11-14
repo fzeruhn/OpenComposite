@@ -2,7 +2,13 @@
 #define GENFILE
 #include "BaseCommon.h"
 
+GEN_INTERFACE("Compositor", "005")
+GEN_INTERFACE("Compositor", "006")
+GEN_INTERFACE("Compositor", "007")
+GEN_INTERFACE("Compositor", "008")
 GEN_INTERFACE("Compositor", "009")
+GEN_INTERFACE("Compositor", "010")
+GEN_INTERFACE("Compositor", "011")
 GEN_INTERFACE("Compositor", "012")
 GEN_INTERFACE("Compositor", "013")
 GEN_INTERFACE("Compositor", "014")
@@ -46,9 +52,9 @@ EVRScreenshotType CVRCompositor_015::GetCurrentScreenshotType()
 
 // Before IVRCompositor_017, Compositor_FrameTiming had other layouts than the one BaseCompositor fills, and a Linux
 // build's can be smaller than the Windows one whose m_nSize Proton passes on. So fill ours, copy the fields the old
-// struct shares, and write no more than the old struct holds.
+// struct shares, and write no more than the old struct holds. minSize: the smallest the version's struct ever was.
 template <typename T>
-static bool GetOldFrameTiming(BaseCompositor* base, T* pTiming, uint32_t unFramesAgo, const char* iface)
+static bool GetOldFrameTiming(BaseCompositor* base, T* pTiming, uint32_t unFramesAgo, const char* iface, size_t minSize = sizeof(T))
 {
 	if (oovr_global_configuration.LogAllOpenVRCalls())
 		oovr_log_raw_format(__FILE__, __LINE__, "GetFrameTiming", "Entered function (from interface %s)", iface);
@@ -105,9 +111,82 @@ static bool GetOldFrameTiming(BaseCompositor* base, T* pTiming, uint32_t unFrame
 	const size_t size = std::min<size_t>(appSize, sizeof(T));
 	if (size > sizeField)
 		memcpy(reinterpret_cast<char*>(pTiming) + sizeField, reinterpret_cast<const char*>(&theirs) + sizeField, size - sizeField);
-	return filled && appSize >= sizeof(T);
+	return filled && appSize >= minSize;
 }
 
+// IVRCompositor_005-008 (SDK 0.9.0 to 0.9.11) take bare texture pointers: 005 and 006 of the API SetGraphicsDevice
+// named, 007 and 008 of the API passed with each
+
+void CVRCompositor_005::SetGraphicsDevice(IVRCompositor_005::Compositor_DeviceType eType, void* pDevice)
+{
+	base->SetGraphicsDevice((OOVR_Compositor_DeviceType)eType, pDevice);
+}
+
+void CVRCompositor_006::SetGraphicsDevice(IVRCompositor_006::Compositor_DeviceType eType, void* pDevice)
+{
+	base->SetGraphicsDevice((OOVR_Compositor_DeviceType)eType, pDevice);
+}
+
+void CVRCompositor_005::WaitGetPoses(TrackedDevicePose_t* pPoseArray, uint32_t unPoseArrayCount)
+{
+	base->WaitGetPoses(pPoseArray, unPoseArrayCount, nullptr, 0);
+}
+
+void CVRCompositor_005::Submit(Hmd_Eye eEye, void* pTexture, IVRCompositor_005::Compositor_TextureBounds* pBounds)
+{
+	// Compositor_TextureBounds is VRTextureBounds_t (uMin, vMin, uMax, vMax)
+	base->SubmitForDevice(eEye, pTexture, (const VRTextureBounds_t*)pBounds);
+}
+
+IVRCompositor_006::VRCompositorError CVRCompositor_006::Submit(Hmd_Eye eEye, void* pTexture, VRTextureBounds_t* pBounds)
+{
+	return (IVRCompositor_006::VRCompositorError)base->SubmitForDevice(eEye, pTexture, pBounds);
+}
+
+IVRCompositor_007::VRCompositorError CVRCompositor_007::Submit(Hmd_Eye eEye, GraphicsAPIConvention eTextureType, void* pTexture,
+    const VRTextureBounds_t* pBounds)
+{
+	return (IVRCompositor_007::VRCompositorError)base->SubmitWithConvention(eEye, eTextureType, pTexture, pBounds, Submit_Default);
+}
+
+IVRCompositor_008::VRCompositorError CVRCompositor_008::Submit(Hmd_Eye eEye, GraphicsAPIConvention eTextureType, void* pTexture,
+    const VRTextureBounds_t* pBounds, VRSubmitFlags_t nSubmitFlags)
+{
+	return (IVRCompositor_008::VRCompositorError)base->SubmitWithConvention(eEye, eTextureType, pTexture, pBounds, nSubmitFlags);
+}
+
+void CVRCompositor_008::SetSkyboxOverride(GraphicsAPIConvention eTextureType, void* pFront, void* pBack, void* pLeft,
+    void* pRight, void* pTop, void* pBottom)
+{
+	base->SetSkyboxOverrideWithConvention(eTextureType, pFront, pBack, pLeft, pRight, pTop, pBottom);
+}
+
+bool CVRCompositor_005::GetFrameTiming(IVRCompositor_005::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
+{
+	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "IVRCompositor_005");
+}
+bool CVRCompositor_006::GetFrameTiming(IVRCompositor_006::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
+{
+	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "IVRCompositor_006");
+}
+bool CVRCompositor_007::GetFrameTiming(IVRCompositor_007::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
+{
+	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "IVRCompositor_007");
+}
+bool CVRCompositor_008::GetFrameTiming(IVRCompositor_008::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
+{
+	// SDK 0.9.9's struct for 008 ends before the handoff times 0.9.11 added
+	using T = IVRCompositor_008::Compositor_FrameTiming;
+	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "IVRCompositor_008", offsetof(T, m_flHandoffStartMs));
+}
+bool CVRCompositor_010::GetFrameTiming(IVRCompositor_010::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
+{
+	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "IVRCompositor_010");
+}
+bool CVRCompositor_011::GetFrameTiming(IVRCompositor_011::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
+{
+	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "IVRCompositor_011");
+}
 bool CVRCompositor_009::GetFrameTiming(IVRCompositor_009::Compositor_FrameTiming* pTiming, uint32_t unFramesAgo)
 {
 	return GetOldFrameTiming(base.get(), pTiming, unFramesAgo, "vr::IVRCompositor_009");

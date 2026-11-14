@@ -1,0 +1,37 @@
+{
+ "#": "The remaining old versions on the stand-in (run.py --cases old-misc --expect expect/old_misc.json). No home application (104, UnknownApplication); IVRChaperone_002's soft bounds are the play area, its seated bounds none; IVRRenderModels_001's inline model; IVRNotifications_001's error names; IVRControlPanel_001 gives the interfaces VR_GetGenericInterface does; IVRInput_003 takes its 24-byte action sets and refuses today's 32 (4, InvalidParam).",
+ "old-misc/IVRApplications_001 GetHomeApplication/-/-": {
+  "ret": 104,
+  "key": ""
+ },
+ "old-misc/IVRChaperone_002 bounds/-/-": {
+  "ret": true,
+  "play area ret": true,
+  "same as play area": true,
+  "seated ret": false,
+  "seated zeroed": true
+ },
+ "old-misc/IVRRenderModels_001 LoadRenderModel/-/-": {
+  "ret": true,
+  "has_vertices": true,
+  "texture": "1x1",
+  "freed handle": 0
+ },
+ "old-misc/IVRNotifications_001/-/-": {
+  "size": 26,
+  "name": "k_ENotificationError_Fail",
+  "create": 0,
+  "id set": true,
+  "dismiss": 0
+ },
+ "old-misc/IVRControlPanel_001/-/-": {
+  "drivers": 0,
+  "display interface": true,
+  "unknown interface null": true,
+  "ipd positive": true
+ },
+ "old-misc/IVRInput_003 UpdateActionState/-/-": {
+  "24 bytes": 0,
+  "32 bytes": 4
+ }
+}

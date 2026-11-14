@@ -1,15 +1,17 @@
 import re, collections
 
-funcdef_t = collections.namedtuple("funcdef_t", ["return_type", "name", "args"])
+# const: the method is declared const (IVRDriverManager_001's GetDriverCount and IsEnabled)
+funcdef_t = collections.namedtuple("funcdef_t", ["return_type", "name", "args", "const"], defaults=[False])
 arg_t = collections.namedtuple("arg_t", ["type", "name", "default", "str"])
 
-regex_src = r"virtual (?P<type>[\w ]+ \**)(?P<funcname>\w+)\((?P<args>.*)\)(?: = 0)?;"
+regex_src = r"virtual (?P<type>[\w ]+ \**)(?P<funcname>\w+)\((?P<args>.*)\)(?P<const>\s*const)?(?: = 0)?;"
 regex = re.compile(regex_src)
 
 arg_src = r"(?P<type>[^=]+ \**)(?P<name>\w+)(?: = (?P<default>.*))?"
 argr = re.compile(arg_src)
 
-typedecl = re.compile(r"^(?:enum(?:\s+class)?|struct)\s+(?P<name>\w+)(?:\s*:\s*\w+)?$")
+# An alignment macro may come first (0.9.11's "VR_CAMERA_DECL_ALIGN( 8 ) struct CameraVideoStreamFrame_t")
+typedecl = re.compile(r"^(?:\w+\(\s*\d+\s*\)\s+)?(?:enum(?:\s+class)?|struct)\s+(?P<name>\w+)(?:\s*:\s*\w+)?$")
 
 typedef = re.compile(r"^typedef\s+(?P<def>[\w\s\d_\*&]+)\s+(?P<name>\w+);$")
 typedef_struct = re.compile(r"^typedef\s+(?:struct|union)$")
@@ -42,6 +44,12 @@ def nice_lines(fi):
 
         if line[-1] == "," or line[-1] == "\\":
             carry = line
+            continue
+
+        # A declaration whose parentheses are still open goes on (0.9.0's HandleControllerOverlayInteractionAsMouse
+        # ends its last argument line without a comma, and its ") = 0;" is on the next)
+        if line.startswith("virtual ") and line.count("(") > line.count(")"):
+            carry = line + " "
             continue
 
         lines.append(line)
@@ -100,6 +108,10 @@ def read_context(context, filename, namespace):
                 if match:
                     tdstruct_start = line
 
+            # "class IVRSystem *Get...()" (IVRControlPanel_001) declares IVRSystem in the header's own namespace
+            for elaborated in re.findall(r"\bclass\s+(\w+)\s*\*", line):
+                context.setdefault(elaborated, namespace + "::" + elaborated)
+
         if tdstruct_start:
             raise Exception("Cound not find closing for structure '%s'" % tdstruct_start)
 
@@ -133,6 +145,10 @@ def convert_type(t, context):
         t = t[5:]
         t = t.lstrip()
 
+    # An elaborated "class X" names X, which the context qualifies
+    if t.startswith("class "):
+        t = t[6:].lstrip()
+
     # Transform the type, assuming we have a context
     if context and t in context:
         t = context[t]
@@ -160,7 +176,8 @@ def parseline(line, context=None):
         for fullarg in args_str.split(","):
             fullarg = fullarg.strip()
 
-            if fullarg == "void":
+            # "()", "( )" (IVRTrackedCamera_006's GetCameraTrackingSpace) and "(void)" take nothing
+            if fullarg == "void" or not fullarg:
                 continue
 
             amatch = argr.match(fullarg.strip())
@@ -172,5 +189,5 @@ def parseline(line, context=None):
 
             args.append(arg_t(type=atype, name=aname, default=adefault, str=fullarg))
 
-    funcdef = funcdef_t(return_type=ret, name=name, args=args)
+    funcdef = funcdef_t(return_type=ret, name=name, args=args, const=bool(match.group("const")))
     return funcdef

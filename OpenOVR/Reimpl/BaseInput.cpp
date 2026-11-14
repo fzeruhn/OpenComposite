@@ -2429,6 +2429,53 @@ EVRInputError BaseInput::GetSkeletalBoneDataCompressed(VRActionHandle_t action, 
 		*punRequiredCompressedSize = 0;
 	OC_UNSUPPORTED(VRInputError_NoData, "GetSkeletalBoneDataCompressed: no compressed bone data yet");
 }
+EVRInputError BaseInput::GetDigitalActionData(VRActionHandle_t action, InputDigitalActionData_t* pActionData, uint32_t unActionDataSize)
+{
+	return GetDigitalActionData(action, pActionData, unActionDataSize, vr::k_ulInvalidInputValueHandle);
+}
+
+EVRInputError BaseInput::GetAnalogActionData(VRActionHandle_t action, InputAnalogActionData_t* pActionData, uint32_t unActionDataSize)
+{
+	return GetAnalogActionData(action, pActionData, unActionDataSize, vr::k_ulInvalidInputValueHandle);
+}
+
+EVRInputError BaseInput::GetPoseActionData(VRActionHandle_t action, ETrackingUniverseOrigin eOrigin, float fPredictedSecondsFromNow,
+    InputPoseActionData_t* pActionData, uint32_t unActionDataSize)
+{
+	return GetPoseActionData(action, eOrigin, fPredictedSecondsFromNow, pActionData, unActionDataSize, vr::k_ulInvalidInputValueHandle);
+}
+
+EVRInputError BaseInput::TriggerHapticVibrationAction(VRActionHandle_t action, float fStartSecondsFromNow, float fDurationSeconds,
+    float fFrequency, float fAmplitude)
+{
+	return TriggerHapticVibrationAction(action, fStartSecondsFromNow, fDurationSeconds, fFrequency, fAmplitude, vr::k_ulInvalidInputValueHandle);
+}
+
+EVRInputError BaseInput::GetSkeletalActionData(VRActionHandle_t action, EVRSkeletalTransformSpace eBoneParent, float fPredictedSecondsFromNow,
+    InputSkeletalActionData_t* pActionData, uint32_t unActionDataSize, VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount)
+{
+	EVRInputError err = GetSkeletalActionData(action, pActionData, unActionDataSize);
+	if (err != vr::VRInputError_None)
+		return err;
+	// A caller that only wants the action data passes no bones
+	if (!pTransformArray && unTransformArrayCount == 0)
+		return vr::VRInputError_None;
+	return GetSkeletalBoneData(action, eBoneParent, vr::VRSkeletalMotionRange_WithController, pTransformArray, unTransformArrayCount);
+}
+
+EVRInputError BaseInput::GetSkeletalActionDataCompressed(VRActionHandle_t action, EVRSkeletalTransformSpace eBoneParent,
+    float fPredictedSecondsFromNow, void* pvCompressedData, uint32_t unCompressedSize, uint32_t* punRequiredCompressedSize)
+{
+	return GetSkeletalBoneDataCompressed(action, vr::VRSkeletalMotionRange_WithController, pvCompressedData, unCompressedSize,
+	    punRequiredCompressedSize);
+}
+
+EVRInputError BaseInput::UncompressSkeletalActionData(void* pvCompressedBuffer, uint32_t unCompressedBufferSize,
+    EVRSkeletalTransformSpace* peBoneParent, VRBoneTransform_t* pTransformArray, uint32_t unTransformArrayCount)
+{
+	return DecompressSkeletalBoneData(pvCompressedBuffer, unCompressedBufferSize, peBoneParent, pTransformArray, unTransformArrayCount);
+}
+
 EVRInputError BaseInput::DecompressSkeletalBoneData(void* pvCompressedBuffer, uint32_t unCompressedBufferSize,
     EVRSkeletalTransformSpace* peTransformSpace, VR_ARRAY_COUNT(unTransformArrayCount) VRBoneTransform_t* pTransformArray,
     uint32_t unTransformArrayCount)

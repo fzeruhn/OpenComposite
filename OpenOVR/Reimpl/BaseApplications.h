@@ -80,6 +80,7 @@ struct OOVR_AppOverrideKeys_t {
 
 class BaseApplications {
 public:
+
 	typedef OOVR_EVRApplicationError EVRApplicationError;
 	typedef OOVR_EVRApplicationProperty EVRApplicationProperty;
 	typedef OOVR_EVRApplicationTransitionState EVRApplicationTransitionState;
@@ -214,4 +215,9 @@ public:
 
 	/** Tells the runtime that a process belongs to this app. */
 	EVRApplicationError RegisterSubprocess(uint32_t nPid);
+
+	/** IVRApplications_001 (SDK 0.9.8 to 0.9.11): the home application, which the OpenXR runtime has none of: none is
+	 * answered (UnknownApplication), and none can be set */
+	EVRApplicationError GetHomeApplication(VR_OUT_STRING() char* pchAppKeyBuffer, uint32_t unAppKeyBufferLen);
+	EVRApplicationError SetHomeApplication(const char* pchAppKey);
 };
