@@ -66,8 +66,10 @@ class Runner:
     def __init__(self, args):
         self.args = args
         self.out = Path(args.out)
+        # OC_TEST_NO_STEAMVR: OpenComposite finds no SteamVR or Steam config (its settings, resources and legacy
+        # binding files), so a run here answers as on CI's runner, which has none
         self.env = {"OC_NO_MESSAGE_BOX": "1", "OC_LOG_DIR": str(self.out / "logs"),
-                    "OC_STORE_DIR": str(self.out / "store")}
+                    "OC_STORE_DIR": str(self.out / "store"), "OC_TEST_NO_STEAMVR": "1"}
         if args.xr_runtime == "stand-in":
             manifest = Path(args.conformance).resolve().parent / "runtime" / "oc_test_runtime.json"
             self.manifest = str(manifest)
