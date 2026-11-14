@@ -87,7 +87,7 @@ void oovr_message_raw(const char* message, const char* title);
 		HRESULT res = (expression);                                                                                            \
 		if (FAILED(res)) {                                                                                                     \
 			OOVR_LOGF("DX Call failed with: 0x%08x", res);                                                                     \
-			OOVR_ABORT_T("OOVR_FAILED_DX_ABORT failed on: " #expression, "OpenComposite DirectX error - see log for details"); \
+			OOVR_ABORT_T("OOVR_FAILED_DX_ABORT failed on: " #expression, "OpenLamina DirectX error - see log for details"); \
 		}                                                                                                                      \
 	} while (0)
 

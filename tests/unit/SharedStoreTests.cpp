@@ -187,3 +187,46 @@ TEST_CASE("Store_process_alive")
 	CHECK(SharedStore::IsProcessAlive(oc_current_pid()));
 	CHECK_FALSE(SharedStore::IsProcessAlive(0));
 }
+
+TEST_CASE("Store_migrates_the_old_folders_documents_once")
+{
+	TempDir t;
+	fs::path legacy = t.root / "OpenComposite" / "store";
+	fs::path fresh = t.root / "OpenLamina" / "store";
+	fs::create_directories(legacy);
+	{
+		SharedStore old(legacy); // the documents as a store writes them
+		REQUIRE(old.Update(StoreDoc::Settings, [](Json::Value& data) { data["a"] = 1; }));
+		REQUIRE(old.Update(StoreDoc::Chaperone, [](Json::Value& data) { data["room"] = 2; }));
+	}
+	REQUIRE(fs::exists(legacy / "state.bin"));
+	REQUIRE(fs::exists(legacy / "store.lock"));
+
+	REQUIRE(SharedStore::MigrateLegacyDir(legacy, fresh));
+	CHECK(Contents(fresh / "settings.json") == Contents(legacy / "settings.json"));
+	CHECK(Contents(fresh / "chaperone.json") == Contents(legacy / "chaperone.json"));
+	CHECK_FALSE(fs::exists(fresh / "state.bin")); // running state isn't carried over
+	CHECK_FALSE(fs::exists(fresh / "store.lock"));
+	CHECK(fs::exists(legacy / "settings.json")); // a copy: the old folder is as it was
+	CHECK(fs::exists(legacy / "state.bin"));
+
+	// Once: a later start doesn't write the old documents over what the new folder has changed since
+	std::ofstream(fresh / "settings.json", std::ios::trunc) << "changed";
+	CHECK_FALSE(SharedStore::MigrateLegacyDir(legacy, fresh));
+	CHECK(Contents(fresh / "settings.json") == "changed");
+
+	// and what was copied is a store that reads it (settings is "changed" by now, so the other document)
+	SharedStore store(fresh);
+	CHECK(store.Read(StoreDoc::Chaperone)["room"].asInt() == 2);
+}
+
+TEST_CASE("Store_migration_leaves_nothing_behind_when_it_fails")
+{
+	TempDir t;
+	fs::path legacy = t.root / "OpenComposite" / "store";
+	fs::create_directories(legacy);
+	std::ofstream(legacy / "settings.json") << "{}";
+	std::ofstream(t.root / "OpenLamina") << "a file where its folder would go";
+	CHECK_FALSE(SharedStore::MigrateLegacyDir(legacy, t.root / "OpenLamina" / "store"));
+	CHECK(fs::exists(legacy / "settings.json"));
+}

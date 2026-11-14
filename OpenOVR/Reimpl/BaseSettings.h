@@ -47,7 +47,7 @@ public:
 	void RemoveKeyInSection(const char* pchSection, const char* pchSettingsKey, EVRSettingsError* peError = nullptr);
 
 	/** The scale the recommended render target size is multiplied by: steamvr.supersampleScale from the store, else
-	 * from the user's steamvr.vrsettings when its supersampleManualOverride is on, else iniRatio (opencomposite.ini's
+	 * from the user's steamvr.vrsettings when its supersampleManualOverride is on, else iniRatio (openlamina.ini's
 	 * supersampleRatio); then steam.app.<SteamAppId>.resolutionScale (percent) from the store or that file. */
 	static float RenderScale(SharedStore& store, float iniRatio);
 	/** RenderScale without the app's own resolutionScale */

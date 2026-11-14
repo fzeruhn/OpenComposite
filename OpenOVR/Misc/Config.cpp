@@ -20,7 +20,7 @@ using vr::HmdColor_t;
 
 Config oovr_global_configuration;
 
-// A bad value in opencomposite.ini: logged as a warning, and the option keeps its default (parse_* throw this to
+// A bad value in openlamina.ini: logged as a warning, and the option keeps its default (parse_* throw this to
 // ini_handler, which catches it; nothing leaves this file)
 struct BadConfigValue {
 	string message;
@@ -168,7 +168,7 @@ int Config::ini_handler(void* user, const char* pSection,
 
 #undef CFGOPT
 
-	OOVR_LOGF("Unknown opencomposite.ini key '%s' ignored (line %d)", name.c_str(), lineno);
+	OOVR_LOGF("Unknown config file key '%s' ignored (line %d)", name.c_str(), lineno);
 	return true;
 }
 
@@ -188,6 +188,20 @@ static int wini_parse(const wchar_t* filename, ini_handler handler, void* user)
 	int error = ini_parse_file(file, handler, user);
 	fclose(file);
 	return error;
+}
+
+// The config file in a folder (prefix ends with a separator): openlamina.ini, else the opencomposite.ini of the
+// project OpenLamina was forked from, so a file a user already has keeps working. If both are there, only
+// openlamina.ini is read. file is the one that was tried last, for the caller's messages.
+static int wini_parse_in(const std::wstring& prefix, std::wstring& file, ini_handler handler, void* user)
+{
+	file = prefix + L"openlamina.ini";
+	int err = wini_parse(file.c_str(), handler, user);
+	if (err == -1) {
+		file = prefix + L"opencomposite.ini";
+		err = wini_parse(file.c_str(), handler, user);
+	}
+	return err;
 }
 
 // The ctor is run before DLLMain, so use this hack for now
@@ -220,8 +234,8 @@ Config::Config()
 	}
 
 	OOVR_LOG("Checking for global config file...");
-	wstring file = dir + L"opencomposite.ini";
-	int err = wini_parse(file.c_str(), ini_handler, this);
+	wstring file;
+	int err = wini_parse_in(dir, file, ini_handler, this);
 #else
 	int err = -1;
 	wstring file;
@@ -232,14 +246,14 @@ Config::Config()
 		// for a file that overrides some properties
 		char buff[FILENAME_MAX];
 		if (GetCurrentDir(buff, FILENAME_MAX)) {
-			file = wstring(&buff[0], &buff[strlen(buff)]);
+			wstring workingDir(&buff[0], &buff[strlen(buff)]);
 #ifdef _WIN32
-			file += L"\\opencomposite.ini";
+			workingDir += L"\\";
 #else
-			file += L"/opencomposite.ini";
+			workingDir += L"/";
 #endif
 			OOVR_LOG("Checking for app specific config file...");
-			err = wini_parse(file.c_str(), ini_handler, this);
+			err = wini_parse_in(workingDir, file, ini_handler, this);
 		} else {
 			OOVR_LOG("Couldn't get the working directory, so there's no app specific config file");
 		}
@@ -251,7 +265,7 @@ Config::Config()
 		return;
 	} else if (err) {
 		// err is the line number of the first line ini_parse couldn't read; it read the rest
-		OOVR_LOGF("Warning: opencomposite.ini can't be read on line %d; that line is ignored", err);
+		OOVR_LOGF("Warning: the config file can't be read on line %d; that line is ignored", err);
 	}
 
 	// Everything should have been set up by ini_handler

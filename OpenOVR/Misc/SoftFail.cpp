@@ -69,7 +69,7 @@ void oc_soft_fail(OcSoftSite* site, const char* fmt, ...)
 		hook(buff);
 		return;
 	}
-	oovr_abort_raw(site->file, site->line, site->func, "%s", "OpenComposite Debug Error (stopOnSoftAbort)", buff);
+	oovr_abort_raw(site->file, site->line, site->func, "%s", "OpenLamina Debug Error (stopOnSoftAbort)", buff);
 }
 
 void oc_soft_log_summary()
@@ -78,7 +78,7 @@ void oc_soft_log_summary()
 	uint64_t total = 0;
 	for (const OcSoftSite* s : sites)
 		total += s->hits.load();
-	OOVR_LOGF("OpenComposite compatibility summary: %llu unsupported calls in %zu places", (unsigned long long)total, sites.size());
+	OOVR_LOGF("OpenLamina compatibility summary: %llu unsupported calls in %zu places", (unsigned long long)total, sites.size());
 	for (const OcSoftSite* s : sites)
 		OOVR_LOGF("  %u x %s (%s:%d): %s", s->hits.load(), s->func, BaseName(s->file), s->line, s->firstMessage);
 }

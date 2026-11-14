@@ -164,7 +164,7 @@ static FILE* cfile(std::ofstream& ofs)
 static std::ofstream init_stream()
 {
 	std::ofstream stream;
-	string outputFilePath = "opencomposite.log";
+	string outputFilePath = "openlamina.log";
 
 	// Try and write to standard location
 	// fall back to exe dir if can't create dir
@@ -173,7 +173,7 @@ static std::ofstream init_stream()
 #ifdef _WIN32
 	string outputFolder = GetEnv("LOCALAPPDATA");
 	if (!outputFolder.empty())
-		outputFolder = outputFolder + "\\OpenComposite\\logs";
+		outputFolder = outputFolder + "\\OpenLamina\\logs";
 	if (!overrideFolder.empty())
 		outputFolder = overrideFolder;
 	if (!outputFolder.empty() && makePath(outputFolder))
@@ -186,7 +186,7 @@ static std::ofstream init_stream()
 			outputFolder = outputFolder + "/.local/state";
 	}
 	if (!outputFolder.empty())
-		outputFolder = outputFolder + "/OpenComposite/logs";
+		outputFolder = outputFolder + "/OpenLamina/logs";
 	if (!overrideFolder.empty())
 		outputFolder = overrideFolder;
 	if (!outputFolder.empty() && makePath(outputFolder))
@@ -293,7 +293,7 @@ void oovr_log_raw(const char* file, long line, const char* func, const char* msg
 	}
 
 #ifdef ANDROID
-	__android_log_print(ANDROID_LOG_INFO, "OpenComposite", "%s:%d \t %s", func, line, msg);
+	__android_log_print(ANDROID_LOG_INFO, "OpenLamina", "%s:%d \t %s", func, line, msg);
 #else
 	stream() << "[" << format_time() << "] " << func << ":" << line << "\t- " << (msg ? msg : "NULL") << std::endl;
 
@@ -350,7 +350,7 @@ OC_NORETURN void oovr_abort_raw(const char* file, long line, const char* func, c
 OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func, const char* msg, const char* title, va_list args)
 {
 	if (title == nullptr) {
-		title = "OpenComposite Error - info in log";
+		title = "OpenLamina Error - info in log";
 		OOVR_LOG("Abort!");
 	} else {
 		OOVR_LOG(title);
@@ -364,7 +364,7 @@ OC_NORETURN void oovr_abort_raw_va(const char* file, long line, const char* func
 
 	// Ensure everything gets written
 #ifdef ANDROID
-	__android_log_print(ANDROID_LOG_ERROR, "OpenComposite", "ERROR: %s:%d \t %s", func, line, buff);
+	__android_log_print(ANDROID_LOG_ERROR, "OpenLamina", "ERROR: %s:%d \t %s", func, line, buff);
 #else
 	stream() << std::flush;
 #endif

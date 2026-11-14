@@ -1,6 +1,6 @@
 #pragma once
 
-// State that every OpenComposite instance of the user shares: JSON documents (settings, applications, the room
+// State that every OpenLamina instance of the user shares: JSON documents (settings, applications, the room
 // setup, the scene app, the dashboard, overlays) and a ring of events between processes. Reading never blocks;
 // changes are a locked read-modify-write, so two programs changing one document at once both keep their change.
 
@@ -28,9 +28,14 @@ static_assert(sizeof(StoreEvent) == 48, "the ring's events are 48 bytes");
 
 class SharedStore {
 public:
-	/** The process's store: OC_STORE_DIR if set, else %LOCALAPPDATA%\OpenComposite\store (Linux: $XDG_STATE_HOME or
-	 * ~/.local/state, then OpenComposite/store) */
+	/** The process's store: OC_STORE_DIR if set, else %LOCALAPPDATA%\OpenLamina\store (Linux: $XDG_STATE_HOME or
+	 * ~/.local/state, then OpenLamina/store). If that folder doesn't exist yet, the OpenComposite one it replaced (the
+	 * same place under OpenComposite) is copied into it first, if there is one. */
 	static SharedStore& Get();
+
+	/** Copies the documents (not state.bin or the lock) of the store in legacy to a new folder dir, all at once. False,
+	 * with nothing made, if dir exists already or any step fails; legacy is never changed. */
+	static bool MigrateLegacyDir(const std::filesystem::path& legacy, const std::filesystem::path& dir);
 
 	/** A store in dir (tests). A folder that can't be made or used leaves the store unusable, never throwing. */
 	explicit SharedStore(const std::filesystem::path& dir);

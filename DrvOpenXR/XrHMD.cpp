@@ -36,7 +36,7 @@ static bool WaitForSessionGlobals()
 
 void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 {
-	// opencomposite.ini's supersampleRatio, unless a program or the user's SteamVR settings chose another
+	// openlamina.ini's supersampleRatio, unless a program or the user's SteamVR settings chose another
 	float scale = BaseSettings::RenderScale(SharedStore::Get(), oovr_global_configuration.SupersampleRatio());
 	if (width)
 		*width = (uint32_t)((float)xr_main_view(XruEyeLeft).recommendedImageRectWidth * scale);

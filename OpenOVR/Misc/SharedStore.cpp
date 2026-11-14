@@ -2,6 +2,8 @@
 
 #include "SharedStore.h"
 
+#include "Misc/Process.h"
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -143,28 +145,100 @@ bool WriteFile(const fs::path& path, const std::string& text)
 	return !out.fail();
 }
 
-fs::path DefaultDir()
+// The store folder of the program called folderName (OpenLamina, or OpenComposite before it)
+fs::path StoreDirOf(const char* folderName)
 {
 #ifdef _WIN32
-	if (const wchar_t* overrideDir = _wgetenv(L"OC_STORE_DIR"); overrideDir && overrideDir[0])
-		return fs::path(overrideDir);
 	if (const wchar_t* local = _wgetenv(L"LOCALAPPDATA"); local && local[0])
-		return fs::path(local) / "OpenComposite" / "store";
+		return fs::path(local) / folderName / "store";
 	return {};
 #else
-	if (const char* overrideDir = getenv("OC_STORE_DIR"); overrideDir && overrideDir[0])
-		return fs::path(overrideDir);
 	const char* xdg = getenv("XDG_STATE_HOME");
 	if (xdg && xdg[0])
-		return fs::path(xdg) / "OpenComposite" / "store";
+		return fs::path(xdg) / folderName / "store";
 	const char* home = getenv("HOME");
 	if (home && home[0])
-		return fs::path(home) / ".local" / "state" / "OpenComposite" / "store";
+		return fs::path(home) / ".local" / "state" / folderName / "store";
 	return {};
 #endif
 }
 
+// OC_STORE_DIR, if it's set (tests)
+fs::path OverrideDir()
+{
+#ifdef _WIN32
+	if (const wchar_t* overrideDir = _wgetenv(L"OC_STORE_DIR"); overrideDir && overrideDir[0])
+		return fs::path(overrideDir);
+#else
+	if (const char* overrideDir = getenv("OC_STORE_DIR"); overrideDir && overrideDir[0])
+		return fs::path(overrideDir);
+#endif
+	return {};
+}
+
+std::string Utf8(const fs::path& p)
+{
+	std::u8string name = p.u8string();
+	return std::string(name.begin(), name.end());
+}
+
+// Where this process's store is: OC_STORE_DIR if set, else the OpenLamina folder. If that doesn't exist yet and the
+// OpenComposite one this was forked from does, its documents are copied over once (the old folder is left as it is,
+// for an OpenComposite still installed); if they can't be, the old folder is used where it is.
+fs::path ChooseDir()
+{
+	if (fs::path overridden = OverrideDir(); !overridden.empty())
+		return overridden;
+	fs::path dir = StoreDirOf("OpenLamina");
+	fs::path legacy = StoreDirOf("OpenComposite");
+	std::error_code ec;
+	if (dir.empty() || legacy.empty() || fs::exists(dir, ec) || !fs::is_directory(legacy, ec))
+		return dir;
+	if (SharedStore::MigrateLegacyDir(legacy, dir)) {
+		OOVR_LOGF("Copied the shared store of OpenComposite, %s, to %s", Utf8(legacy).c_str(), Utf8(dir).c_str());
+		return dir;
+	}
+	// Another program that started at the same moment may have done it
+	if (fs::exists(dir, ec))
+		return dir;
+	OOVR_LOGF("Couldn't copy the shared store of OpenComposite, %s, to %s: using it where it is", Utf8(legacy).c_str(), Utf8(dir).c_str());
+	return legacy;
+}
+
 } // namespace
+
+bool SharedStore::MigrateLegacyDir(const fs::path& legacy, const fs::path& dir)
+{
+	std::error_code ec;
+	fs::create_directories(dir.parent_path(), ec);
+	if (ec)
+		return false;
+	// Into a folder of its own first, which becomes dir in one step: a program that is late can't write the old
+	// documents over newer ones, and a half-copied store is never seen
+	fs::path temp = dir.parent_path() / (Utf8(dir.filename()) + ".migrating-" + std::to_string(oc_current_pid()));
+	fs::remove_all(temp, ec);
+	if (!fs::create_directory(temp, ec) || ec)
+		return false;
+	bool ok = true;
+	// Only the documents: state.bin and the lock are this machine's running state, and start again
+	for (const char* name : kDocNames) {
+		fs::path from = legacy / (std::string(name) + ".json");
+		if (!fs::is_regular_file(from, ec))
+			continue;
+		fs::copy_file(from, temp / from.filename(), fs::copy_options::none, ec);
+		if (ec) {
+			ok = false;
+			break;
+		}
+	}
+	if (ok) {
+		fs::rename(temp, dir, ec);
+		ok = !ec;
+	}
+	if (!ok)
+		fs::remove_all(temp, ec);
+	return ok;
+}
 
 struct SharedStore::Header {
 	char magic[4]; // "OCST"
@@ -312,7 +386,7 @@ public:
 SharedStore& SharedStore::Get()
 {
 	// Never destroyed: the backend writes to it from static destructors at exit, which may run after this one would
-	static SharedStore* store = new SharedStore(DefaultDir());
+	static SharedStore* store = new SharedStore(ChooseDir());
 	return *store;
 }
 

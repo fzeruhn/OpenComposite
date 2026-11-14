@@ -51,7 +51,7 @@ void DrvOpenXR::GetXRAppName(char (&appName)[128])
 {
 	std::string exeName = GetExeName();
 	if (exeName.size() > 0) {
-		std::string ocAppName{ "OpenComposite_" };
+		std::string ocAppName{ "OpenLamina_" };
 		ocAppName.append(exeName);
 		auto pos = ocAppName.find(".exe");
 		if (pos != std::string::npos && pos > 0)
@@ -59,7 +59,7 @@ void DrvOpenXR::GetXRAppName(char (&appName)[128])
 		OOVR_LOGF("Setting application name to %s", ocAppName.c_str());
 		strcpy_arr(appName, ocAppName.c_str());
 	} else {
-		strcpy_arr(appName, "OpenComposite");
+		strcpy_arr(appName, "OpenLamina");
 	}
 }
 

@@ -16,7 +16,9 @@ using vr::VRSpatialAnchorError_InvalidArgument;
 using vr::VRSpatialAnchorError_Success;
 using vr::VRSpatialAnchorError_UnknownHandle;
 
-static const char* const kDescriptorPrefix = "OpenComposite-anchor";
+static const char* const kDescriptorPrefix = "OpenLamina-anchor";
+// What descriptors began with before OpenLamina: a game may have saved one, so it is still read (never written)
+static const char* const kOldDescriptorPrefix = "OpenComposite-anchor";
 
 static bool UsableOrigin(vr::ETrackingUniverseOrigin origin)
 {
@@ -71,7 +73,7 @@ vr::EVRSpatialAnchorError BaseSpatialAnchors::CreateSpatialAnchorFromDescriptor(
 		for (float& v : row)
 			in >> v;
 	anchor.origin = (vr::ETrackingUniverseOrigin)origin;
-	if (!in || prefix != kDescriptorPrefix || !UsableOrigin(anchor.origin) || !Finite(anchor.pose))
+	if (!in || (prefix != kDescriptorPrefix && prefix != kOldDescriptorPrefix) || !UsableOrigin(anchor.origin) || !Finite(anchor.pose))
 		return VRSpatialAnchorError_InvalidArgument;
 	return Add(anchor, pHandleOut);
 }
