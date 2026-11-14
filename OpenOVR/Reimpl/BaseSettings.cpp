@@ -4,6 +4,7 @@
 #include "BaseSettings.h"
 #include "Drivers/Backend.h"
 #include "Misc/Config.h"
+#include "Misc/Numbers.h"
 #include "Misc/SharedStore.h"
 #include "Misc/SteamVRSettings.h"
 #include "../DrvOpenXR/DeviceIdentity.h"
@@ -53,6 +54,7 @@ std::optional<Json::Value> StoredValue(SharedStore& store, const std::string& se
 // The OpenXR system's name, which picks the HMD's identity row; empty before a session (and in the unit tests)
 std::string HmdSystemName()
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	if (!xr_gbl)
 		return {};
 	return xr_gbl->systemProperties.systemName;
@@ -61,13 +63,9 @@ std::string HmdSystemName()
 // Text as a number, all of it; nothing for anything else
 std::optional<double> ParseNumber(const std::string& text)
 {
-	if (text.empty())
-		return std::nullopt;
-	const char* begin = text.c_str();
-	char* end = nullptr;
-	errno = 0;
-	double d = strtod(begin, &end);
-	if (end == begin || *end != '\0' || errno == ERANGE)
+	size_t used = 0;
+	std::optional<double> d = Numbers::ParseDouble(text, &used);
+	if (!d || used != text.size())
 		return std::nullopt;
 	return d;
 }
@@ -99,9 +97,7 @@ std::optional<std::string> AsString(const Json::Value& v)
 	if (v.isBool())
 		return v.asBool() ? "true" : "false";
 	if (v.type() == Json::realValue) { // before isInt64, which a whole float also is
-		char buff[64];
-		snprintf(buff, sizeof(buff), "%f", v.asDouble());
-		return std::string(buff);
+		return Numbers::FormatFixed(v.asDouble(), 6); // as "%f" in the C locale
 	}
 	if (v.isInt64())
 		return std::to_string(v.asInt64());

@@ -30,24 +30,11 @@ bool XrController::GetBoolTrackedDeviceProperty(vr::ETrackedDeviceProperty prop,
 
 	TRY_PROFILE_PROP(bool);
 
-	// The battery, from libmonado when Monado offers it
+	// The battery, from libmonado when Monado offers it (asked only for the battery's own properties)
 	const char* role = type == XCT_LEFT ? "left" : type == XCT_RIGHT ? "right" : nullptr;
-	auto batteryFor = [role]() { return role ? LibMonado::Get().BatteryForRole(role) : std::nullopt; };
-
-	switch (prop) {
-	case vr::Prop_DeviceProvidesBatteryStatus_Bool: {
-		std::optional<LibMonado::Battery> battery = batteryFor();
-		return battery ? battery->present : true;
-	}
-	case vr::Prop_DeviceIsCharging_Bool: {
-		std::optional<LibMonado::Battery> battery = batteryFor();
-		if (battery && battery->present)
-			return battery->charging;
-		return XrTrackedDevice::GetBoolTrackedDeviceProperty(prop, pErrorL);
-	}
-	default:
-		return XrTrackedDevice::GetBoolTrackedDeviceProperty(prop, pErrorL);
-	}
+	if (std::optional<bool> battery = BatteryBoolProperty(LibMonado::Get(), prop, role))
+		return *battery;
+	return XrTrackedDevice::GetBoolTrackedDeviceProperty(prop, pErrorL);
 }
 
 float XrController::GetFloatTrackedDeviceProperty(vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* pErrorL)
@@ -165,6 +152,7 @@ ITrackedDevice::TrackedDeviceType XrController::GetHand()
 
 void XrController::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t* pose, ETrackingStateType trackingState)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	// Default to an invalid pose
 	ZeroMemory(pose, sizeof(*pose));
 	pose->bDeviceIsConnected = true;

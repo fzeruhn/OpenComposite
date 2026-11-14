@@ -331,6 +331,13 @@ public:
 	 * null.  The string will be a space separated list of required device extensions to enable in VkCreateDevice */
 	uint32_t GetVulkanDeviceExtensionsRequired(VkPhysicalDevice_T* pPhysicalDevice, char* pchValue, uint32_t unBufferSize);
 
+	/** What the two above answer for OpenXR's answer: the size OpenXR says is needed, also when the buffer was too
+	 * small (as SteamVR answers); 0 for any other failure */
+	static uint32_t VulkanExtensionsSize(XrResult res, uint32_t sizeNeeded)
+	{
+		return (XR_SUCCEEDED(res) || res == XR_ERROR_SIZE_INSUFFICIENT) ? sizeNeeded : 0;
+	}
+
 	/** [ Vulkan/D3D12 Only ]
 	 * There are two purposes for SetExplicitTimingMode:
 	 *	1. To get a more accurate GPU timestamp for when the frame begins in Vulkan/D3D12 applications.

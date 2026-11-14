@@ -5,7 +5,8 @@
  *   FAKE_MND_NO_BATTERY  set: the battery call fails with MND_ERROR_OPERATION_FAILED (-4), as Monado's does for a
  *                        device without battery status
  *   FAKE_MND_SAME_NAMES  set: every device is called "Fake Controller"
- * Three devices: 0 "Fake HMD" (head), 1 "Fake Left" (left), 2 "Fake Right" (right); serials SN0, SN1, SN2. */
+ * Three devices: 0 "Fake HMD" (head), 1 "Fake Left" (left), 2 "Fake Right" (right); serials SN0, SN1, SN2.
+ * fake_mnd_battery_calls() answers how often the battery was asked for. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -94,9 +95,17 @@ FAKE_API int mnd_root_get_device_from_role(void* root, const char* role, int32_t
 	return -1;
 }
 
+static int batteryCalls;
+
+FAKE_API int fake_mnd_battery_calls(void)
+{
+	return batteryCalls;
+}
+
 FAKE_API int mnd_root_get_device_battery_status(void* root, uint32_t index, bool* present, bool* charging, float* charge)
 {
 	(void)root;
+	batteryCalls++;
 	if (index > 2)
 		return -1;
 	if (fake_getenv("FAKE_MND_NO_BATTERY"))

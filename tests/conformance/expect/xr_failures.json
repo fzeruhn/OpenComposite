@@ -17,6 +17,14 @@
   },
   "hmd_present": false
  },
+ "fail_session": {
+  "cases": [
+   "init-matrix"
+  ],
+  "init_error": {
+   "Init(1)": 124
+  }
+ },
  "fail_frame": {
   "cases": [
    "frame-loop"

@@ -48,6 +48,7 @@ void XrHMD::GetRecommendedRenderTargetSize(uint32_t* width, uint32_t* height)
 
 vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, float fFarZ, EGraphicsAPIConvention convention)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	if (eEye < 0 || (int)eEye >= 2)
 		eEye = vr::Eye_Left;
 
@@ -103,6 +104,7 @@ vr::HmdMatrix44_t XrHMD::GetProjectionMatrix(vr::EVREye eEye, float fNearZ, floa
 
 void XrHMD::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	// This is how SteamVR seems to handle invalid eyes
 	if (eEye < 0 || (int)eEye >= 2)
 		eEye = vr::Eye_Left;
@@ -170,6 +172,7 @@ bool XrHMD::ComputeDistortion(vr::EVREye eEye, float fU, float fV, vr::Distortio
 
 vr::HmdMatrix34_t XrHMD::GetEyeToHeadTransform(vr::EVREye eEye)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	static XrTime time = ~0; // Don't set to zero by default, otherwise we'll return an identity matrix before the first frame
 	static XrView views[XruEyeCount] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
 
@@ -209,7 +212,7 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 {
 	if (!xr_ext->xrGetVisibilityMaskKHR_Available()) {
 		// This is what the docs say we should return if the mask is unavailable
-		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+		return HiddenAreaMesh(nullptr, 0);
 	}
 
 	// TODO verify the line loop mode works properly
@@ -227,7 +230,7 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 		break;
 	default:
 		// As SteamVR answers a mesh type it doesn't know: no mesh
-		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+		return HiddenAreaMesh(nullptr, 0);
 	}
 
 	// Note: the OpenXR and OpenVR eye indexes are the same, so we can just cast between them.
@@ -239,7 +242,7 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 	if (eye >= XruEyeCount || !xr_session.get() || XR_FAILED(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask))
 	    || mask.indexCountOutput == 0) {
 		// No mask from the runtime: what the docs say to return when there's none
-		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+		return HiddenAreaMesh(nullptr, 0);
 	}
 
 	// Allocate memory for the mesh
@@ -252,14 +255,12 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 	if (XR_FAILED(xr_ext->xrGetVisibilityMaskKHR(xr_session.get(), XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, eye, xrType, &mask))) {
 		delete[] mask.indices;
 		delete[] mask.vertices;
-		return vr::HiddenAreaMesh_t{ nullptr, 0 };
+		return HiddenAreaMesh(nullptr, 0);
 	}
 
 	// Convert the data into something usable by SteamVR - it doesn't use indices
-	vr::HiddenAreaMesh_t result = {};
 	// FIXME memory allocation handling
 	auto* arr = new vr::HmdVector2_t[mask.indexCountOutput];
-	result.pVertexData = arr;
 
 	float ftop, fbottom, fleft, fright;
 	GetProjectionRaw(eEye, &fleft, &fright, &ftop, &fbottom);
@@ -279,17 +280,13 @@ vr::HiddenAreaMesh_t XrHMD::GetHiddenAreaMesh(vr::EVREye eEye, vr::EHiddenAreaMe
 		}
 	}
 
-	if (type == vr::k_eHiddenAreaMesh_LineLoop) {
-		result.unTriangleCount = mask.indexCountOutput;
-	} else {
-		result.unTriangleCount = mask.indexCountOutput / 3;
-	}
+	uint32_t count = type == vr::k_eHiddenAreaMesh_LineLoop ? mask.indexCountOutput : mask.indexCountOutput / 3;
 
 	// Delete the buffers
 	delete[] mask.indices;
 	delete[] mask.vertices;
 
-	return result;
+	return HiddenAreaMesh(arr, count);
 }
 
 void XrHMD::GetPose(vr::ETrackingUniverseOrigin origin, vr::TrackedDevicePose_t* pose, ETrackingStateType trackingState)

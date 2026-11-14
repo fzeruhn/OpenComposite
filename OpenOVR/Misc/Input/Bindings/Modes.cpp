@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Modes.h"
+#include "Misc/Numbers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -93,10 +94,8 @@ protected:
 	{
 		auto it = binding.parameters.find(name);
 		if (it != binding.parameters.end()) {
-			char* end = nullptr;
-			float v = strtof(it->second.c_str(), &end);
-			if (end != it->second.c_str())
-				return v;
+			if (std::optional<float> v = Numbers::ParseFloat(it->second))
+				return *v;
 		}
 		return ModeParameterDefault(binding.mode, name);
 	}
@@ -487,7 +486,8 @@ public:
 		Stick s = ReadStick(in, binding.path, forceClick);
 		bool on = TextParam("sub_mode", "touch") == "click" ? s.clicked : s.touched;
 		float wanted = Param("segments");
-		int segments = std::isfinite(wanted) ? std::clamp((int)std::min(wanted, 64.0f), 1, 64) : 4;
+		// 1 to 360 (a hand-edited count can't make a frame loop run forever)
+		int segments = std::isfinite(wanted) ? (int)std::clamp(wanted, 1.0f, 360.0f) : 4;
 		int under = -1;
 		if (on && s.Radius() > Param("deadzone_pct") / 100.0f) {
 			float clockwiseFromNorth = 90.0f - std::atan2(s.y, s.x) * 180.0f / 3.14159265f;

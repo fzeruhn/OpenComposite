@@ -45,13 +45,16 @@ std::optional<fs::path> FindBindingFile(const std::string& appKey, const std::st
 
 fs::path UserBindingsDir()
 {
-	if (const char* overrideDir = getenv("OC_BINDINGS_DIR"); overrideDir && overrideDir[0])
-		return PathFromUtf8(overrideDir);
 #ifdef _WIN32
+	// Wide: the narrow variable is in the ANSI code page, which can't hold every folder name
+	if (const wchar_t* overrideDir = _wgetenv(L"OC_BINDINGS_DIR"); overrideDir && overrideDir[0])
+		return fs::path(overrideDir);
 	if (const wchar_t* local = _wgetenv(L"LOCALAPPDATA"); local && local[0])
 		return fs::path(local) / "OpenComposite" / "bindings";
 	return {};
 #else
+	if (const char* overrideDir = getenv("OC_BINDINGS_DIR"); overrideDir && overrideDir[0])
+		return PathFromUtf8(overrideDir);
 	const char* xdg = getenv("XDG_STATE_HOME");
 	if (xdg && xdg[0])
 		return fs::path(xdg) / "OpenComposite" / "bindings";

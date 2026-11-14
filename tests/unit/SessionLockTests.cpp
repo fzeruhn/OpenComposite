@@ -207,3 +207,16 @@ TEST_CASE("SessionLock: the teardown lock gives up on a holder that never lets g
 		CHECK(WaitFor([&] { return reader.got.load(); }));
 	}
 }
+
+TEST_CASE("SessionLock_shared_reader_blocks_restart")
+{
+	// A reader of input on one thread (shared) and a session restart on another (exclusive): the restart waits
+	SessionWrapper w;
+	std::optional<SessionLock> reader;
+	reader.emplace(w, false);
+
+	Contender restart(w, true);
+	CHECK(StaysUnset(restart.got));
+	reader.reset();
+	CHECK(WaitFor([&] { return restart.got.load(); }));
+}

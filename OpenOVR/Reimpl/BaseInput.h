@@ -4,6 +4,7 @@
 // FIXME don't do that, it's ugly and slows down the build when modifying headers
 
 #include "Drivers/Backend.h"
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <memory>
@@ -241,6 +242,29 @@ public:
 	/** Reads the current state into all actions. After this call, the results of Get*Action calls
 	 * will be the same until the next call to UpdateActionState. */
 	EVRInputError UpdateActionState(VR_ARRAY_COUNT(unSetCount) VRActiveActionSet_t* pSets, uint32_t unSizeOfVRSelectedActionSet_t, uint32_t unSetCount);
+
+	/** UpdateActionState's argument check: a null or wrong-sized struct is an argument error, as SteamVR answers, and
+	 * so is an entry without a set among several (whatever their priorities). VRInputError_None if they're usable. */
+	static EVRInputError CheckActiveSets(const VRActiveActionSet_t* pSets, uint32_t unSizeOfVRSelectedActionSet_t, uint32_t unSetCount)
+	{
+		if (sizeof(*pSets) != unSizeOfVRSelectedActionSet_t || (unSetCount && !pSets))
+			return vr::VRInputError_InvalidParam;
+		if (unSetCount > 1) {
+			for (uint32_t i = 0; i < unSetCount; i++) {
+				if (pSets[i].ulActionSet == vr::k_ulInvalidActionSetHandle)
+					return vr::VRInputError_InvalidParam;
+			}
+		}
+		return vr::VRInputError_None;
+	}
+
+	/** An action's fUpdateTime: when its value last changed (changeTime, 0 for never), as seconds from now (0 or
+	 * less). One that never changed counts from when it was made (createdAt). */
+	static float UpdateTimeFromNow(double changeTime, double createdAt, double now)
+	{
+		double since = changeTime != 0 ? changeTime : createdAt;
+		return since >= now ? 0.0f : (float)(since - now);
+	}
 
 	/** Reads the state of a digital action given its handle. This will return VRInputError_WrongType if the type of
 	 * action is something other than digital */
@@ -674,6 +698,7 @@ private:
 		ActionType type = ActionType::Boolean;
 		ActionSet* set = nullptr;
 		std::string setName; // The name of the action set - set before we've enumerated the action sets, eg 'main'
+		double createdAt = 0; // when the manifest made it, on the evaluator's clock (its fUpdateTime until it changes)
 
 		XrAction xr = XR_NULL_HANDLE;
 		// used for extending float value range: if this reports a value above 0, the value read by this action is one plus that value
@@ -824,8 +849,10 @@ private:
 	// For some reason, the behavior is different for digital input actions
 	uint64_t syncSerialDigital = 0;
 
-	bool hasLoadedActions = false;
+	// Set under the exclusive session lock; read without it on the way in to LoadEmptyManifestIfRequired
+	std::atomic<bool> hasLoadedActions = false;
 	std::string loadedActionsPath;
+	std::mutex loadedActionsPathLock; // read before the session lock, to answer a repeated manifest at once
 	bool usingLegacyInput = false;
 	Registry<ActionSet> actionSets;
 	Registry<Action> actions;
@@ -838,6 +865,7 @@ private:
 
 	// TODO convert to Registry
 	std::unordered_map<std::string, std::unique_ptr<InputValueHandle>> inputHandleRegistry;
+	std::mutex inputHandleRegistryLock; // GetInputSourceHandle is called from any thread
 
 	std::unordered_map<std::string, XrAction> indexGripExtensionActions;
 
@@ -853,7 +881,11 @@ private:
 	std::map<const InteractionProfile*, std::unique_ptr<BindingEvaluator>> evaluators;
 	std::vector<const BindingEvaluator*> evaluatedThisSync;
 	// Guards everything above and the legacy evaluators: a game reads input on its own thread while OpenComposite
-	// reads the old input after each frame on the thread that submits
+	// reads the old input after each frame on the thread that submits.
+	// Lock order: the session lock (xr_session, shared or exclusive) is taken before evaluatorLock, never after. Every
+	// reader of input holds the session lock shared, so a session restart (exclusive) waits for it; a thread holding
+	// evaluatorLock that then asked for the session lock could wait behind a restart that waits for a reader that
+	// waits for evaluatorLock.
 	mutable std::recursive_mutex evaluatorLock;
 	void CreateRawActions();
 	void SuggestRawInputs(const InteractionProfile& profile, std::vector<XrActionSuggestedBinding>& bindings);

@@ -13,6 +13,7 @@
 #include "IVRDriverManager_001.h"
 #include "custom_interfaces/IVRPaths_002.h"
 #include "IVRSpatialAnchors_001.h"
+#include "IVRTrackedCamera_001.h"
 #include "IVRTrackedCamera_006.h"
 #include "IVRInput_003.h"
 #include "IVRNotifications_001.h"
@@ -31,11 +32,15 @@
 #include "IVRSystem_022.h"
 
 #include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <atomic>
+#include <set>
 #include <thread>
 
 #ifndef _WIN32
@@ -51,6 +56,22 @@ Json::Value Err(int e)
 	Json::Value v;
 	v["ret"] = e;
 	return v;
+}
+
+// The stand-in runtime's dump (OC_TEST_RUNTIME_DUMP), written when OpenComposite destroys its instance: read it after
+// Cleanup. Null without one (another runtime, or none written).
+Json::Value ReadStandInDump()
+{
+	const char* path = std::getenv("OC_TEST_RUNTIME_DUMP");
+	if (!path || !*path)
+		return Json::Value();
+	std::ifstream in(path, std::ios::binary);
+	Json::Value root;
+	Json::CharReaderBuilder rb;
+	std::string errors;
+	if (!in || !Json::parseFromStream(rb, in, &root, &errors))
+		return Json::Value();
+	return root;
 }
 
 void InitMatrix(CaseContext& c)
@@ -327,7 +348,11 @@ void FrameLoop(CaseContext& c)
 }
 
 // IVRSystem_003-010 poll into SDK 0.9.x's 32-byte VREvent_t, not today's 64-byte one. 120 frames as frame-loop, polling
-// through IVRSystem_009 into a 64-byte buffer: each frame records its events and how many bytes past 32 were written
+// through IVRSystem_009 into a 64-byte buffer: each frame records its events and how many bytes past 32 were written.
+// Each kind of event is also recorded once as the old struct reads it ("event <type>"): the device at 4, the data's
+// 16 bytes at 8 (hex), eventAgeSeconds at 24 and the 4 bytes after it (Windows' padding). The game reads the right
+// controller's old state every frame, so with scripts/legacy_click.json its button events arrive (their data is the
+// button's id, expect/old_calls.json)
 void OldEvents(CaseContext& c)
 {
 	Frames f;
@@ -341,11 +366,14 @@ void OldEvents(CaseContext& c)
 		return;
 	}
 	callers::Texture tex(ArgSet::Valid, *c.call);
+	std::set<uint32_t> laidOut;
 	for (int frame = 1; frame <= 120; frame++) {
 		vr::TrackedDevicePose_t poses[16];
 		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
 		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
 		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
+		vr::VRControllerState_t state{}; // the same in SDK 0.9.x
+		old->GetControllerState(2, &state);
 		Json::Value r;
 		Json::Value events(Json::arrayValue);
 		int overrun = 0;
@@ -359,6 +387,26 @@ void OldEvents(CaseContext& c)
 			events.append((int)type);
 			for (int i = 32; i < 64; i++)
 				overrun += buffer[i] != 0xCD;
+			if (laidOut.insert(type).second) {
+				// 0.9.x's layout: eventType 0, trackedDeviceIndex 4, data 8 to 24, eventAgeSeconds 24 (then 4 bytes of
+				// padding on Windows, none on Linux, where the struct is 28 bytes)
+				uint32_t device, after;
+				float age;
+				memcpy(&device, buffer + 4, sizeof(device));
+				memcpy(&age, buffer + 24, sizeof(age));
+				memcpy(&after, buffer + 28, sizeof(after));
+				char hex[33];
+				for (int i = 0; i < 16; i++)
+					std::snprintf(hex + 2 * i, 3, "%02x", buffer[8 + i]);
+				Json::Value e;
+				e["device"] = device;
+				e["data"] = hex;
+				e["age"] = age;
+				e["age_is_finite"] = std::isfinite(age);
+				// Windows' 4 bytes of padding: zeroed; on Linux the struct ends at 28 and they're the buffer's own
+				e["after_age"] = after == 0 ? "zero" : after == 0xCDCDCDCD ? "untouched" : "written";
+				c.Record("event " + std::to_string(type), e);
+			}
 		}
 		r["events"] = events;
 		r["overrun"] = overrun;
@@ -443,6 +491,36 @@ void OldCalls(CaseContext& c)
 	unknown["ret"] = sys003->LoadRenderModel("no such model", &model);
 	unknown["handle"] = (Json::UInt64)model.ulInternalHandle;
 	c.Record("LoadRenderModel unknown", unknown);
+
+	// IVRTrackedCamera_001 in SDK 0.9.12's slot order, which OpenComposite answers (0.9.11 has fewer slots, 0.9.14 one
+	// gone from the middle), through the last slot: no camera, so false, 0 or null, and the outputs left as they were
+	auto* cam = (vr::IVRTrackedCamera_001::IVRTrackedCamera*)c.core->GetGenericInterface("IVRTrackedCamera_001", &le);
+	Json::Value camera;
+	camera["found"] = cam != nullptr;
+	if (cam) {
+		char firmware[16];
+		memset(firmware, 'x', sizeof(firmware));
+		firmware[sizeof(firmware) - 1] = 0;
+		uint32_t width = 7, height = 7;
+		float u = 7, v = 7;
+		vr::HmdMatrix44_t projection;
+		memset(&projection, 0xCD, sizeof(projection));
+		camera["HasCamera"] = cam->HasCamera(0);
+		camera["GetCameraFirmwareDescription"] = cam->GetCameraFirmwareDescription(0, firmware, sizeof(firmware));
+		camera["firmware"] = firmware;
+		camera["GetCameraFrameDimensions"] = cam->GetCameraFrameDimensions(0, (vr::ECameraVideoStreamFormat)1, &width, &height);
+		camera["size"] = std::to_string(width) + "x" + std::to_string(height);
+		camera["GetCameraVideoStreamFormat"] = (int)cam->GetCameraVideoStreamFormat(0);
+		camera["GetVideoStreamElapsedTime"] = cam->GetVideoStreamElapsedTime(0);
+		camera["GetVideoStreamFrame"] = cam->GetVideoStreamFrame(0) == nullptr ? "null" : "set";
+		camera["SupportsPauseResume"] = cam->SupportsPauseResume(0);
+		camera["IsVideoStreamPaused"] = cam->IsVideoStreamPaused(0);
+		camera["GetCameraDistortion"] = cam->GetCameraDistortion(0, 0.5f, 0.5f, &u, &v);
+		camera["distortion"] = std::to_string(u) + "," + std::to_string(v);
+		camera["GetCameraProjection"] = cam->GetCameraProjection(0, 640, 480, 0.1f, 100, &projection);
+		camera["projection_zeroed"] = projection.m[0][0] == 0 && projection.m[3][3] == 0;
+	}
+	c.Record("IVRTrackedCamera_001", camera);
 
 	c.core->Cleanup();
 }
@@ -1115,8 +1193,10 @@ void EventsCase(CaseContext& c)
 // reads the manifest's actions and submits frames (OpenComposite reads the old input after each frame, for its button
 // events), while another thread reads the old input and the same action all the time, as Unity's SteamVR_Controller
 // and a render thread do. With scripts/input_toggle.json and manifest_toggle.json, under either evaluator: nothing may
-// crash, and the toggle still turns on, off and on. The second thread starts after frame 5: the first Submit recreates
-// the session for the game's graphics API, and reading input while that happens is another problem (not this case's).
+// crash, and the toggle still turns on, off and on. The second thread starts after frame start_frame (--case-arg
+// start_frame=<n>, default 0: before the first frame, so it reads while the first Submit recreates the session for the
+// game's graphics API). With the stand-in, the record also has the action calls OpenComposite made on a session that
+// wasn't live (action_calls_without_session).
 void InputThreadsCase(CaseContext& c)
 {
 	using namespace vr::IVRInput_010;
@@ -1137,15 +1217,18 @@ void InputThreadsCase(CaseContext& c)
 	in->GetActionHandle("/actions/main/in/toggle", &toggle);
 	in->GetActionHandle("/actions/main/out/haptic", &haptic);
 	callers::Texture tex(ArgSet::Valid, *c.call);
+	const int startFrame = c.IntArg("start_frame", 0);
 
 	std::atomic<bool> done{ false }, start{ false };
 	std::atomic<int> polls{ 0 };
 	std::thread reader([&] {
 		while (!start && !done)
 			std::this_thread::yield();
-		// As fast as it can (to meet the other thread), but bounded: at most 200000 passes, and haptics (which the
-		// stand-in records) only every 50th. run.py's memory limit is the backstop.
-		for (int pass = 0; !done && pass < 200000; pass++) {
+		// As fast as it can (to meet the other thread, also through a session restart's waits), until the game's
+		// thread is done, but for at most 30 seconds; haptics (which the stand-in counts) only every 50th pass.
+		// run.py's memory limit is the backstop.
+		const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+		for (int pass = 0; !done && (pass % 256 != 0 || std::chrono::steady_clock::now() < until); pass++) {
 			std::this_thread::yield();
 			for (vr::TrackedDeviceIndex_t dev = 1; dev <= 2; dev++) {
 				vr::VRControllerState_t state{};
@@ -1161,6 +1244,14 @@ void InputThreadsCase(CaseContext& c)
 	int changes = 0;
 	bool last = false;
 	const int frames = 300;
+	// The reader's first pass before the frames that meet it (a busy runner may not schedule it at once)
+	auto startReader = [&] {
+		start = true;
+		for (int wait = 0; polls == 0 && wait < 2000; wait++)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	};
+	if (startFrame <= 0)
+		startReader();
 	for (int frame = 1; frame <= frames; frame++) {
 		vr::TrackedDevicePose_t poses[16];
 		f.comp->WaitGetPoses(poses, 16, nullptr, 0);
@@ -1175,21 +1266,23 @@ void InputThreadsCase(CaseContext& c)
 		f.sys->GetControllerState(2, &state, sizeof(state));
 		f.comp->Submit(vr::Eye_Left, tex.get(), nullptr, vr::Submit_Default);
 		f.comp->Submit(vr::Eye_Right, tex.get(), nullptr, vr::Submit_Default);
-		if (frame == 5) {
-			start = true;
-			// The reader's first pass before the frames that meet it (a busy runner may not schedule it at once)
-			for (int wait = 0; polls == 0 && wait < 2000; wait++)
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-		}
+		if (frame == startFrame)
+			startReader();
 	}
 	done = true;
 	reader.join();
+	c.core->Cleanup();
 	Json::Value r;
 	r["frames"] = frames;
 	r["polled"] = polls > 0;
 	r["toggle_changes"] = changes;
+	r["start_frame"] = startFrame;
+	// Input read on a session that was being replaced: on a real runtime, a use after free
+	Json::Value dump = ReadStandInDump();
+	if (dump.isMember("action_calls_without_session"))
+		r["action_calls_without_session"] = dump["action_calls_without_session"];
+
 	c.Record("threads", r);
-	c.core->Cleanup();
 }
 
 // The action manifest's actions read frame by frame (expect/input_evaluator.json), on the stand-in with

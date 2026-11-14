@@ -365,3 +365,20 @@ TEST_CASE("Trackpad_click_from_force")
 	b.Step({ { pad + "/touch", 1 }, { pad + "/force", 0.0 } });
 	CHECK_FALSE(b.Digital("/press"));
 }
+
+TEST_CASE("Radial_segments_clamped")
+{
+	// A hand-edited segment count: the evaluation ends, with at most 360 segments
+	Runner huge(Source("radial", { { "0", "/first" } }, { { "segments", "1e9" } }, kPad));
+	huge.Step(At(kPad, 0, 0.9f));
+	CHECK(huge.Digital("/first"));
+	CHECK(huge.out.digital.size() == 1);
+	CHECK(huge.mode->DigitalInput("359").has_value());
+	CHECK_FALSE(huge.mode->DigitalInput("360").has_value());
+
+	// None or fewer: one segment, the whole pad
+	Runner none(Source("radial", { { "0", "/all" } }, { { "segments", "-5" } }, kPad));
+	none.Step(At(kPad, 0, -0.9f));
+	CHECK(none.Digital("/all"));
+	CHECK_FALSE(none.mode->DigitalInput("1").has_value());
+}

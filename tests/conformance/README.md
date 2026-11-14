@@ -19,6 +19,9 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
   uses that runtime (Monado's, say). `monado:<manifest>` runs on a Monado service that is already running (the run
   stops at once if none is), and keeps the manifest with `--real-runtime`; there's no stand-in dump to join then.
 - `--only <regex>` limits the interface versions, `--cases a,b` runs only those cases.
+- `--repeat N` (at most 100) runs each case N times, each in its own child; every record gets its `round`, the summary
+  says how many rounds of each case ended ok, and `--expect` checks every round. `--case-arg <name>=<value>` (repeatable)
+  is passed to every case, as `input-threads`' `start_frame=<n>`.
 - `--expected expected/steamvr-<version>.json --differences differences.json` compares every answer with SteamVR's
   recorded ones (`record-steamvr.ps1`); `--expect <file>` checks exact values for chosen records (`expect/`).
 - `--known-failures <file>` lists records (keyed as in `--expect`) that may fail today; any other failure still fails
@@ -32,7 +35,9 @@ python tests/conformance/run.py --runtime build/bin/vrclient_x64.dll --conforman
   `samples_error`. The dump keeps whole records for frames 1-64, every 32nd after and the last one
   (`tests/runtime/script.h`).
 - Each child gets `OC_NO_MESSAGE_BOX=1` (OpenComposite ending a program exits with code 70, without a box),
-  `OC_LOG_DIR` and `OC_STORE_DIR` under `--out`, so a run never touches the user's own logs or state.
+  `OC_LOG_DIR` and `OC_STORE_DIR` under `--out`, so a run never touches the user's own logs or state. Each child has a
+  store of its own (`store/<its output>`), so one child's settings and events never reach another, except the cases that
+  work between programs (`SHARED_STORES` in `run.py`: events-listen with events-commit, chaperone with chaperone-read).
 
 `out/summary.txt` has the counts per status (`ok`, `ended`: OpenComposite ended the program, `crashed`, `timeout`) and
 every record that wasn't ok; `out/results.json` has every record. When a child ends early the runner starts it again
@@ -64,7 +69,8 @@ shipped, app-facing or C API only) has a `GEN_INTERFACE` line or a reason in `no
 
 `regress.py --results <dir>/results.json --baseline baseline/<file>` fails when a record that was ok in the baseline
 isn't any more, or when an answer changes (except the run-to-run fields in `volatile.json`); `--accept` writes a new
-baseline. CI keeps `none.json` (no runtime) and `stand-in.json`. A later `--baseline` overrides the earlier ones per
+baseline, which keeps a hash of each answer and the answer itself where it is under 200 bytes, so a regression shows
+the old and the new value (`--self-test` checks that). CI keeps `none.json` (no runtime) and `stand-in.json`. A later `--baseline` overrides the earlier ones per
 record: `stand-in-x86.json` holds only the records a 32-bit run answers differently (the pointer-sized ones), and CI
 passes it after `stand-in.json`. With several, `--accept` writes the last one, so after accepting `stand-in.json` from a
 64-bit run, accept the 32-bit one with `--baseline baseline/stand-in.json --baseline baseline/stand-in-x86.json` from
@@ -79,6 +85,10 @@ error, `VR_IsHmdPresent`, one `VREvent_Quit`, which `Submit` fails, and that not
 `exiting_old_events` polls that quit through IVRSystem_009, whose game passes SDK 0.9.x's 32-byte `VREvent_t`
 (case `old-events`): nothing may be written past it. The script
 format is described at the top of `tests/runtime/script.h`.
+
+A debug build of the DLL (`-DCMAKE_BUILD_TYPE=Debug -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug`) with
+`OC_CRT_LEAK_REPORT_DIR=<dir>` set writes the debug C runtime's report of what was never freed to `<dir>/<pid>.txt`
+when it unloads, so a run such as `xr_failures.py --only fail_session` shows what a failed start-up leaves behind.
 
 ## Elevated shells
 

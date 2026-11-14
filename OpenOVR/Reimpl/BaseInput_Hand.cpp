@@ -429,6 +429,7 @@ EVRInputError BaseInput::getEstimatedBoneData(
     EVRSkeletalMotionRange eMotionRange,
     std::span<VRBoneTransform_t, eBone_Count> boneData)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	auto& controller = legacyControllers[hand];
 
 	auto state = GetInterpolatedControllerState(hand, controller);
@@ -505,6 +506,7 @@ EVRInputError BaseInput::getEstimatedBoneData(
 
 EVRInputError BaseInput::getEstimatedSkeletalSummary(ITrackedDevice::TrackedDeviceType hand, VRSkeletalSummaryData_t* pSkeletalSummaryData)
 {
+	auto sessionLock = xr_session.lock_shared(); // held while reading: a session restart waits for it
 	if (hand != ITrackedDevice::HAND_LEFT && hand != ITrackedDevice::HAND_RIGHT)
 		return vr::VRInputError_InvalidDevice;
 

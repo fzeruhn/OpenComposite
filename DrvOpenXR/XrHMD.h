@@ -9,6 +9,7 @@
 #include "Misc/Input/InteractionProfile.h"
 #include "XrTrackedDevice.h"
 
+#include <cstring>
 #include <mutex>
 
 // This warning tells us that a method (GetPose) was overridden by one of our parent classes
@@ -23,6 +24,17 @@ class XrHMD : public XrTrackedDevice, public IHMD {
 	std::shared_mutex profile_mutex;
 
 public:
+	/** What GetHiddenAreaMesh answers: the vertices and their triangle (or line loop) count, with the struct's padding
+	 * zeroed (a game may copy or compare the whole struct) */
+	static vr::HiddenAreaMesh_t HiddenAreaMesh(const vr::HmdVector2_t* vertices, uint32_t count)
+	{
+		vr::HiddenAreaMesh_t mesh;
+		std::memset(&mesh, 0, sizeof(mesh));
+		mesh.pVertexData = vertices;
+		mesh.unTriangleCount = count;
+		return mesh;
+	}
+
 	// Override the GetPose implementation to use the difference between spaces, in the hope it'll make the
 	// head positioning possibly more accurate.
 	void GetPose(

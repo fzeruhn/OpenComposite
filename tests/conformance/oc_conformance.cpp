@@ -4,6 +4,7 @@
 //   oc_conformance --runtime <vrclient dll> --interface <IVRName_NNN> --apptype <n> --argset valid|edge|null|invalid
 //                  [--start-at <i>] --out <file.jsonl> [--real-runtime] [--data <dir>]
 //   oc_conformance --runtime <dll> --case <name> --out <file.jsonl> [--real-runtime] [--data <dir>] [--manifest <file>]
+//                  [--case-arg <name>=<value>]...
 
 #include "conformance.h"
 
@@ -14,6 +15,7 @@
 #include <dlfcn.h>
 #endif
 
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 
@@ -47,6 +49,18 @@ void CaseContext::Record(const std::string& label, Json::Value fields)
 	fields["case"] = caseName;
 	fields["method"] = label;
 	out->Write(fields);
+}
+
+int CaseContext::IntArg(const std::string& name, int fallback) const
+{
+	auto it = args.find(name);
+	if (it == args.end())
+		return fallback;
+	char* end = nullptr;
+	long v = std::strtol(it->second.c_str(), &end, 10);
+	if (end == it->second.c_str() || *end || v < INT_MIN || v > INT_MAX)
+		return fallback;
+	return (int)v;
 }
 
 typedef void* (*VRClientCoreFactoryFn)(const char* pInterfaceName, int* pReturnCode);
@@ -83,12 +97,20 @@ static ArgSet ParseArgSet(const std::string& s)
 int main(int argc, char** argv)
 {
 	std::map<std::string, std::string> args;
+	std::map<std::string, std::string> caseArgs;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a.rfind("--", 0) != 0)
 			continue;
 		if (a == "--real-runtime") {
 			args[a] = "1";
+			continue;
+		}
+		if (a == "--case-arg" && i + 1 < argc) {
+			std::string kv = argv[++i];
+			size_t eq = kv.find('=');
+			if (eq != std::string::npos)
+				caseArgs[kv.substr(0, eq)] = kv.substr(eq + 1);
 			continue;
 		}
 		if (i + 1 < argc)
@@ -148,6 +170,7 @@ int main(int argc, char** argv)
 		cc.call = &ctx;
 		cc.out = &out;
 		cc.caseName = args["--case"];
+		cc.args = caseArgs;
 		cc.manifest = args.count("--manifest") ? args["--manifest"] : (ctx.dataDir / "manifest_basic.json").string();
 		it->second(cc);
 		return 0;

@@ -3,6 +3,7 @@
 #include "BindingFile.h"
 
 #include "Misc/JsonFile.h"
+#include "Misc/Numbers.h"
 
 #include <algorithm>
 #include <cctype>
@@ -28,11 +29,8 @@ std::string ParameterText(const Json::Value& v)
 		return v.asBool() ? "true" : "false";
 	if (v.isInt64())
 		return std::to_string(v.asInt64());
-	if (v.isNumeric()) {
-		char buffer[32];
-		snprintf(buffer, sizeof(buffer), "%.9g", v.asDouble()); // 0.6, not 0.59999999999999998
-		return buffer;
-	}
+	if (v.isNumeric())
+		return Numbers::FormatGeneral(v.asDouble(), 9); // 0.6, not 0.59999999999999998
 	return {};
 }
 

@@ -1,7 +1,10 @@
 #pragma once
 
 #include "Misc/Input/InteractionProfile.h"
+#include "Misc/LibMonado.h"
 #include "XrTrackedDevice.h"
+
+#include <optional>
 
 class BaseInput;
 
@@ -33,6 +36,26 @@ public:
 	    uint32_t unBufferSize, vr::ETrackedPropertyError* pErrorL) override;
 
 	DeviceIdentity Identity() override;
+
+	/** A bool property from the battery libmonado reports for a role ("left", "right"; null for none): the answer, or
+	 * nothing for the other properties, which ask libmonado nothing */
+	static std::optional<bool> BatteryBoolProperty(LibMonado& mnd, vr::ETrackedDeviceProperty prop, const char* role)
+	{
+		switch (prop) {
+		case vr::Prop_DeviceProvidesBatteryStatus_Bool: {
+			std::optional<LibMonado::Battery> battery = role ? mnd.BatteryForRole(role) : std::nullopt;
+			return battery ? battery->present : true;
+		}
+		case vr::Prop_DeviceIsCharging_Bool: {
+			std::optional<LibMonado::Battery> battery = role ? mnd.BatteryForRole(role) : std::nullopt;
+			if (battery && battery->present)
+				return battery->charging;
+			return std::nullopt;
+		}
+		default:
+			return std::nullopt;
+		}
+	}
 
 	bool IsPoseFromHandTracking() override;
 	bool IsHandTrackingValid() override;
